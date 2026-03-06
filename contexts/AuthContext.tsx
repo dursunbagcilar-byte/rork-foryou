@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import createContextHook from '@nkzw/create-context-hook';
 import type { User, Driver, Ride, DriverDocuments } from '@/constants/mockData';
 import { PRICING } from '@/constants/pricing';
-import { setSessionToken, getSessionToken, getBaseUrl, waitForBaseUrl } from '@/lib/trpc';
+import { setSessionToken, getSessionToken, getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl } from '@/lib/trpc';
 
 type UserType = 'customer' | 'driver' | null;
 
@@ -70,7 +70,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         const projId = process.env.EXPO_PUBLIC_PROJECT_ID;
         const teamId = process.env.EXPO_PUBLIC_TEAM_ID;
         if (projId && teamId) {
-          apiBase = `https://${projId}-${teamId}.rork.app`;
+          apiBase = normalizeApiBaseUrl(`https://${projId}-${teamId}.rork.app`);
           console.log('[Auth] directFetch: Built URL from project/team IDs:', apiBase.substring(0, 50));
         }
       } catch {}
@@ -80,7 +80,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         if (typeof window !== 'undefined' && window.location && window.location.origin) {
           const origin = window.location.origin;
           if (origin && origin !== 'null') {
-            apiBase = origin;
+            apiBase = normalizeApiBaseUrl(origin);
             console.log('[Auth] directFetch: Using window.location.origin:', apiBase.substring(0, 50));
           }
         }
@@ -95,7 +95,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
-    const url = `${apiBase}/api${path}`;
+    apiBase = normalizeApiBaseUrl(apiBase);
+    const normalizedPath = path.startsWith('/api/')
+      ? path
+      : `/api${path.startsWith('/') ? path : `/${path}`}`;
+    const url = `${apiBase}${normalizedPath}`;
     console.log('[Auth] directFetch POST:', url, 'attempt:', retryCount + 1);
 
     const controller = new AbortController();

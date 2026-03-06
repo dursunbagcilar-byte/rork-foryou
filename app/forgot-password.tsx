@@ -8,11 +8,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Mail, Lock, CheckCircle, KeyRound } from 'lucide-react-native';
-import { getSessionToken } from '@/lib/trpc';
-
-function getApiBaseUrl(): string {
-  return process.env.EXPO_PUBLIC_RORK_API_BASE_URL || '';
-}
+import { buildTrpcProcedureUrl, getSessionToken } from '@/lib/trpc';
 
 function getDbHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -26,8 +22,7 @@ function getDbHeaders(): Record<string, string> {
 }
 
 async function directMutation<T>(procedure: string, input: Record<string, unknown>): Promise<T> {
-  const baseUrl = getApiBaseUrl();
-  const url = `${baseUrl}/api/trpc/${procedure}`;
+  const url = buildTrpcProcedureUrl(procedure);
   const token = await getSessionToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -54,7 +49,7 @@ async function directMutation<T>(procedure: string, input: Record<string, unknow
         const errData = JSON.parse(text);
         if (errData?.error?.message) errorMsg = errData.error.message;
         else if (typeof errData?.error === 'string') errorMsg = errData.error;
-      } catch (_) {}
+      } catch {}
       throw new Error(errorMsg);
     }
     const parsed = JSON.parse(text);

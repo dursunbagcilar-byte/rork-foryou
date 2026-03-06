@@ -18,7 +18,7 @@ import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from '@/hooks/useLocation';
-import { trpc } from '@/lib/trpc';
+import { buildApiUrl, trpc } from '@/lib/trpc';
 import { ISTANBUL_REGION, findBestAlternativeVehicle, getVehicleTypeLabel } from '@/constants/mockData';
 import type { MockDriverInfo } from '@/constants/mockData';
 import { getCityByName, getCityRegion } from '@/constants/cities';
@@ -988,8 +988,8 @@ export default function CustomerHomeScreen() {
       setPaymentLoading(true);
       console.log('[PAYMENT] Starting card payment flow, price:', ridePrice);
       try {
-        const baseUrl = process.env.EXPO_PUBLIC_RORK_API_BASE_URL || '';
-        const callbackUrl = `${baseUrl}/api/iyzico/callback`;
+        const callbackUrl = buildApiUrl('/api/iyzico/callback');
+        console.log('[PAYMENT] Using callback URL:', callbackUrl);
         const result = await initializePaymentMutation.mutateAsync({
           rideId: 'r_' + Date.now(),
           customerId: user?.id ?? '',

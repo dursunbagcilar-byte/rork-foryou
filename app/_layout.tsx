@@ -185,7 +185,7 @@ export default function RootLayout() {
     const bootstrapDb = async () => {
       if (!mountedRef.current) return;
       try {
-        const { getBaseUrl, waitForBaseUrl } = await import('@/lib/trpc');
+        const { buildApiUrl, getBaseUrl, waitForBaseUrl } = await import('@/lib/trpc');
         let baseUrl = getBaseUrl();
         if (!baseUrl) {
           console.log('[Layout] DB bootstrap - waiting for base URL...');
@@ -201,7 +201,9 @@ export default function RootLayout() {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 10000);
           try {
-            const res = await fetch(`${baseUrl}/api/bootstrap-db`, {
+            const bootstrapUrl = buildApiUrl('/api/bootstrap-db');
+            console.log('[Layout] DB bootstrap URL:', bootstrapUrl);
+            const res = await fetch(bootstrapUrl, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',

@@ -77,6 +77,20 @@ export function resetCircuitBreaker(): void {
 
 let _resolvedFromEnv = false;
 
+function stripKnownApiSuffixes(value: string): string {
+  return value
+    .trim()
+    .replace(/\/api\/trpc$/i, '')
+    .replace(/\/trpc$/i, '')
+    .replace(/\/api$/i, '')
+    .replace(/\/+$/, '');
+}
+
+export function normalizeApiBaseUrl(value: string | null | undefined): string {
+  if (!value) return '';
+  return stripKnownApiSuffixes(value);
+}
+
 function resolveBaseUrl(): string {
   if (_resolvedBaseUrl && _resolvedFromEnv) return _resolvedBaseUrl;
 
@@ -93,13 +107,13 @@ function resolveBaseUrl(): string {
   }
 
   if (apiBase && apiBase.trim()) {
-    result = apiBase.trim().replace(/\/+$/, '');
+    result = normalizeApiBaseUrl(apiBase);
     fromEnv = true;
   } else if (toolkitUrl && toolkitUrl.trim()) {
-    result = toolkitUrl.trim().replace(/\/toolkit\/?$/, '').replace(/\/+$/, '');
+    result = normalizeApiBaseUrl(toolkitUrl.trim().replace(/\/toolkit\/?$/, ''));
     fromEnv = true;
   } else if (projectId && teamId) {
-    result = `https://${projectId}-${teamId}.rork.app`;
+    result = normalizeApiBaseUrl(`https://${projectId}-${teamId}.rork.app`);
     fromEnv = true;
   }
 
@@ -108,7 +122,7 @@ function resolveBaseUrl(): string {
       if (typeof window !== 'undefined' && window.location && window.location.origin) {
         const origin = window.location.origin;
         if (origin && origin !== 'null') {
-          result = origin;
+          result = normalizeApiBaseUrl(origin);
         }
       }
     } catch (e) {
@@ -117,6 +131,7 @@ function resolveBaseUrl(): string {
   }
 
   if (result) {
+    result = normalizeApiBaseUrl(result);
     if (!_resolvedBaseUrl || (fromEnv && !_resolvedFromEnv)) {
       console.log('[TRPC] Base URL resolved:', result.substring(0, 80), fromEnv ? '(env)' : '(fallback)');
     }
@@ -165,9 +180,10 @@ export const waitForBaseUrl = async (maxWaitMs = 10000): Promise<string> => {
     if (typeof window !== 'undefined' && window.location && window.location.origin) {
       const origin = window.location.origin;
       if (origin && origin !== 'null') {
-        _resolvedBaseUrl = origin;
-        console.log('[TRPC] Final fallback to window.location.origin:', origin.substring(0, 60));
-        return origin;
+        const normalizedOrigin = normalizeApiBaseUrl(origin);
+        _resolvedBaseUrl = normalizedOrigin;
+        console.log('[TRPC] Final fallback to window.location.origin:', normalizedOrigin.substring(0, 60));
+        return normalizedOrigin;
       }
     }
   } catch (e) {
@@ -242,7 +258,7 @@ function buildFullUrl(inputUrl: RequestInfo | URL): string {
   const resolvedInput = requestInfoToUrlString(inputUrl);
 
   if (!resolvedInput) {
-    return base ? `${base}/api/trpc` : '/api/trpc';
+    return buildApiUrl('/api/trpc');
   }
 
   if (resolvedInput.startsWith('http://') || resolvedInput.startsWith('https://')) {
@@ -253,7 +269,7 @@ function buildFullUrl(inputUrl: RequestInfo | URL): string {
       const urlObj = new URL(resolvedInput);
       const pathname = urlObj.pathname + urlObj.search;
       if (pathname.startsWith('/api/')) {
-        return `${base}${pathname}`;
+        return buildApiUrl(pathname);
       }
     } catch (e) {
       console.log('[TRPC] buildFullUrl parse error:', e);
@@ -269,10 +285,20 @@ function buildFullUrl(inputUrl: RequestInfo | URL): string {
   return resolvedInput;
 }
 
-export function getTrpcUrl(): string {
+export function buildApiUrl(path: string): string {
   const base = resolveBaseUrl();
-  if (base) return `${base}/api/trpc`;
-  return '/api/trpc';
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  if (base) return `${base}${normalizedPath}`;
+  return normalizedPath;
+}
+
+export function buildTrpcProcedureUrl(procedure: string): string {
+  const normalizedProcedure = procedure.replace(/^\/+/, '');
+  return buildApiUrl(`/api/trpc/${normalizedProcedure}`);
+}
+
+export function getTrpcUrl(): string {
+  return buildApiUrl('/api/trpc');
 }
 
 export const trpcClient = trpc.createClient({
