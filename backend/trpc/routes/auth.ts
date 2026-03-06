@@ -553,12 +553,13 @@ export const authRouter = createTRPCRouter({
       console.log('[AUTH] sendResetCode - first lookup for:', cleanEmail, 'user:', !!user, 'driver:', !!driver, 'hasPassword:', !!hasPassword);
 
       if (!account || !hasPassword) {
-        console.log('[AUTH] sendResetCode - data incomplete, doing store init...');
+        console.log('[AUTH] sendResetCode - data incomplete, doing store init + force reload...');
         try {
-          const { initializeStore } = await import('../../db/store');
+          const { initializeStore, forceReloadStore } = await import('../../db/store');
           await initializeStore();
+          await forceReloadStore();
         } catch (reloadErr) {
-          console.log('[AUTH] sendResetCode - init error:', reloadErr);
+          console.log('[AUTH] sendResetCode - init/reload error:', reloadErr);
         }
         if (!account) {
           user = db.users.getByEmail(cleanEmail);
@@ -566,7 +567,7 @@ export const authRouter = createTRPCRouter({
           account = user || driver;
         }
         if (!hasPassword) hasPassword = db.passwords.get(cleanEmail);
-        console.log('[AUTH] sendResetCode - after init: account:', !!account, 'hasPassword:', !!hasPassword);
+        console.log('[AUTH] sendResetCode - after init+reload: account:', !!account, 'hasPassword:', !!hasPassword);
       }
 
       if (!account || !hasPassword) {
