@@ -25,17 +25,21 @@ function isValidEmailAddress(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function resolveFromEmail(): { value: string | null; errorCode: SendEmailErrorCode | null } {
+function resolveFromEmail(): { value: string | null; errorCode: SendEmailErrorCode | null; isTestAddress: boolean } {
   if (!RAW_FROM_EMAIL) {
-    return { value: null, errorCode: 'missing_from_email' };
+    if (RESEND_API_KEY) {
+      console.log('[EMAIL] FROM_EMAIL not set, using Resend test address (onboarding@resend.dev). Emails will only be delivered to the Resend account owner email.');
+      return { value: 'onboarding@resend.dev', errorCode: null, isTestAddress: true };
+    }
+    return { value: null, errorCode: 'missing_from_email', isTestAddress: false };
   }
 
   const extractedEmail = extractEmailAddress(RAW_FROM_EMAIL);
   if (!isValidEmailAddress(extractedEmail)) {
-    return { value: null, errorCode: 'invalid_from_email' };
+    return { value: null, errorCode: 'invalid_from_email', isTestAddress: false };
   }
 
-  return { value: RAW_FROM_EMAIL, errorCode: null };
+  return { value: RAW_FROM_EMAIL, errorCode: null, isTestAddress: false };
 }
 
 const FROM_EMAIL_CONFIG = resolveFromEmail();
@@ -45,7 +49,9 @@ if (!RESEND_API_KEY) {
 }
 
 if (FROM_EMAIL_CONFIG.errorCode === 'missing_from_email') {
-  console.log('[EMAIL] WARNING: FROM_EMAIL env var not set. Configure a verified Resend sender like "2GO <no-reply@yourdomain.com>".');
+  console.log('[EMAIL] WARNING: FROM_EMAIL env var not set and no RESEND_API_KEY. Email sending is fully disabled.');
+} else if (FROM_EMAIL_CONFIG.isTestAddress) {
+  console.log('[EMAIL] INFO: Using Resend test address. To send to any email, set FROM_EMAIL with a verified domain.');
 }
 
 if (FROM_EMAIL_CONFIG.errorCode === 'invalid_from_email') {

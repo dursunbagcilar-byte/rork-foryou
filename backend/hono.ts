@@ -394,7 +394,7 @@ const ensureTrpcRequestReady = async (c: Context, next: Next) => {
 app.use("/api/trpc/*", ensureTrpcRequestReady);
 app.use("/api/trpc/*", trpcServer({ endpoint: "/api/trpc", router: appRouter, createContext }));
 app.use("/trpc/*", ensureTrpcRequestReady);
-app.use("/trpc/*", trpcServer({ endpoint: "/api/trpc", router: appRouter, createContext }));
+app.use("/trpc/*", trpcServer({ endpoint: "/trpc", router: appRouter, createContext }));
 
 app.post("/iyzico/callback", async (c) => {
   try {
