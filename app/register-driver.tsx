@@ -605,10 +605,10 @@ export default function RegisterDriverScreen() {
 
             <Text style={styles.sectionTitle}>Kişisel Bilgiler</Text>
             <View style={styles.formSection}>
-              <InputField icon={<User size={18} color={Colors.dark.textMuted} />} label="Ad Soyad" placeholder="Adınızı girin" value={name} onChangeText={setName} />
-              <InputField icon={<Phone size={18} color={Colors.dark.textMuted} />} label="Telefon" placeholder="+90 5XX XXX XXXX" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
-              <InputField icon={<Mail size={18} color={Colors.dark.textMuted} />} label="E-posta" placeholder="ornek@email.com" value={email} onChangeText={setEmail} keyboardType="email-address" />
-              <InputField icon={<Lock size={18} color={Colors.dark.textMuted} />} label="Şifre" placeholder="En az 8 karakter, büyük/küçük harf, rakam" value={password} onChangeText={setPassword} secure />
+              <InputField renderIcon={() => <User size={18} color={Colors.dark.textMuted} />} label="Ad Soyad" placeholder="Adınızı girin" value={name} onChangeText={setName} />
+              <InputField renderIcon={() => <Phone size={18} color={Colors.dark.textMuted} />} label="Telefon" placeholder="+90 5XX XXX XXXX" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+              <InputField renderIcon={() => <Mail size={18} color={Colors.dark.textMuted} />} label="E-posta" placeholder="ornek@email.com" value={email} onChangeText={setEmail} keyboardType="email-address" />
+              <InputField renderIcon={() => <Lock size={18} color={Colors.dark.textMuted} />} label="Şifre" placeholder="En az 8 karakter, büyük/küçük harf, rakam" value={password} onChangeText={setPassword} secure />
             </View>
 
             <Text style={styles.sectionTitle}>Hizmet Bölgesi</Text>
@@ -658,21 +658,21 @@ export default function RegisterDriverScreen() {
               {driverCategory === 'courier' ? (
                 <>
                   <InputField
-                    icon={<Bike size={18} color={Colors.dark.textMuted} />}
+                    renderIcon={() => <Bike size={18} color={Colors.dark.textMuted} />}
                     label="Araç Tipi / Modeli"
                     placeholder="Motorsiklet, bisiklet veya yaya"
                     value={vehicleModel}
                     onChangeText={setVehicleModel}
                   />
                   <InputField
-                    icon={<Palette size={18} color={Colors.dark.textMuted} />}
+                    renderIcon={() => <Palette size={18} color={Colors.dark.textMuted} />}
                     label="Araç Rengi"
                     placeholder="Siyah"
                     value={vehicleColor}
                     onChangeText={setVehicleColor}
                   />
                   <InputField
-                    icon={<Hash size={18} color={Colors.dark.textMuted} />}
+                    renderIcon={() => <Hash size={18} color={Colors.dark.textMuted} />}
                     label="Plaka (Varsa)"
                     placeholder="Motorsiklet plakası (opsiyonel)"
                     value={vehiclePlate}
@@ -684,7 +684,7 @@ export default function RegisterDriverScreen() {
                 <>
                   {(driverCategory !== 'scooter' || scooterSubType !== 'escooter') && (
                     <InputField
-                      icon={<Hash size={18} color={Colors.dark.textMuted} />}
+                      renderIcon={() => <Hash size={18} color={Colors.dark.textMuted} />}
                       label="Plaka"
                       placeholder={driverCategory === 'scooter' ? '34 AB 1234' : '34 ABC 123'}
                       value={vehiclePlate}
@@ -693,14 +693,14 @@ export default function RegisterDriverScreen() {
                     />
                   )}
                   <InputField
-                    icon={driverCategory === 'scooter' ? (scooterSubType === 'escooter' ? <Zap size={18} color={Colors.dark.textMuted} /> : <Bike size={18} color={Colors.dark.textMuted} />) : <Car size={18} color={Colors.dark.textMuted} />}
+                    renderIcon={() => driverCategory === 'scooter' ? (scooterSubType === 'escooter' ? <Zap size={18} color={Colors.dark.textMuted} /> : <Bike size={18} color={Colors.dark.textMuted} />) : <Car size={18} color={Colors.dark.textMuted} />}
                     label={driverCategory === 'driver' ? 'Araç Modeli' : (scooterSubType === 'escooter' ? 'E-Scooter Modeli' : 'Motorsiklet Modeli')}
                     placeholder={driverCategory === 'driver' ? 'Toyota Corolla 2022' : (scooterSubType === 'escooter' ? 'Xiaomi Mi Pro 2' : 'Honda PCX 125')}
                     value={vehicleModel}
                     onChangeText={setVehicleModel}
                   />
                   <InputField
-                    icon={<Palette size={18} color={Colors.dark.textMuted} />}
+                    renderIcon={() => <Palette size={18} color={Colors.dark.textMuted} />}
                     label={driverCategory === 'driver' ? 'Araç Rengi' : 'Renk'}
                     placeholder="Beyaz"
                     value={vehicleColor}
@@ -887,7 +887,7 @@ export default function RegisterDriverScreen() {
                 <Text style={styles.sectionTitle}>Partner Şoför</Text>
                 <Text style={styles.partnerNote}>Her araçta 2 şoför çalışır. Partner bilgisi opsiyoneldir.</Text>
                 <View style={styles.formSection}>
-                  <InputField icon={<Users size={18} color={Colors.dark.textMuted} />} label="Partner Adı" placeholder="Partner şoför adı" value={partnerName} onChangeText={setPartnerName} />
+                  <InputField renderIcon={() => <Users size={18} color={Colors.dark.textMuted} />} label="Partner Adı" placeholder="Partner şoför adı" value={partnerName} onChangeText={setPartnerName} />
                 </View>
               </>
             )}
@@ -1132,15 +1132,15 @@ function DocUploadBox({ label, uri, onPress, onRemove }: {
   );
 }
 
-function InputField({ icon, label, placeholder, value, onChangeText, keyboardType, secure, autoCapitalize }: {
-  icon: React.ReactNode; label: string; placeholder: string; value: string;
+function InputField({ renderIcon, label, placeholder, value, onChangeText, keyboardType, secure, autoCapitalize }: {
+  renderIcon: () => React.ReactElement; label: string; placeholder: string; value: string;
   onChangeText: (t: string) => void; keyboardType?: 'default' | 'phone-pad' | 'email-address'; secure?: boolean; autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
 }) {
   return (
     <View style={styles.inputGroup}>
       <Text style={styles.inputLabel}>{label}</Text>
       <View style={styles.inputWrapper}>
-        {icon}
+        {renderIcon()}
         <TextInput
           style={styles.input}
           placeholder={placeholder}

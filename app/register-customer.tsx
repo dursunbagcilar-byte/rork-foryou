@@ -156,12 +156,12 @@ export default function RegisterCustomerScreen() {
             <Text style={[styles.title, { fontSize: isSmall ? 26 : isTablet ? 34 : 30 }]}>Hesap Oluştur</Text>
             <Text style={[styles.subtitle, { fontSize: isSmall ? 13 : 15 }]}>Güvenli yolculuk için kayıt olun</Text>
             <View style={styles.formSection}>
-              <InputField icon={<User size={18} color={Colors.dark.textMuted} />} label="Ad Soyad" placeholder="Adınızı girin" value={name} onChangeText={setName} />
-              <InputField icon={<Phone size={18} color={Colors.dark.textMuted} />} label="Telefon" placeholder="+90 5XX XXX XXXX" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
-              <InputField icon={<Mail size={18} color={Colors.dark.textMuted} />} label="E-posta" placeholder="ornek@email.com" value={email} onChangeText={setEmail} keyboardType="email-address" />
-              <InputField icon={<Lock size={18} color={Colors.dark.textMuted} />} label="Şifre" placeholder="En az 8 karakter, büyük/küçük harf, rakam" value={password} onChangeText={setPassword} secure />
-              <InputField icon={<Hash size={18} color={Colors.dark.textMuted} />} label="Araç Plakası" placeholder="34 ABC 123" value={vehiclePlate} onChangeText={(t) => setVehiclePlate(t.toUpperCase())} autoCapitalize="characters" />
-              <InputField icon={<Gift size={18} color={Colors.dark.textMuted} />} label="Davet Kodu (Opsiyonel)" placeholder="Arkadaşınızın davet kodu" value={referralCode} onChangeText={(t) => setReferralCode(t.toUpperCase())} autoCapitalize="characters" />
+              <InputField renderIcon={() => <User size={18} color={Colors.dark.textMuted} />} label="Ad Soyad" placeholder="Adınızı girin" value={name} onChangeText={setName} />
+              <InputField renderIcon={() => <Phone size={18} color={Colors.dark.textMuted} />} label="Telefon" placeholder="+90 5XX XXX XXXX" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+              <InputField renderIcon={() => <Mail size={18} color={Colors.dark.textMuted} />} label="E-posta" placeholder="ornek@email.com" value={email} onChangeText={setEmail} keyboardType="email-address" />
+              <InputField renderIcon={() => <Lock size={18} color={Colors.dark.textMuted} />} label="Şifre" placeholder="En az 8 karakter, büyük/küçük harf, rakam" value={password} onChangeText={setPassword} secure />
+              <InputField renderIcon={() => <Hash size={18} color={Colors.dark.textMuted} />} label="Araç Plakası" placeholder="34 ABC 123" value={vehiclePlate} onChangeText={(t) => setVehiclePlate(t.toUpperCase())} autoCapitalize="characters" />
+              <InputField renderIcon={() => <Gift size={18} color={Colors.dark.textMuted} />} label="Davet Kodu (Opsiyonel)" placeholder="Arkadaşınızın davet kodu" value={referralCode} onChangeText={(t) => setReferralCode(t.toUpperCase())} autoCapitalize="characters" />
             </View>
             <Text style={styles.sectionTitle}>Cinsiyet</Text>
             <View style={styles.genderRow}>
@@ -405,15 +405,15 @@ export default function RegisterCustomerScreen() {
   );
 }
 
-function InputField({ icon, label, placeholder, value, onChangeText, keyboardType, secure, autoCapitalize }: {
-  icon: React.ReactNode; label: string; placeholder: string; value: string;
+function InputField({ renderIcon, label, placeholder, value, onChangeText, keyboardType, secure, autoCapitalize }: {
+  renderIcon: () => React.ReactElement; label: string; placeholder: string; value: string;
   onChangeText: (t: string) => void; keyboardType?: 'default' | 'phone-pad' | 'email-address'; secure?: boolean; autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
 }) {
   return (
     <View style={styles.inputGroup}>
       <Text style={styles.inputLabel}>{label}</Text>
       <View style={styles.inputWrapper}>
-        {icon}
+        {renderIcon()}
         <TextInput
           style={styles.input}
           placeholder={placeholder}
