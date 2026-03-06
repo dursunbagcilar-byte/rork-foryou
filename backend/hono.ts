@@ -10,7 +10,7 @@ import { checkRateLimit, getClientIP, isIPBlocked, trackSuspiciousActivity } fro
 
 const app = new Hono();
 
-console.log("[SERVER] Hono v61 started - ensureDbReady");
+console.log("[SERVER] Hono v62 started - ensureDbReady with URL validation");
 
 let _dbReady = false;
 let _dbInitPromise: Promise<void> | null = null;
@@ -23,8 +23,21 @@ initializeStore()
   })
   .catch(e => console.log('[SERVER] Initial store err:', e));
 
+function isValidDbUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 async function ensureDbReady(dbEp?: string, dbNs?: string, dbTk?: string): Promise<boolean> {
   if (dbEp && dbNs && dbTk) {
+    if (!isValidDbUrl(dbEp)) {
+      console.log('[SERVER] Invalid DB endpoint URL, skipping DB init:', dbEp);
+      return _dbReady;
+    }
     const wasConfigured = isDbConfigured();
     setDbConfig(dbEp, dbNs, dbTk);
 
@@ -86,8 +99,8 @@ app.use("*", async (c, next) => {
   console.log(`[API] ${c.req.method} ${c.req.path} ${c.res.status} ${Date.now() - start}ms`);
 });
 
-app.get("/", (c) => c.json({ status: "ok", version: "60", dbConfigured: isDbConfigured(), dbReady: _dbReady }));
-app.get("/health", (c) => c.json({ status: "ok", version: "60", dbConfigured: isDbConfigured(), dbReady: _dbReady, drivers: db.drivers.getAll().length, users: db.users.getAll().length }));
+app.get("/", (c) => c.json({ status: "ok", version: "62", dbConfigured: isDbConfigured(), dbReady: _dbReady }));
+app.get("/health", (c) => c.json({ status: "ok", version: "62", dbConfigured: isDbConfigured(), dbReady: _dbReady, drivers: db.drivers.getAll().length, users: db.users.getAll().length }));
 
 app.post("/auth/register-customer", async (c) => {
   const startTime = Date.now();

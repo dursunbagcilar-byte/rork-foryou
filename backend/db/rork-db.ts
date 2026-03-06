@@ -115,10 +115,19 @@ function retryEnvVars(): void {
   _envChecked = true;
 }
 
+function isValidUrl(str: string): boolean {
+  try {
+    const url = new URL(str);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 function isConfigured(): boolean {
   retryEnvVars();
   const config = getConfig();
-  const ok = !!(config.endpoint && config.namespace && config.token);
+  const ok = !!(config.endpoint && config.namespace && config.token && isValidUrl(config.endpoint));
   return ok;
 }
 
@@ -297,6 +306,10 @@ export function getPendingOpsCount(): number {
 
 export function setDbConfig(endpoint: string, namespace: string, token: string): boolean {
   if (!endpoint || !namespace || !token) return false;
+  if (!isValidUrl(endpoint)) {
+    console.log('[RORK-DB] setDbConfig rejected - invalid URL:', endpoint);
+    return false;
+  }
   STATIC_ENDPOINT = endpoint;
   STATIC_NAMESPACE = namespace;
   STATIC_TOKEN = token;
