@@ -8,10 +8,10 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Mail, Lock, CheckCircle, KeyRound } from 'lucide-react-native';
-import { buildTrpcProcedureUrl, getSessionToken } from '@/lib/trpc';
+import { getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl } from '@/lib/trpc';
 
 function getDbHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const dbEndpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT;
   const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
   const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
@@ -21,22 +21,28 @@ function getDbHeaders(): Record<string, string> {
   return headers;
 }
 
-async function directMutation<T>(procedure: string, input: Record<string, unknown>): Promise<T> {
-  const url = buildTrpcProcedureUrl(procedure);
-  const token = await getSessionToken();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...getDbHeaders(),
-  };
-  if (token) headers['authorization'] = `Bearer ${token}`;
+async function resolveApiBase(): Promise<string> {
+  let base = getBaseUrl();
+  if (!base) base = await waitForBaseUrl(8000);
+  if (!base) {
+    const projId = process.env.EXPO_PUBLIC_PROJECT_ID;
+    const teamId = process.env.EXPO_PUBLIC_TEAM_ID;
+    if (projId && teamId) base = normalizeApiBaseUrl(`https://${projId}-${teamId}.rork.app`);
+  }
+  if (!base) throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edin.');
+  return normalizeApiBaseUrl(base);
+}
 
+async function restCall<T>(path: string, input: Record<string, unknown>): Promise<T> {
+  const apiBase = await resolveApiBase();
+  const url = `${apiBase}${path}`;
   console.log('[ForgotPwd] POST', url);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 30000);
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers,
+      headers: getDbHeaders(),
       body: JSON.stringify(input),
       signal: controller.signal,
     });
@@ -47,17 +53,14 @@ async function directMutation<T>(procedure: string, input: Record<string, unknow
       let errorMsg = `HTTP ${response.status}`;
       try {
         const errData = JSON.parse(text);
-        if (errData?.error?.message) errorMsg = errData.error.message;
-        else if (typeof errData?.error === 'string') errorMsg = errData.error;
+        if (errData?.error) errorMsg = typeof errData.error === 'string' ? errData.error : errData.error.message || errorMsg;
       } catch {}
       throw new Error(errorMsg);
     }
-    const parsed = JSON.parse(text);
-    if (parsed?.result?.data) return parsed.result.data as T;
-    if (parsed?.result) return parsed.result as T;
-    return parsed as T;
+    return JSON.parse(text) as T;
   } catch (err: any) {
     clearTimeout(timeoutId);
+    if (err?.name === 'AbortError') throw new Error('Sunucu yanıt vermedi. Lütfen tekrar deneyin.');
     throw err;
   }
 }
@@ -104,8 +107,8 @@ export default function ForgotPasswordScreen() {
 
     setLoading(true);
     try {
-      const result = await directMutation<{ success: boolean; error?: string | null; emailSent?: boolean }>(
-        'auth.sendResetCode',
+      const result = await restCall<{ success: boolean; error?: string | null; emailSent?: boolean }>(
+        '/auth/send-reset-code',
         { email: email.trim() }
       );
 
@@ -145,8 +148,8 @@ export default function ForgotPasswordScreen() {
 
     setLoading(true);
     try {
-      const result = await directMutation<{ success: boolean; error?: string | null }>(
-        'auth.verifyResetCode',
+      const result = await restCall<{ success: boolean; error?: string | null }>(
+        '/auth/verify-reset-code',
         { email: email.trim(), code: code.trim() }
       );
 
@@ -194,8 +197,8 @@ export default function ForgotPasswordScreen() {
 
     setLoading(true);
     try {
-      const result = await directMutation<{ success: boolean; error?: string | null }>(
-        'auth.resetPassword',
+      const result = await restCall<{ success: boolean; error?: string | null }>(
+        '/auth/reset-password',
         { email: email.trim(), code: code.trim(), newPassword: newPassword }
       );
 
@@ -218,8 +221,8 @@ export default function ForgotPasswordScreen() {
   const handleResendCode = async () => {
     setLoading(true);
     try {
-      const result = await directMutation<{ success: boolean; error?: string | null; emailSent?: boolean }>(
-        'auth.sendResetCode',
+      const result = await restCall<{ success: boolean; error?: string | null; emailSent?: boolean }>(
+        '/auth/send-reset-code',
         { email: email.trim() }
       );
       if (result.success) {

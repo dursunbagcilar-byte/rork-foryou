@@ -59,11 +59,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, []);
 
   const directFetch = useCallback(async (path: string, body: Record<string, any>, retryCount = 0): Promise<any> => {
-    const MAX_RETRIES = 4;
+    const MAX_RETRIES = 2;
     let apiBase = getApiBase();
     if (!apiBase) {
-      console.log('[Auth] directFetch: No API base from getApiBase, waiting...');
-      apiBase = await waitForBaseUrl(10000);
+      console.log('[Auth] directFetch: No API base, waiting...');
+      apiBase = await waitForBaseUrl(5000);
     }
     if (!apiBase) {
       try {
@@ -71,7 +71,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         const teamId = process.env.EXPO_PUBLIC_TEAM_ID;
         if (projId && teamId) {
           apiBase = normalizeApiBaseUrl(`https://${projId}-${teamId}.rork.app`);
-          console.log('[Auth] directFetch: Built URL from project/team IDs:', apiBase.substring(0, 50));
         }
       } catch {}
     }
@@ -81,15 +80,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           const origin = window.location.origin;
           if (origin && origin !== 'null') {
             apiBase = normalizeApiBaseUrl(origin);
-            console.log('[Auth] directFetch: Using window.location.origin:', apiBase.substring(0, 50));
           }
         }
       } catch {}
     }
     if (!apiBase) {
       if (retryCount < MAX_RETRIES) {
-        const delay = 2000 + retryCount * 1000;
-        console.log(`[Auth] directFetch: No URL, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+        const delay = 1000;
+        console.log(`[Auth] directFetch: No URL, retrying in ${delay}ms...`);
         await new Promise(r => setTimeout(r, delay));
         return directFetch(path, body, retryCount + 1);
       }
@@ -100,11 +98,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       ? path
       : `/api${path.startsWith('/') ? path : `/${path}`}`;
     const url = `${apiBase}${normalizedPath}`;
-    console.log('[Auth] directFetch POST:', url, 'attempt:', retryCount + 1);
+    console.log('[Auth] directFetch POST:', url);
 
     const controller = new AbortController();
-    const isAuthRoute = path.includes('register') || path.includes('login');
-    const timeoutMs = isAuthRoute ? 25000 : 15000;
+    const timeoutMs = 20000;
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
@@ -115,13 +112,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
-      console.log('[Auth] directFetch response status:', res.status);
+      console.log('[Auth] directFetch status:', res.status);
 
       if (res.status === 404) {
-        console.log('[Auth] directFetch 404 for:', url, 'attempt:', retryCount + 1);
         if (retryCount < MAX_RETRIES) {
-          const delay = 2000 + retryCount * 1500;
-          console.log(`[Auth] 404 - server may not be ready, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+          const delay = 1500;
+          console.log(`[Auth] 404 - retrying in ${delay}ms...`);
           await new Promise(r => setTimeout(r, delay));
           return directFetch(path, body, retryCount + 1);
         }
@@ -134,8 +130,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
       if (res.status === 503 || res.status === 502) {
         if (retryCount < MAX_RETRIES) {
-          const delay = 2000 + retryCount * 1000;
-          console.log(`[Auth] Server ${res.status}, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+          const delay = 1500;
           await new Promise(r => setTimeout(r, delay));
           return directFetch(path, body, retryCount + 1);
         }
@@ -154,8 +149,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           if (parseErr?.message && !parseErr.message.includes('JSON')) throw parseErr;
         }
         if (retryCount < MAX_RETRIES) {
-          const delay = 2000 + retryCount * 1000;
-          console.log(`[Auth] Server ${res.status} error, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+          const delay = 1500;
           await new Promise(r => setTimeout(r, delay));
           return directFetch(path, body, retryCount + 1);
         }
@@ -166,23 +160,19 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       const responseText = await res.text();
 
       if (!contentType.includes('application/json') && responseText.includes('<!DOCTYPE html>')) {
-        console.log('[Auth] directFetch got HTML instead of JSON (server overloaded)');
         if (retryCount < MAX_RETRIES) {
-          const delay = 2000;
-          console.log(`[Auth] Retrying after HTML response in ${delay}ms...`);
-          await new Promise(r => setTimeout(r, delay));
+          await new Promise(r => setTimeout(r, 1500));
           return directFetch(path, body, retryCount + 1);
         }
         throw new Error('Sunucu geçici olarak kullanılamıyor. Lütfen tekrar deneyin.');
       }
 
-      console.log('[Auth] directFetch raw response:', responseText.substring(0, 300));
+      console.log('[Auth] directFetch response:', responseText.substring(0, 300));
 
       let data: any;
       try {
         data = JSON.parse(responseText);
       } catch {
-        console.log('[Auth] directFetch JSON parse failed:', responseText.substring(0, 200));
         throw new Error('Sunucu geçersiz yanıt döndü. Lütfen tekrar deneyin.');
       }
 
@@ -191,21 +181,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       clearTimeout(timeoutId);
       if (err?.name === 'AbortError') {
         if (retryCount < MAX_RETRIES) {
-          const delay = 2000;
-          console.log(`[Auth] Timeout, retrying in ${delay}ms...`);
-          await new Promise(r => setTimeout(r, delay));
+          await new Promise(r => setTimeout(r, 1000));
           return directFetch(path, body, retryCount + 1);
         }
         throw new Error('Sunucu yanıt vermedi (zaman aşımı). Lütfen tekrar deneyin.');
       }
-      if (err?.message === '__SERVER_ROUTE_NOT_FOUND__') {
-        throw err;
-      }
       if (isNetworkError(err?.message || '')) {
         if (retryCount < MAX_RETRIES) {
-          const delay = 2000;
-          console.log(`[Auth] Network error, retrying in ${delay}ms...`);
-          await new Promise(r => setTimeout(r, delay));
+          await new Promise(r => setTimeout(r, 1000));
           return directFetch(path, body, retryCount + 1);
         }
       }
@@ -768,18 +751,6 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   const logout = useCallback(async () => {
     console.log('[Auth] Logout starting...');
-    try {
-      const token = await getSessionToken();
-      if (token) {
-        try {
-          await directFetch('/auth/logout', { token });
-        } catch (e) {
-          console.log('[Auth] Logout request error (non-critical):', e);
-        }
-      }
-    } catch (e) {
-      console.log('[Auth] Get token error during logout:', e);
-    }
     setUser(null);
     setUserType(null);
     setIsAuthenticated(false);
@@ -793,9 +764,19 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     setTeamMemberDocuments({});
     setCustomVehicleImage(null);
     setDriverApproved(false);
-    await setSessionToken(null);
-    await AsyncStorage.removeItem('auth_user');
-    console.log('[Auth] Logged out, all state and session cleared');
+    try {
+      const token = await getSessionToken();
+      await setSessionToken(null);
+      await AsyncStorage.removeItem('auth_user');
+      if (token) {
+        directFetch('/auth/logout', { token }).catch(e =>
+          console.log('[Auth] Logout request error (non-critical):', e)
+        );
+      }
+    } catch (e) {
+      console.log('[Auth] Logout cleanup error:', e);
+    }
+    console.log('[Auth] Logged out');
   }, [directFetch]);
 
   const value = useMemo(() => ({

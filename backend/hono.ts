@@ -369,6 +369,168 @@ app.post("/auth/login", async (c) => {
   }
 });
 
+app.post("/auth/send-reset-code", async (c) => {
+  try {
+    const dbEp = c.req.header('x-db-endpoint');
+    const dbNs = c.req.header('x-db-namespace');
+    const dbTk = c.req.header('x-db-token');
+    await ensureDbReady(dbEp, dbNs, dbTk);
+
+    const body = await c.req.json();
+    const cleanEmail = (body.email || '').toLowerCase().trim();
+    if (!cleanEmail) return c.json({ success: false, error: 'E-posta adresi gerekli' });
+
+    console.log('[REST] send-reset-code:', cleanEmail);
+    const { checkLoginAttempt, recordLoginFailure, recordLoginSuccess } = await import('./utils/security');
+    const { sendEmail, generateResetCode, buildResetCodeEmail } = await import('./utils/email');
+
+    const loginCheck = checkLoginAttempt(`resetcode_${cleanEmail}`);
+    if (!loginCheck.allowed) {
+      return c.json({ success: false, error: 'Çok fazla deneme. Lütfen daha sonra tekrar deneyin.' });
+    }
+
+    let user = db.users.getByEmail(cleanEmail);
+    let driver = db.drivers.getByEmail(cleanEmail);
+    let account: any = user || driver;
+    let hasPassword = db.passwords.get(cleanEmail);
+
+    if (!account || !hasPassword) {
+      try {
+        const { initializeStore } = await import('./db/store');
+        await initializeStore();
+        if (!account) { user = db.users.getByEmail(cleanEmail); driver = db.drivers.getByEmail(cleanEmail); account = user || driver; }
+        if (!hasPassword) hasPassword = db.passwords.get(cleanEmail);
+      } catch (e) { console.log('[REST] send-reset-code init err:', e); }
+    }
+
+    if (!account || !hasPassword) {
+      try {
+        const { dbFindByEmail, dbSearchPasswordByEmail } = await import('./db/rork-db');
+        if (!account) {
+          const dbU = await dbFindByEmail<any>('users', cleanEmail);
+          if (dbU) { const uid = dbU.rorkId || dbU._originalId || dbU.id; if (uid) { dbU.id = uid; account = dbU; db.users.set(uid, dbU); } }
+        }
+        if (!account) {
+          const dbD = await dbFindByEmail<any>('drivers', cleanEmail);
+          if (dbD) { const did = dbD.rorkId || dbD._originalId || dbD.id; if (did) { dbD.id = did; account = dbD; db.drivers.set(did, dbD); } }
+        }
+        if (!hasPassword) {
+          const r = await dbSearchPasswordByEmail(cleanEmail);
+          if (r?.hash) { hasPassword = r.hash; db.passwords.set(cleanEmail, r.hash); }
+        }
+      } catch (e) { console.log('[REST] send-reset-code db lookup err:', e); }
+    }
+
+    if (!account && !hasPassword) {
+      recordLoginFailure(`resetcode_${cleanEmail}`);
+      return c.json({ success: false, error: 'Bu e-posta adresiyle kayıtlı hesap bulunamadı' });
+    }
+
+    const accountName = account?.name || cleanEmail.split('@')[0];
+    const code = generateResetCode();
+    db.resetCodes.set(cleanEmail, code);
+    console.log('[REST] send-reset-code stored code for:', cleanEmail);
+
+    const emailResult = await sendEmail({
+      to: cleanEmail,
+      subject: '2GO - Şifre Sıfırlama Kodu',
+      html: buildResetCodeEmail(code, accountName),
+    });
+
+    if (!emailResult.success) {
+      console.log('[REST] Reset email failed:', emailResult.errorCode, emailResult.providerMessage);
+      return c.json({ success: true, error: null, emailSent: false });
+    }
+
+    recordLoginSuccess(`resetcode_${cleanEmail}`);
+    console.log('[REST] Reset code sent to:', cleanEmail);
+    return c.json({ success: true, error: null, emailSent: true });
+  } catch (err: any) {
+    console.log('[REST] send-reset-code error:', err?.message);
+    return c.json({ success: false, error: 'Bir hata oluştu. Lütfen tekrar deneyin.' }, 500);
+  }
+});
+
+app.post("/auth/verify-reset-code", async (c) => {
+  try {
+    const dbEp = c.req.header('x-db-endpoint');
+    const dbNs = c.req.header('x-db-namespace');
+    const dbTk = c.req.header('x-db-token');
+    await ensureDbReady(dbEp, dbNs, dbTk);
+
+    const body = await c.req.json();
+    const cleanEmail = (body.email || '').toLowerCase().trim();
+    const inputCode = (body.code || '').trim();
+    if (!cleanEmail || !inputCode) return c.json({ success: false, error: 'E-posta ve kod gerekli' });
+
+    console.log('[REST] verify-reset-code:', cleanEmail);
+
+    const stored = await db.resetCodes.getAsync(cleanEmail);
+    if (!stored) {
+      return c.json({ success: false, error: 'Doğrulama kodu bulunamadı veya süresi dolmuş. Lütfen yeni kod talep edin.' });
+    }
+
+    if (stored.attempts >= 5) {
+      db.resetCodes.delete(cleanEmail);
+      return c.json({ success: false, error: 'Çok fazla hatalı deneme. Yeni kod talep edin.' });
+    }
+
+    if (stored.code !== inputCode) {
+      await db.resetCodes.incrementAttemptsAsync(cleanEmail);
+      const remaining = 4 - stored.attempts;
+      return c.json({ success: false, error: remaining > 0 ? `Doğrulama kodu hatalı. ${remaining} deneme hakkınız kaldı.` : 'Doğrulama kodu hatalı. Yeni kod talep edin.' });
+    }
+
+    console.log('[REST] Reset code verified for:', cleanEmail);
+    return c.json({ success: true, error: null });
+  } catch (err: any) {
+    console.log('[REST] verify-reset-code error:', err?.message);
+    return c.json({ success: false, error: 'Bir hata oluştu. Lütfen tekrar deneyin.' }, 500);
+  }
+});
+
+app.post("/auth/reset-password", async (c) => {
+  try {
+    const dbEp = c.req.header('x-db-endpoint');
+    const dbNs = c.req.header('x-db-namespace');
+    const dbTk = c.req.header('x-db-token');
+    await ensureDbReady(dbEp, dbNs, dbTk);
+
+    const body = await c.req.json();
+    const cleanEmail = (body.email || '').toLowerCase().trim();
+    const inputCode = (body.code || '').trim();
+    const newPassword = body.newPassword || '';
+    if (!cleanEmail || !inputCode || !newPassword) return c.json({ success: false, error: 'Tüm alanlar gerekli' });
+
+    console.log('[REST] reset-password:', cleanEmail);
+    const { validatePassword, hashPassword } = await import('./utils/security');
+
+    const stored = await db.resetCodes.getAsync(cleanEmail);
+    if (!stored) {
+      return c.json({ success: false, error: 'Doğrulama kodu bulunamadı veya süresi dolmuş. Lütfen yeni kod talep edin.' });
+    }
+
+    if (stored.code !== inputCode) {
+      return c.json({ success: false, error: 'Doğrulama kodu hatalı' });
+    }
+
+    const pwdCheck = validatePassword(newPassword);
+    if (!pwdCheck.valid) {
+      return c.json({ success: false, error: pwdCheck.reason });
+    }
+
+    const hashedPwd = await hashPassword(newPassword);
+    await db.passwords.setSync(cleanEmail, hashedPwd);
+    db.resetCodes.delete(cleanEmail);
+
+    console.log('[REST] Password reset OK for:', cleanEmail);
+    return c.json({ success: true, error: null });
+  } catch (err: any) {
+    console.log('[REST] reset-password error:', err?.message);
+    return c.json({ success: false, error: 'Bir hata oluştu. Lütfen tekrar deneyin.' }, 500);
+  }
+});
+
 app.post("/auth/logout", async (c) => {
   try {
     const body = await c.req.json();
