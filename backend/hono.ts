@@ -15,6 +15,32 @@ console.log("[SERVER] Hono v62 started - ensureDbReady with URL validation");
 let _dbReady = false;
 let _dbInitPromise: Promise<void> | null = null;
 
+const SUPPORT_WHATSAPP_NUMBER = '905516300624';
+const SUPPORT_WHATSAPP_DISPLAY = '0551 630 06 24';
+
+function maskPhoneNumber(phone: string | undefined): string | null {
+  const digits = (phone ?? '').replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.length <= 4) return digits;
+
+  const prefixLength = Math.min(2, digits.length - 2);
+  const prefix = digits.slice(0, prefixLength);
+  const suffix = digits.slice(-2);
+  const hiddenLength = Math.max(digits.length - (prefix.length + suffix.length), 2);
+  return `${prefix}${'•'.repeat(hiddenLength)}${suffix}`;
+}
+
+function buildPasswordResetWhatsAppUrl(email: string, maskedPhone: string | null, reason?: string): string {
+  const lines: Array<string | null> = [
+    'Merhaba 2GO destek,',
+    'şifre sıfırlama kodu talep ediyorum.',
+    `E-posta: ${email}`,
+    `Kayıtlı telefon: ${maskedPhone ?? 'sistemde kontrol ediniz'}`,
+    reason ? `Not: ${reason}` : null,
+  ];
+  const message = lines.filter((line): line is string => Boolean(line)).join('\n');
+  return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+}
 
 initializeStore()
   .then(() => {
@@ -378,9 +404,10 @@ app.post("/auth/send-reset-code", async (c) => {
 
     const body = await c.req.json();
     const cleanEmail = (body.email || '').toLowerCase().trim();
+    const deliveryMethod = body.deliveryMethod === 'email' ? 'email' : 'whatsapp';
     if (!cleanEmail) return c.json({ success: false, error: 'E-posta adresi gerekli' });
 
-    console.log('[REST] send-reset-code:', cleanEmail);
+    console.log('[REST] send-reset-code:', cleanEmail, 'deliveryMethod:', deliveryMethod);
     const { checkLoginAttempt, recordLoginFailure, recordLoginSuccess } = await import('./utils/security');
     const { sendEmail, generateResetCode, buildResetCodeEmail } = await import('./utils/email');
 
@@ -431,6 +458,24 @@ app.post("/auth/send-reset-code", async (c) => {
     db.resetCodes.set(cleanEmail, code);
     console.log('[REST] send-reset-code stored code for:', cleanEmail);
 
+    const maskedPhone = maskPhoneNumber(typeof account?.phone === 'string' ? account.phone : undefined);
+    const whatsappUrl = buildPasswordResetWhatsAppUrl(cleanEmail, maskedPhone, 'Şifre sıfırlama doğrulama kodu talebi');
+
+    if (deliveryMethod === 'whatsapp') {
+      recordLoginSuccess(`resetcode_${cleanEmail}`);
+      console.log('[REST] Reset code prepared for WhatsApp support:', cleanEmail, 'maskedPhone:', maskedPhone);
+      return c.json({
+        success: true,
+        error: null,
+        emailSent: false,
+        deliveryChannel: 'whatsapp',
+        supportPhone: SUPPORT_WHATSAPP_NUMBER,
+        supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
+        whatsappUrl,
+        maskedPhone,
+      });
+    }
+
     const emailResult = await sendEmail({
       to: cleanEmail,
       subject: '2GO - Şifre Sıfırlama Kodu',
@@ -439,12 +484,29 @@ app.post("/auth/send-reset-code", async (c) => {
 
     if (!emailResult.success) {
       console.log('[REST] Reset email failed:', emailResult.errorCode, emailResult.providerMessage);
-      return c.json({ success: true, error: null, emailSent: false });
+      return c.json({
+        success: true,
+        error: null,
+        emailSent: false,
+        deliveryChannel: 'whatsapp',
+        supportPhone: SUPPORT_WHATSAPP_NUMBER,
+        supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
+        whatsappUrl,
+        maskedPhone,
+      });
     }
 
     recordLoginSuccess(`resetcode_${cleanEmail}`);
-    console.log('[REST] Reset code sent to:', cleanEmail);
-    return c.json({ success: true, error: null, emailSent: true });
+    console.log('[REST] Reset code sent to:', cleanEmail, 'channel: email');
+    return c.json({
+      success: true,
+      error: null,
+      emailSent: true,
+      deliveryChannel: 'email',
+      supportPhone: SUPPORT_WHATSAPP_NUMBER,
+      supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
+      maskedPhone,
+    });
   } catch (err: any) {
     console.log('[REST] send-reset-code error:', err?.message);
     return c.json({ success: false, error: 'Bir hata oluştu. Lütfen tekrar deneyin.' }, 500);

@@ -61,6 +61,33 @@ function getEmailSendErrorMessage(errorCode: SendEmailErrorCode | null): string 
   return 'E-posta gönderilemedi. Lütfen e-posta adresinizi kontrol edin veya daha sonra tekrar deneyin.';
 }
 
+const SUPPORT_WHATSAPP_NUMBER = '905516300624';
+const SUPPORT_WHATSAPP_DISPLAY = '0551 630 06 24';
+
+function maskPhoneNumber(phone: string | undefined): string | null {
+  const digits = (phone ?? '').replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.length <= 4) return digits;
+
+  const prefixLength = Math.min(2, digits.length - 2);
+  const prefix = digits.slice(0, prefixLength);
+  const suffix = digits.slice(-2);
+  const hiddenLength = Math.max(digits.length - (prefix.length + suffix.length), 2);
+  return `${prefix}${'•'.repeat(hiddenLength)}${suffix}`;
+}
+
+function buildPasswordResetWhatsAppUrl(email: string, maskedPhone: string | null, reason?: string): string {
+  const lines: Array<string | null> = [
+    'Merhaba 2GO destek,',
+    'şifre sıfırlama kodu talep ediyorum.',
+    `E-posta: ${email}`,
+    `Kayıtlı telefon: ${maskedPhone ?? 'sistemde kontrol ediniz'}`,
+    reason ? `Not: ${reason}` : null,
+  ];
+  const message = lines.filter((line): line is string => Boolean(line)).join('\n');
+  return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+}
+
 export const authRouter = createTRPCRouter({
   sendVerificationCode: publicProcedure
     .input(z.object({
@@ -536,9 +563,11 @@ export const authRouter = createTRPCRouter({
   sendResetCode: publicProcedure
     .input(z.object({
       email: z.string().email().max(254),
+      deliveryMethod: z.enum(['email', 'whatsapp']).optional(),
     }))
     .mutation(async ({ input }) => {
       const cleanEmail = input.email.toLowerCase().trim();
+      const deliveryMethod = input.deliveryMethod === 'email' ? 'email' : 'whatsapp';
 
       const loginCheck = checkLoginAttempt(`resetcode_${cleanEmail}`);
       if (!loginCheck.allowed) {
@@ -550,7 +579,7 @@ export const authRouter = createTRPCRouter({
       let account = user || driver;
       let hasPassword = db.passwords.get(cleanEmail);
 
-      console.log('[AUTH] sendResetCode - first lookup for:', cleanEmail, 'user:', !!user, 'driver:', !!driver, 'hasPassword:', !!hasPassword);
+      console.log('[AUTH] sendResetCode - first lookup for:', cleanEmail, 'user:', !!user, 'driver:', !!driver, 'hasPassword:', !!hasPassword, 'deliveryMethod:', deliveryMethod);
 
       if (!account || !hasPassword) {
         console.log('[AUTH] sendResetCode - data incomplete, doing store init + force reload...');
@@ -625,6 +654,24 @@ export const authRouter = createTRPCRouter({
       const storedCheck = db.resetCodes.get(cleanEmail);
       console.log('[AUTH] sendResetCode - verify stored code:', storedCheck?.code, 'matches:', storedCheck?.code === code);
 
+      const maskedPhone = maskPhoneNumber(typeof account?.phone === 'string' ? account.phone : undefined);
+      const whatsappUrl = buildPasswordResetWhatsAppUrl(cleanEmail, maskedPhone, 'Şifre sıfırlama doğrulama kodu talebi');
+
+      if (deliveryMethod === 'whatsapp') {
+        recordLoginSuccess(`resetcode_${cleanEmail}`);
+        console.log('[AUTH] Reset code prepared for WhatsApp support:', cleanEmail, 'maskedPhone:', maskedPhone);
+        return {
+          success: true,
+          error: null,
+          emailSent: false,
+          deliveryChannel: 'whatsapp' as const,
+          supportPhone: SUPPORT_WHATSAPP_NUMBER,
+          supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
+          whatsappUrl,
+          maskedPhone,
+        };
+      }
+
       const emailResult = await sendEmail({
         to: cleanEmail,
         subject: '2GO - Şifre Sıfırlama Kodu',
@@ -643,15 +690,28 @@ export const authRouter = createTRPCRouter({
           emailResult.providerMessage,
         );
         return {
-          success: false,
+          success: true,
           error: getEmailSendErrorMessage(emailResult.errorCode),
           emailSent: false,
+          deliveryChannel: 'whatsapp' as const,
+          supportPhone: SUPPORT_WHATSAPP_NUMBER,
+          supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
+          whatsappUrl,
+          maskedPhone,
         };
       }
 
       recordLoginSuccess(`resetcode_${cleanEmail}`);
-      console.log("[AUTH] Reset code sent to:", cleanEmail, 'code:', code);
-      return { success: true, error: null, emailSent: true };
+      console.log("[AUTH] Reset code sent to:", cleanEmail, 'code:', code, 'channel: email');
+      return {
+        success: true,
+        error: null,
+        emailSent: true,
+        deliveryChannel: 'email' as const,
+        supportPhone: SUPPORT_WHATSAPP_NUMBER,
+        supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
+        maskedPhone,
+      };
     }),
 
   verifyResetCode: publicProcedure

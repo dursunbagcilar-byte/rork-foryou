@@ -70,7 +70,16 @@ const SUPPORT_WHATSAPP_NUMBER = '905516300624';
 const SUPPORT_WHATSAPP_DISPLAY = '0551 630 06 24';
 
 type Step = 'email' | 'code' | 'newPassword' | 'success';
-type ResetCodeResponse = { success: boolean; error?: string | null; emailSent?: boolean };
+type DeliveryChannel = 'email' | 'whatsapp';
+type ResetCodeResponse = {
+  success: boolean;
+  error?: string | null;
+  emailSent?: boolean;
+  deliveryChannel?: DeliveryChannel;
+  whatsappUrl?: string;
+  supportPhoneDisplay?: string;
+  maskedPhone?: string | null;
+};
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
@@ -89,6 +98,9 @@ export default function ForgotPasswordScreen() {
   const [emailSentInfo, setEmailSentInfo] = useState<boolean>(true);
   const [localRecoveryMode, setLocalRecoveryMode] = useState<boolean>(false);
   const [deliveryIssue, setDeliveryIssue] = useState<string | null>(null);
+  const [deliveryChannel, setDeliveryChannel] = useState<DeliveryChannel>('whatsapp');
+  const [registeredPhoneMask, setRegisteredPhoneMask] = useState<string | null>(null);
+  const [supportWhatsAppUrl, setSupportWhatsAppUrl] = useState<string | null>(null);
 
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
@@ -127,19 +139,20 @@ export default function ForgotPasswordScreen() {
 
   const buildWhatsAppSupportUrl = useCallback((reason: string): string => {
     const contactEmail = email.trim() || 'belirtilmedi';
+    const phoneInfo = registeredPhoneMask ?? 'sistemde kontrol ediniz';
     const message = [
       'Merhaba 2GO destek,',
-      'şifre sıfırlama kodunu alamıyorum.',
+      'şifre sıfırlama kodu talep ediyorum.',
       `E-posta: ${contactEmail}`,
-      `Sorun: ${reason}`,
-      'Yardımcı olur musunuz?',
+      `Kayıtlı telefon: ${phoneInfo}`,
+      `Not: ${reason}`,
     ].join('\n');
 
     return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
-  }, [email]);
+  }, [email, registeredPhoneMask]);
 
-  const openWhatsAppSupport = useCallback(async (reason: string) => {
-    const url = buildWhatsAppSupportUrl(reason);
+  const openWhatsAppSupport = useCallback(async (reason: string, overrideUrl?: string | null) => {
+    const url = overrideUrl ?? supportWhatsAppUrl ?? buildWhatsAppSupportUrl(reason);
     console.log('[ForgotPassword] Opening WhatsApp support:', url);
 
     try {
@@ -148,18 +161,20 @@ export default function ForgotPasswordScreen() {
       console.log('[ForgotPassword] WhatsApp open error:', openErr);
       Alert.alert('Hata', 'WhatsApp açılamadı. Lütfen WhatsApp yüklü olduğundan emin olun.');
     }
-  }, [buildWhatsAppSupportUrl]);
+  }, [buildWhatsAppSupportUrl, supportWhatsAppUrl]);
 
-  const promptWhatsAppSupport = useCallback((reason: string) => {
-    const finalReason = reason.trim() || 'Doğrulama kodu teslim edilemedi';
+  const promptWhatsAppSupport = useCallback((reason: string, overrideUrl?: string | null) => {
+    const finalReason = reason.trim() || 'WhatsApp üzerinden kod talebi hazırlandı';
     setEmailSentInfo(false);
+    setDeliveryChannel('whatsapp');
+    setSupportWhatsAppUrl(overrideUrl ?? null);
     setDeliveryIssue(finalReason);
     Alert.alert(
       'WhatsApp Destek',
-      'Kod şu anda otomatik gönderilemiyor. İsterseniz WhatsApp destek hattından manuel yardım isteyebilirsiniz.',
+      'Şifre sıfırlama talebiniz WhatsApp destek hattına hazır. Açılan mesajı göndererek kodunuzu isteyebilirsiniz.',
       [
         { text: 'Vazgeç', style: 'cancel' },
-        { text: 'WhatsApp Aç', onPress: () => { void openWhatsAppSupport(finalReason); } },
+        { text: 'WhatsApp Aç', onPress: () => { void openWhatsAppSupport(finalReason, overrideUrl); } },
       ]
     );
   }, [openWhatsAppSupport]);
@@ -176,14 +191,23 @@ export default function ForgotPasswordScreen() {
     try {
       const result = await restCall<ResetCodeResponse>(
         '/api/auth/send-reset-code',
-        { email: email.trim() }
+        { email: email.trim(), deliveryMethod: 'whatsapp' }
       );
 
       if (result.success) {
-        setEmailSentInfo(true);
-        setDeliveryIssue(null);
+        const nextDeliveryChannel: DeliveryChannel = result.deliveryChannel === 'email' ? 'email' : 'whatsapp';
+        setDeliveryChannel(nextDeliveryChannel);
+        setRegisteredPhoneMask(result.maskedPhone ?? null);
+        setSupportWhatsAppUrl(result.whatsappUrl ?? null);
+        setEmailSentInfo(result.emailSent !== false);
+        setDeliveryIssue(nextDeliveryChannel === 'whatsapp'
+          ? 'Kod talebiniz WhatsApp destek hattına hazırlandı. Sohbeti açıp mesajı gönderin.'
+          : null);
         animateTransition(() => setStep('code'));
-        console.log('[ForgotPassword] Code sent, emailSent:', result.emailSent);
+        console.log('[ForgotPassword] Code sent, deliveryChannel:', nextDeliveryChannel, 'emailSent:', result.emailSent);
+        if (nextDeliveryChannel === 'whatsapp') {
+          promptWhatsAppSupport('Kod talebiniz WhatsApp destek hattına hazırlandı. Sohbeti açıp mesajı gönderin.', result.whatsappUrl ?? null);
+        }
       } else {
         const resultError = result.error ?? 'Bir hata oluştu';
         const handledLocally = resultError.toLowerCase().includes('kayıtlı hesap bulunamadı')
@@ -193,7 +217,7 @@ export default function ForgotPasswordScreen() {
           return;
         }
         if (result.emailSent === false) {
-          promptWhatsAppSupport(resultError);
+          promptWhatsAppSupport(resultError, result.whatsappUrl ?? null);
           return;
         }
         Alert.alert('Hata', resultError);
@@ -311,14 +335,24 @@ export default function ForgotPasswordScreen() {
     try {
       const result = await restCall<ResetCodeResponse>(
         '/api/auth/send-reset-code',
-        { email: email.trim() }
+        { email: email.trim(), deliveryMethod: 'whatsapp' }
       );
       if (result.success) {
-        setEmailSentInfo(true);
-        setDeliveryIssue(null);
-        Alert.alert('Başarılı', 'Yeni doğrulama kodu gönderildi');
+        const nextDeliveryChannel: DeliveryChannel = result.deliveryChannel === 'email' ? 'email' : 'whatsapp';
+        setDeliveryChannel(nextDeliveryChannel);
+        setRegisteredPhoneMask(result.maskedPhone ?? null);
+        setSupportWhatsAppUrl(result.whatsappUrl ?? null);
+        setEmailSentInfo(result.emailSent !== false);
+        setDeliveryIssue(nextDeliveryChannel === 'whatsapp'
+          ? 'WhatsApp mesajı yeniden hazırlandı. Sohbeti açıp mesajı tekrar gönderin.'
+          : null);
+        if (nextDeliveryChannel === 'whatsapp') {
+          promptWhatsAppSupport('WhatsApp mesajı yeniden hazırlandı. Sohbeti açıp mesajı tekrar gönderin.', result.whatsappUrl ?? null);
+        } else {
+          Alert.alert('Başarılı', 'Yeni doğrulama kodu gönderildi');
+        }
       } else if (result.emailSent === false) {
-        promptWhatsAppSupport(result.error ?? 'Yeni kod şu anda teslim edilemiyor.');
+        promptWhatsAppSupport(result.error ?? 'Yeni kod şu anda teslim edilemiyor.', result.whatsappUrl ?? null);
       } else {
         Alert.alert('Hata', result.error ?? 'Kod gönderilemedi');
       }
@@ -351,9 +385,9 @@ export default function ForgotPasswordScreen() {
         <View style={styles.stepIconWrap}>
           <Mail size={28} color="#F5A623" />
         </View>
-        <Text style={[styles.stepTitle, { fontSize: isSmall ? 18 : 22 }]}>E-posta Doğrulama</Text>
+        <Text style={[styles.stepTitle, { fontSize: isSmall ? 18 : 22 }]}>WhatsApp ile Kurtarma</Text>
         <Text style={[styles.stepDesc, { fontSize: isSmall ? 12 : 14 }]}>
-          Hesabınıza kayıtlı e-posta adresinizi girin. Doğrulama kodu göndereceğiz.
+          Hesabınıza kayıtlı e-posta adresinizi girin. Kod talebinizi WhatsApp destek hattına hazırlayalım.
         </Text>
       </View>
       <View style={styles.inputGroup}>
@@ -371,7 +405,7 @@ export default function ForgotPasswordScreen() {
           />
         </View>
       </View>
-      {deliveryIssue ? (
+      {(deliveryIssue || deliveryChannel === 'whatsapp') ? (
         <View style={styles.supportCard}>
           <View style={styles.supportCardHeader}>
             <View style={styles.supportIconWrap}>
@@ -379,14 +413,14 @@ export default function ForgotPasswordScreen() {
             </View>
             <Text style={styles.supportTitle}>WhatsApp ile destek al</Text>
           </View>
-          <Text style={styles.supportDescription}>{deliveryIssue}</Text>
+          <Text style={styles.supportDescription}>{deliveryIssue ?? 'Kod talebiniz WhatsApp destek hattı üzerinden ilerler.'}</Text>
           <TouchableOpacity
             style={styles.supportButton}
-            onPress={() => { void openWhatsAppSupport(deliveryIssue); }}
+            onPress={() => { void openWhatsAppSupport(deliveryIssue ?? 'WhatsApp üzerinden şifre sıfırlama kodu talebi'); }}
             activeOpacity={0.85}
             testID="forgot-open-whatsapp-support-btn"
           >
-            <Text style={styles.supportButtonText}>WhatsApp Desteğini Aç</Text>
+            <Text style={styles.supportButtonText}>WhatsApp Talebini Aç</Text>
           </TouchableOpacity>
           <Text style={styles.supportMeta}>{SUPPORT_WHATSAPP_DISPLAY}</Text>
         </View>
@@ -401,7 +435,7 @@ export default function ForgotPasswordScreen() {
         {loading ? (
           <ActivityIndicator color="#0A0A12" size="small" />
         ) : (
-          <Text style={[styles.actionButtonText, { fontSize: isSmall ? 15 : 17 }]}>Doğrulama Kodu Gönder</Text>
+          <Text style={[styles.actionButtonText, { fontSize: isSmall ? 15 : 17 }]}>WhatsApp'tan Kod Talep Et</Text>
         )}
       </TouchableOpacity>
     </>
@@ -415,9 +449,11 @@ export default function ForgotPasswordScreen() {
         </View>
         <Text style={[styles.stepTitle, { fontSize: isSmall ? 18 : 22 }]}>Kodu Girin</Text>
         <Text style={[styles.stepDesc, { fontSize: isSmall ? 12 : 14 }]}>
-          {emailSentInfo
-            ? `${email} adresine gönderilen 6 haneli kodu girin`
-            : `Doğrulama kodu oluşturuldu. E-posta gönderilemedi, lütfen tekrar deneyin.`
+          {deliveryChannel === 'whatsapp'
+            ? `WhatsApp destek üzerinden paylaşılacak 6 haneli kodu girin${registeredPhoneMask ? ` • kayıtlı hat: ${registeredPhoneMask}` : ''}`
+            : emailSentInfo
+              ? `${email} adresine gönderilen 6 haneli kodu girin`
+              : 'Doğrulama kodu oluşturuldu. E-posta gönderilemedi, lütfen tekrar deneyin.'
           }
         </Text>
       </View>
@@ -452,17 +488,17 @@ export default function ForgotPasswordScreen() {
       <View style={styles.resendRow}>
         <Text style={styles.resendLabel}>Kod gelmedi mi? </Text>
         <TouchableOpacity onPress={handleResendCode} disabled={loading}>
-          <Text style={styles.resendLink}>Tekrar Gönder</Text>
+          <Text style={styles.resendLink}>{deliveryChannel === 'whatsapp' ? 'WhatsApp Mesajını Aç' : 'Tekrar Gönder'}</Text>
         </TouchableOpacity>
       </View>
       <TouchableOpacity
         style={styles.inlineWhatsAppButton}
-        onPress={() => { void openWhatsAppSupport(emailSentInfo ? 'Doğrulama kodu kullanıcıya ulaşmadı.' : (deliveryIssue ?? 'Doğrulama kodu teslim edilemedi.')); }}
+        onPress={() => { void openWhatsAppSupport(deliveryChannel === 'whatsapp' ? 'Şifre sıfırlama kodu talebi' : (emailSentInfo ? 'Doğrulama kodu kullanıcıya ulaşmadı.' : (deliveryIssue ?? 'Doğrulama kodu teslim edilemedi.'))); }}
         activeOpacity={0.85}
         testID="forgot-inline-whatsapp-support-btn"
       >
         <MessageSquare size={16} color="#25D366" />
-        <Text style={styles.inlineWhatsAppText}>Kod gelmediyse WhatsApp destek</Text>
+        <Text style={styles.inlineWhatsAppText}>{deliveryChannel === 'whatsapp' ? 'WhatsApp sohbetini tekrar aç' : 'Kod gelmediyse WhatsApp destek'}</Text>
       </TouchableOpacity>
       <TouchableOpacity style={styles.backStepButton} onPress={() => animateTransition(() => setStep('email'))}>
         <Text style={styles.backStepText}>Geri Dön</Text>
