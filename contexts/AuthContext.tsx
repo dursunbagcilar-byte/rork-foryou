@@ -39,14 +39,47 @@ interface LocalAuthLegacyCredentials {
   driverCategory?: 'driver' | 'scooter' | 'courier';
 }
 
-const LOCAL_AUTH_PREFIX = 'local_auth_backup_';
+const LOCAL_AUTH_PREFIX = 'localauthbackup';
 
 function normalizeAuthEmail(email: string): string {
   return email.toLowerCase().trim();
 }
 
+function buildLocalAuthStorageId(email: string): string {
+  const normalizedEmail = normalizeAuthEmail(email);
+  let hash = 2166136261;
+
+  for (let index = 0; index < normalizedEmail.length; index += 1) {
+    hash ^= normalizedEmail.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return `${normalizedEmail.length.toString(16)}${(hash >>> 0).toString(16)}`;
+}
+
 function buildLocalAuthKey(email: string): string {
-  return `${LOCAL_AUTH_PREFIX}${normalizeAuthEmail(email)}`;
+  return `${LOCAL_AUTH_PREFIX}${buildLocalAuthStorageId(email)}`;
+}
+
+function parseLocalAuthBackup(raw: string): LocalAuthBackup | null {
+  try {
+    const parsed = JSON.parse(raw) as LocalAuthBackup;
+    if (!parsed?.email || !parsed?.type || !parsed?.passwordHash || !parsed?.user) {
+      return null;
+    }
+
+    return {
+      ...parsed,
+      email: normalizeAuthEmail(parsed.email),
+      user: {
+        ...parsed.user,
+        email: normalizeAuthEmail(parsed.user.email),
+      } as User | Driver,
+    };
+  } catch (error) {
+    console.log('[Auth] parseLocalAuthBackup error:', error);
+    return null;
+  }
 }
 
 async function hashLocalPassword(password: string): Promise<string> {
@@ -274,26 +307,21 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
 
     try {
-      const raw = await SecureStore.getItemAsync(buildLocalAuthKey(normalizedEmail));
+      const secureStoreKey = buildLocalAuthKey(normalizedEmail);
+      const raw = await SecureStore.getItemAsync(secureStoreKey);
       if (!raw) {
         return null;
       }
 
-      const parsed = JSON.parse(raw) as LocalAuthBackup;
-      if (!parsed?.email || !parsed?.type || !parsed?.passwordHash || !parsed?.user) {
+      const parsed = parseLocalAuthBackup(raw);
+      if (!parsed) {
+        console.log('[Auth] getLocalAuthBackup invalid backup payload for:', normalizedEmail);
         return null;
       }
 
-      return {
-        ...parsed,
-        email: normalizeAuthEmail(parsed.email),
-        user: {
-          ...parsed.user,
-          email: normalizeAuthEmail(parsed.user.email),
-        } as User | Driver,
-      };
+      return parsed;
     } catch (error) {
-      console.log('[Auth] getLocalAuthBackup error:', error);
+      console.log('[Auth] getLocalAuthBackup error:', error, 'email:', normalizedEmail);
       return null;
     }
   }, []);
@@ -379,20 +407,25 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       return;
     }
 
-    const passwordHash = await hashLocalPassword(password);
-    const backup: LocalAuthBackup = {
-      email: normalizedEmail,
-      type: account.type,
-      passwordHash,
-      user: {
-        ...account,
+    try {
+      const passwordHash = await hashLocalPassword(password);
+      const backup: LocalAuthBackup = {
         email: normalizedEmail,
-      },
-      updatedAt: new Date().toISOString(),
-    };
+        type: account.type,
+        passwordHash,
+        user: {
+          ...account,
+          email: normalizedEmail,
+        },
+        updatedAt: new Date().toISOString(),
+      };
 
-    await SecureStore.setItemAsync(buildLocalAuthKey(normalizedEmail), JSON.stringify(backup));
-    console.log('[Auth] Local auth backup saved for:', normalizedEmail, 'type:', account.type);
+      const secureStoreKey = buildLocalAuthKey(normalizedEmail);
+      await SecureStore.setItemAsync(secureStoreKey, JSON.stringify(backup));
+      console.log('[Auth] Local auth backup saved for:', normalizedEmail, 'type:', account.type, 'key:', secureStoreKey);
+    } catch (error) {
+      console.log('[Auth] persistLocalAuthBackup error:', error, 'email:', normalizedEmail);
+    }
   }, []);
 
   const hasLocalRecoveryAccount = useCallback(async (email: string): Promise<boolean> => {
