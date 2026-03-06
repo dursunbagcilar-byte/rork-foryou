@@ -1,0 +1,224 @@
+import { QueryClient } from "@tanstack/react-query";
+import { Stack } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
+import React, { useEffect, useRef, useState } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
+import { LanguageProvider } from "@/contexts/LanguageContext";
+import { NotificationProvider, useNotificationContext } from "@/contexts/NotificationContext";
+import { SecurityProvider } from "@/contexts/SecurityContext";
+import { PrivacyProvider } from "@/contexts/PrivacyContext";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import InAppNotification from "@/components/InAppNotification";
+import { Colors } from "@/constants/colors";
+import { trpc, trpcClient, resetCircuitBreaker } from "@/lib/trpc";
+
+try {
+  SplashScreen.preventAutoHideAsync();
+} catch (e) {
+  console.log('[Layout] SplashScreen.preventAutoHideAsync error:', e);
+}
+
+let queryClientSingleton: QueryClient | null = null;
+function getQueryClient() {
+  if (!queryClientSingleton) {
+    queryClientSingleton = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: 0,
+          staleTime: 30000,
+          networkMode: 'always' as const,
+          refetchOnWindowFocus: false,
+          refetchOnReconnect: false,
+        },
+        mutations: {
+          retry: 0,
+          networkMode: 'always' as const,
+        },
+      },
+    });
+  }
+  return queryClientSingleton;
+}
+
+console.log('[Layout] Root layout module loaded v3 - Platform:', Platform.OS);
+
+function NotificationOverlay() {
+  const { notification, dismiss } = useNotificationContext();
+  return (
+    <InAppNotification
+      visible={notification.visible}
+      title={notification.title}
+      message={notification.message}
+      type={notification.type}
+      onDismiss={dismiss}
+      onPress={notification.onPress}
+    />
+  );
+}
+
+function RootLayoutNav() {
+  const { colors } = useTheme();
+  console.log('[Layout] RootLayoutNav rendering');
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: colors.background },
+      }}
+    >
+      <Stack.Screen name="index" />
+      <Stack.Screen name="login" />
+      <Stack.Screen name="register-customer" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="register-driver" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="customer-menu" options={{ presentation: 'fullScreenModal', animation: 'fade_from_bottom', animationDuration: 250 }} />
+      <Stack.Screen name="driver-menu" options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="ai-chat" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="ai-photo-editor" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="scheduled-ride" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="cancellation-policy" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="forgot-password" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
+      <Stack.Screen name="privacy-policy" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="terms-of-service" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="driver-help" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="kvkk-data-management" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="(customer-tabs)" />
+      <Stack.Screen name="(driver-tabs)" />
+      <Stack.Screen name="+not-found" />
+    </Stack>
+  );
+}
+
+function CrashFallback({ error, onRetry }: { error: string; onRetry: () => void }) {
+  return (
+    <View style={crashStyles.container}>
+      <Text style={crashStyles.emoji}>⚠️</Text>
+      <Text style={crashStyles.title}>Uygulama Başlatılamadı</Text>
+      <Text style={crashStyles.message}>Bir hata oluştu. Lütfen tekrar deneyin.</Text>
+      {error ? <Text style={crashStyles.detail} numberOfLines={4}>{error}</Text> : null}
+      <TouchableOpacity style={crashStyles.button} onPress={onRetry} activeOpacity={0.85}>
+        <Text style={crashStyles.buttonText}>Tekrar Dene</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const crashStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: Colors.dark.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  emoji: { fontSize: 48, marginBottom: 16 },
+  title: { fontSize: 22, fontWeight: '700' as const, color: Colors.dark.text, marginBottom: 8 },
+  message: { fontSize: 14, color: Colors.dark.textSecondary, textAlign: 'center' as const, marginBottom: 16 },
+  detail: { fontSize: 12, color: Colors.dark.textMuted, backgroundColor: Colors.dark.card, padding: 12, borderRadius: 10, width: '100%', marginBottom: 20, overflow: 'hidden' as const },
+  button: { backgroundColor: Colors.dark.primary, paddingVertical: 14, paddingHorizontal: 40, borderRadius: 14 },
+  buttonText: { fontSize: 16, fontWeight: '700' as const, color: Colors.dark.background },
+});
+
+export default function RootLayout() {
+  const [initError, setInitError] = useState<string | null>(null);
+
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    console.log('[Layout] RootLayout mounted');
+    mountedRef.current = true;
+    resetCircuitBreaker();
+    SplashScreen.hideAsync().catch((e) => console.log('[Layout] SplashScreen.hideAsync error:', e));
+
+    const bootstrapDb = async () => {
+      if (!mountedRef.current) return;
+      try {
+        const { getBaseUrl, waitForBaseUrl } = await import('@/lib/trpc');
+        let baseUrl = getBaseUrl();
+        if (!baseUrl) {
+          console.log('[Layout] DB bootstrap - waiting for base URL...');
+          baseUrl = await waitForBaseUrl(12000);
+        }
+        const dbEndpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT;
+        const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
+        const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
+
+        console.log('[Layout] DB bootstrap - baseUrl:', baseUrl ? baseUrl.substring(0, 50) : 'MISSING', 'dbEndpoint:', dbEndpoint ? 'SET' : 'MISSING');
+
+        if (baseUrl && dbEndpoint && dbNamespace && dbToken) {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
+          try {
+            const res = await fetch(`${baseUrl}/api/bootstrap-db`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-db-endpoint': dbEndpoint,
+                'x-db-namespace': dbNamespace,
+                'x-db-token': dbToken,
+              },
+              body: JSON.stringify({ endpoint: dbEndpoint, namespace: dbNamespace, token: dbToken }),
+              signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+            if (res.ok) {
+              const data = await res.json();
+              console.log('[Layout] DB bootstrap OK - drivers:', data.drivers, 'users:', data.users);
+            } else {
+              console.log('[Layout] DB bootstrap status:', res.status);
+            }
+          } catch (fetchErr) {
+            clearTimeout(timeoutId);
+            console.log('[Layout] DB bootstrap fetch error (non-critical):', fetchErr);
+          }
+        } else if (baseUrl) {
+          console.log('[Layout] DB bootstrap skipped - DB env vars missing but baseUrl available:', baseUrl.substring(0, 50));
+        }
+      } catch (e) {
+        console.log('[Layout] DB bootstrap error (non-critical):', e);
+      }
+    };
+    bootstrapDb();
+
+    return () => {
+      mountedRef.current = false;
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  if (initError) {
+    return <CrashFallback error={initError} onRetry={() => setInitError(null)} />;
+  }
+
+  const queryClient = getQueryClient();
+
+  return (
+    <trpc.Provider client={trpcClient} queryClient={queryClient}>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <ErrorBoundary>
+          <ThemeProvider>
+            <PrivacyProvider>
+              <SecurityProvider>
+                <AuthProvider>
+                  <LanguageProvider>
+                    <NotificationProvider>
+                      <NotificationOverlay />
+                      <RootLayoutNav />
+                    </NotificationProvider>
+                  </LanguageProvider>
+                </AuthProvider>
+              </SecurityProvider>
+            </PrivacyProvider>
+          </ThemeProvider>
+        </ErrorBoundary>
+      </GestureHandlerRootView>
+    </trpc.Provider>
+  );
+}
