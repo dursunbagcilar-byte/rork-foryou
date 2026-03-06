@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import createContextHook from '@nkzw/create-context-hook';
 import type { User, Driver, Ride, DriverDocuments } from '@/constants/mockData';
 import { PRICING } from '@/constants/pricing';
@@ -12,6 +13,65 @@ export interface TeamMemberInfo {
   name: string;
   email: string;
   phone: string;
+}
+
+interface LocalAuthBackup {
+  email: string;
+  type: Exclude<UserType, null>;
+  passwordHash: string;
+  user: User | Driver;
+  updatedAt: string;
+}
+
+interface LocalAuthLegacyCredentials {
+  type?: Exclude<UserType, null>;
+  name?: string;
+  phone?: string;
+  email?: string;
+  gender?: 'male' | 'female';
+  city?: string;
+  district?: string;
+  vehiclePlate?: string;
+  vehicleModel?: string;
+  vehicleColor?: string;
+  partnerDriverName?: string;
+  licenseIssueDate?: string;
+  driverCategory?: 'driver' | 'scooter' | 'courier';
+}
+
+const LOCAL_AUTH_PREFIX = 'local_auth_backup_';
+
+function normalizeAuthEmail(email: string): string {
+  return email.toLowerCase().trim();
+}
+
+function buildLocalAuthKey(email: string): string {
+  return `${LOCAL_AUTH_PREFIX}${normalizeAuthEmail(email)}`;
+}
+
+async function hashLocalPassword(password: string): Promise<string> {
+  const normalizedPassword = `2go_local_auth_v1:${password}`;
+
+  try {
+    const subtleCrypto = globalThis.crypto?.subtle;
+    if (subtleCrypto) {
+      const encoded = new TextEncoder().encode(normalizedPassword);
+      const buffer = await subtleCrypto.digest('SHA-256', encoded);
+      const bytes = Array.from(new Uint8Array(buffer));
+      const digest = bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('');
+      return `sha256:${digest}`;
+    }
+  } catch (error) {
+    console.log('[Auth] hashLocalPassword subtle error:', error);
+  }
+
+  let hash = 2166136261;
+  for (let index = 0; index < normalizedPassword.length; index += 1) {
+    hash ^= normalizedPassword.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return `fnv:${(hash >>> 0).toString(16)}`;
 }
 
 function isNetworkError(msg: string): boolean {
@@ -197,6 +257,210 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   }, [getApiBase, getDbHeaders]);
 
+  const setAuthenticatedLocalUser = useCallback(async (localUser: User | Driver, source: string): Promise<UserType> => {
+    await setSessionToken(null);
+    setUser(localUser);
+    setUserType(localUser.type);
+    setIsAuthenticated(true);
+    await AsyncStorage.setItem('auth_user', JSON.stringify(localUser));
+    console.log('[Auth] Local auth session restored from', source, 'for:', localUser.email, 'type:', localUser.type);
+    return localUser.type;
+  }, []);
+
+  const getLocalAuthBackup = useCallback(async (email: string): Promise<LocalAuthBackup | null> => {
+    const normalizedEmail = normalizeAuthEmail(email);
+    if (!normalizedEmail) {
+      return null;
+    }
+
+    try {
+      const raw = await SecureStore.getItemAsync(buildLocalAuthKey(normalizedEmail));
+      if (!raw) {
+        return null;
+      }
+
+      const parsed = JSON.parse(raw) as LocalAuthBackup;
+      if (!parsed?.email || !parsed?.type || !parsed?.passwordHash || !parsed?.user) {
+        return null;
+      }
+
+      return {
+        ...parsed,
+        email: normalizeAuthEmail(parsed.email),
+        user: {
+          ...parsed.user,
+          email: normalizeAuthEmail(parsed.user.email),
+        } as User | Driver,
+      };
+    } catch (error) {
+      console.log('[Auth] getLocalAuthBackup error:', error);
+      return null;
+    }
+  }, []);
+
+  const buildLegacyLocalUser = useCallback(async (email: string): Promise<User | Driver | null> => {
+    const normalizedEmail = normalizeAuthEmail(email);
+    const fallbackId = normalizedEmail.replace(/[^a-zA-Z0-9]/g, '_');
+
+    try {
+      const storedUser = await AsyncStorage.getItem('auth_user');
+      if (storedUser) {
+        const parsed = JSON.parse(storedUser) as User | Driver;
+        if (normalizeAuthEmail(parsed.email) === normalizedEmail && (parsed.type === 'customer' || parsed.type === 'driver')) {
+          return {
+            ...parsed,
+            email: normalizedEmail,
+          } as User | Driver;
+        }
+      }
+    } catch (error) {
+      console.log('[Auth] buildLegacyLocalUser auth_user error:', error);
+    }
+
+    try {
+      const rawCredentials = await AsyncStorage.getItem('auth_credentials');
+      if (!rawCredentials) {
+        return null;
+      }
+
+      const credentials = JSON.parse(rawCredentials) as LocalAuthLegacyCredentials;
+      if (normalizeAuthEmail(credentials.email ?? '') !== normalizedEmail) {
+        return null;
+      }
+
+      if (credentials.type === 'driver') {
+        const driver: Driver = {
+          id: `d_local_${fallbackId}`,
+          name: credentials.name ?? 'Şoför',
+          phone: credentials.phone ?? '',
+          email: normalizedEmail,
+          type: 'driver',
+          driverCategory: credentials.driverCategory ?? 'driver',
+          vehiclePlate: credentials.vehiclePlate ?? '',
+          vehicleModel: credentials.vehicleModel ?? 'Araç',
+          vehicleColor: credentials.vehicleColor ?? 'Belirtilmedi',
+          rating: 5,
+          totalRides: 0,
+          isOnline: false,
+          isApproved: true,
+          approvedAt: new Date().toISOString(),
+          licenseIssueDate: credentials.licenseIssueDate,
+          partnerDriverName: credentials.partnerDriverName,
+          dailyEarnings: 0,
+          weeklyEarnings: 0,
+          monthlyEarnings: 0,
+          city: credentials.city,
+          district: credentials.district,
+        };
+        return driver;
+      }
+
+      const customer: User = {
+        id: `c_local_${fallbackId}`,
+        name: credentials.name ?? 'Müşteri',
+        phone: credentials.phone ?? '',
+        email: normalizedEmail,
+        type: 'customer',
+        gender: credentials.gender,
+        city: credentials.city,
+        district: credentials.district,
+        vehiclePlate: credentials.vehiclePlate,
+      };
+      return customer;
+    } catch (error) {
+      console.log('[Auth] buildLegacyLocalUser auth_credentials error:', error);
+      return null;
+    }
+  }, []);
+
+  const persistLocalAuthBackup = useCallback(async (account: User | Driver, password: string): Promise<void> => {
+    const normalizedEmail = normalizeAuthEmail(account.email);
+    if (!normalizedEmail || !password) {
+      return;
+    }
+
+    const passwordHash = await hashLocalPassword(password);
+    const backup: LocalAuthBackup = {
+      email: normalizedEmail,
+      type: account.type,
+      passwordHash,
+      user: {
+        ...account,
+        email: normalizedEmail,
+      },
+      updatedAt: new Date().toISOString(),
+    };
+
+    await SecureStore.setItemAsync(buildLocalAuthKey(normalizedEmail), JSON.stringify(backup));
+    console.log('[Auth] Local auth backup saved for:', normalizedEmail, 'type:', account.type);
+  }, []);
+
+  const hasLocalRecoveryAccount = useCallback(async (email: string): Promise<boolean> => {
+    const backup = await getLocalAuthBackup(email);
+    if (backup) {
+      return true;
+    }
+
+    const legacyUser = await buildLegacyLocalUser(email);
+    return !!legacyUser;
+  }, [buildLegacyLocalUser, getLocalAuthBackup]);
+
+  const recoverLocalPassword = useCallback(async (email: string, newPassword: string): Promise<boolean> => {
+    const normalizedEmail = normalizeAuthEmail(email);
+    const backup = await getLocalAuthBackup(normalizedEmail);
+    const localUser = backup?.user ?? await buildLegacyLocalUser(normalizedEmail);
+
+    if (!localUser) {
+      console.log('[Auth] recoverLocalPassword failed - no local user for:', normalizedEmail);
+      return false;
+    }
+
+    await persistLocalAuthBackup({
+      ...localUser,
+      email: normalizedEmail,
+    } as User | Driver, newPassword);
+    console.log('[Auth] Local password recovery completed for:', normalizedEmail);
+    return true;
+  }, [buildLegacyLocalUser, getLocalAuthBackup, persistLocalAuthBackup]);
+
+  const shouldTryLocalAuthFallback = useCallback((message: string): boolean => {
+    const lowerMessage = (message || '').toLowerCase();
+    return lowerMessage.includes('kullanıcı bulunamadı') ||
+      lowerMessage.includes('şifremi unuttum') ||
+      lowerMessage.includes('kayıtlı hesap bulunamadı') ||
+      lowerMessage.includes('sunucuya bağlanılamadı') ||
+      isNetworkError(lowerMessage);
+  }, []);
+
+  const tryLocalLogin = useCallback(async (
+    email: string,
+    password: string,
+    requestedType: Exclude<UserType, null>
+  ): Promise<UserType> => {
+    const normalizedEmail = normalizeAuthEmail(email);
+    const backup = await getLocalAuthBackup(normalizedEmail);
+
+    if (!backup) {
+      console.log('[Auth] tryLocalLogin - no backup for:', normalizedEmail);
+      throw new Error('Bu cihazda kayıtlı bir hesap yedeği bulunamadı. Lütfen şifrenizi yeniden oluşturun.');
+    }
+
+    const passwordHash = await hashLocalPassword(password);
+    if (backup.passwordHash !== passwordHash) {
+      console.log('[Auth] tryLocalLogin - password mismatch for:', normalizedEmail);
+      throw new Error('Şifre hatalı');
+    }
+
+    if (requestedType === 'driver' && backup.type !== 'driver') {
+      throw new Error('Bu e-posta ile kayıtlı şoför hesabı bulunamadı');
+    }
+
+    return setAuthenticatedLocalUser({
+      ...backup.user,
+      email: normalizedEmail,
+    } as User | Driver, 'secure-backup');
+  }, [getLocalAuthBackup, setAuthenticatedLocalUser]);
+
   const handleSessionInvalid = useCallback(async () => {
     console.log('[Auth] Session invalid, logging out...');
     await setSessionToken(null);
@@ -378,10 +642,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       return await handleLoginSuccess(result, email, 'REST');
     } catch (err: any) {
       console.log('[Auth] loginAsCustomer error:', err?.message);
+      const errorMessage = err instanceof Error ? err.message : '';
+      if (shouldTryLocalAuthFallback(errorMessage)) {
+        return tryLocalLogin(email, password, 'customer');
+      }
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
-  }, [directFetch, handleLoginSuccess]);
+  }, [directFetch, handleLoginSuccess, shouldTryLocalAuthFallback, tryLocalLogin]);
 
   const loginAsDriver = useCallback(async (email?: string, password?: string) => {
     if (!email || !password) {
@@ -397,10 +665,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       return await handleLoginSuccess(result, email, 'REST');
     } catch (err: any) {
       console.log('[Auth] loginAsDriver error:', err?.message);
+      const errorMessage = err instanceof Error ? err.message : '';
+      if (shouldTryLocalAuthFallback(errorMessage)) {
+        return tryLocalLogin(email, password, 'driver');
+      }
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
-  }, [directFetch, handleLoginSuccess]);
+  }, [directFetch, handleLoginSuccess, shouldTryLocalAuthFallback, tryLocalLogin]);
 
   const registerCustomer = useCallback(async (name: string, phone: string, email: string, password: string, gender: 'male' | 'female', city: string, district: string, vehiclePlate?: string, referralCode?: string) => {
     const payload = { name, phone, email, password, gender, city, district, referralCode: referralCode || undefined };
@@ -431,6 +703,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         await AsyncStorage.setItem('auth_credentials', JSON.stringify({
           type: 'customer', name, phone, email, gender, city, district, vehiclePlate,
         }));
+        await persistLocalAuthBackup(customer, password);
         console.log('[Auth] Registered customer:', customer.id);
         return;
       }
@@ -451,7 +724,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen tekrar deneyin.');
     }
-  }, [directFetch]);
+  }, [directFetch, persistLocalAuthBackup]);
 
   const registerDriver = useCallback(async (
     name: string,
@@ -520,6 +793,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           vehiclePlate, vehicleModel, vehicleColor,
           partnerDriverName: partnerName, licenseIssueDate, driverCategory, city, district,
         }));
+        await persistLocalAuthBackup(driver, password);
         console.log('[Auth] Registered driver:', driver.id);
         return;
       }
@@ -539,7 +813,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen tekrar deneyin.');
     }
-  }, [directFetch]);
+  }, [directFetch, persistLocalAuthBackup]);
 
   const applyPromoCode = useCallback(async (code: string): Promise<boolean> => {
     if (code.toUpperCase() === PRICING.promoCode && !promoApplied) {
@@ -810,6 +1084,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     customVehicleImage,
     updateCustomVehicleImage,
     driverApproved,
+    hasLocalRecoveryAccount,
+    recoverLocalPassword,
     logout,
   }), [
     user,
@@ -842,6 +1118,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     customVehicleImage,
     updateCustomVehicleImage,
     driverApproved,
+    hasLocalRecoveryAccount,
+    recoverLocalPassword,
     logout,
   ]);
 

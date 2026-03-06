@@ -9,6 +9,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Mail, Lock, CheckCircle, KeyRound } from 'lucide-react-native';
 import { getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl } from '@/lib/trpc';
+import { useAuth } from '@/contexts/AuthContext';
 
 function getDbHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -69,6 +70,7 @@ type Step = 'email' | 'code' | 'newPassword' | 'success';
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
+  const { hasLocalRecoveryAccount, recoverLocalPassword } = useAuth();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const isSmall = width < 360;
@@ -81,6 +83,7 @@ export default function ForgotPasswordScreen() {
   const [confirmPassword, setConfirmPassword] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [emailSentInfo, setEmailSentInfo] = useState<boolean>(true);
+  const [localRecoveryMode, setLocalRecoveryMode] = useState<boolean>(false);
 
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
@@ -99,12 +102,30 @@ export default function ForgotPasswordScreen() {
     });
   };
 
+  const tryLocalRecoveryFallback = async (reason: string): Promise<boolean> => {
+    const trimmedEmail = email.trim();
+    const hasLocalAccount = await hasLocalRecoveryAccount(trimmedEmail);
+
+    console.log('[ForgotPassword] Local recovery fallback check:', trimmedEmail, 'reason:', reason, 'hasLocalAccount:', hasLocalAccount);
+
+    if (!hasLocalAccount) {
+      return false;
+    }
+
+    setLocalRecoveryMode(true);
+    setEmailSentInfo(false);
+    animateTransition(() => setStep('newPassword'));
+    Alert.alert('Yerel Kurtarma', 'Sunucuda hesap bulunamadı ancak bu cihazda kayıtlı bilgiler bulundu. Bu cihaz için yeni bir şifre oluşturabilirsiniz.');
+    return true;
+  };
+
   const handleSendCode = async () => {
     if (!email.trim()) {
       Alert.alert('Uyarı', 'Lütfen e-posta adresinizi girin');
       return;
     }
 
+    setLocalRecoveryMode(false);
     setLoading(true);
     try {
       const result = await restCall<{ success: boolean; error?: string | null; emailSent?: boolean }>(
@@ -127,14 +148,23 @@ export default function ForgotPasswordScreen() {
         animateTransition(() => setStep('code'));
         console.log('[ForgotPassword] Code sent, emailSent:', result.emailSent);
       } else {
-        Alert.alert('Hata', result.error ?? 'Bir hata oluştu');
+        const resultError = result.error ?? 'Bir hata oluştu';
+        const handledLocally = resultError.toLowerCase().includes('kayıtlı hesap bulunamadı')
+          ? await tryLocalRecoveryFallback(resultError)
+          : false;
+        if (!handledLocally) {
+          Alert.alert('Hata', resultError);
+        }
       }
     } catch (e) {
       console.log('[ForgotPassword] Send code error:', e);
       const sendErr = (e instanceof Error && (e.message === 'Failed to fetch' || e.message === 'Network request failed'))
         ? 'Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edin.'
         : (e instanceof Error ? e.message : 'Bir hata oluştu. Lütfen tekrar deneyin.');
-      Alert.alert('Hata', sendErr);
+      const handledLocally = await tryLocalRecoveryFallback(sendErr);
+      if (!handledLocally) {
+        Alert.alert('Hata', sendErr);
+      }
     } finally {
       setLoading(false);
     }
@@ -197,6 +227,16 @@ export default function ForgotPasswordScreen() {
 
     setLoading(true);
     try {
+      if (localRecoveryMode) {
+        const recovered = await recoverLocalPassword(email.trim(), newPassword);
+        if (recovered) {
+          animateTransition(() => setStep('success'));
+        } else {
+          Alert.alert('Hata', 'Bu cihazda bu e-posta ile eşleşen kayıt bulunamadı.');
+        }
+        return;
+      }
+
       const result = await restCall<{ success: boolean; error?: string | null }>(
         '/api/auth/reset-password',
         { email: email.trim(), code: code.trim(), newPassword: newPassword }
