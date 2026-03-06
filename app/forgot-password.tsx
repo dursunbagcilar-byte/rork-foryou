@@ -1,13 +1,13 @@
-import React, { useState, useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   KeyboardAvoidingView, Platform, ScrollView, Animated, Alert,
   Image, StatusBar, useWindowDimensions, ActivityIndicator, Keyboard,
-  TouchableWithoutFeedback,
+  TouchableWithoutFeedback, Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Mail, Lock, CheckCircle, KeyRound } from 'lucide-react-native';
+import { ArrowLeft, Mail, Lock, CheckCircle, KeyRound, MessageSquare } from 'lucide-react-native';
 import { getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -66,7 +66,11 @@ async function restCall<T>(path: string, input: Record<string, unknown>): Promis
   }
 }
 
+const SUPPORT_WHATSAPP_NUMBER = '905516300624';
+const SUPPORT_WHATSAPP_DISPLAY = '0551 630 06 24';
+
 type Step = 'email' | 'code' | 'newPassword' | 'success';
+type ResetCodeResponse = { success: boolean; error?: string | null; emailSent?: boolean };
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
@@ -84,6 +88,7 @@ export default function ForgotPasswordScreen() {
   const [loading, setLoading] = useState<boolean>(false);
   const [emailSentInfo, setEmailSentInfo] = useState<boolean>(true);
   const [localRecoveryMode, setLocalRecoveryMode] = useState<boolean>(false);
+  const [deliveryIssue, setDeliveryIssue] = useState<string | null>(null);
 
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
@@ -114,10 +119,50 @@ export default function ForgotPasswordScreen() {
 
     setLocalRecoveryMode(true);
     setEmailSentInfo(false);
+    setDeliveryIssue(reason);
     animateTransition(() => setStep('newPassword'));
     Alert.alert('Yerel Kurtarma', 'Sunucuda hesap bulunamadı ancak bu cihazda kayıtlı bilgiler bulundu. Bu cihaz için yeni bir şifre oluşturabilirsiniz.');
     return true;
   };
+
+  const buildWhatsAppSupportUrl = useCallback((reason: string): string => {
+    const contactEmail = email.trim() || 'belirtilmedi';
+    const message = [
+      'Merhaba 2GO destek,',
+      'şifre sıfırlama kodunu alamıyorum.',
+      `E-posta: ${contactEmail}`,
+      `Sorun: ${reason}`,
+      'Yardımcı olur musunuz?',
+    ].join('\n');
+
+    return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+  }, [email]);
+
+  const openWhatsAppSupport = useCallback(async (reason: string) => {
+    const url = buildWhatsAppSupportUrl(reason);
+    console.log('[ForgotPassword] Opening WhatsApp support:', url);
+
+    try {
+      await Linking.openURL(url);
+    } catch (openErr) {
+      console.log('[ForgotPassword] WhatsApp open error:', openErr);
+      Alert.alert('Hata', 'WhatsApp açılamadı. Lütfen WhatsApp yüklü olduğundan emin olun.');
+    }
+  }, [buildWhatsAppSupportUrl]);
+
+  const promptWhatsAppSupport = useCallback((reason: string) => {
+    const finalReason = reason.trim() || 'Doğrulama kodu teslim edilemedi';
+    setEmailSentInfo(false);
+    setDeliveryIssue(finalReason);
+    Alert.alert(
+      'WhatsApp Destek',
+      'Kod şu anda otomatik gönderilemiyor. İsterseniz WhatsApp destek hattından manuel yardım isteyebilirsiniz.',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        { text: 'WhatsApp Aç', onPress: () => { void openWhatsAppSupport(finalReason); } },
+      ]
+    );
+  }, [openWhatsAppSupport]);
 
   const handleSendCode = async () => {
     if (!email.trim()) {
@@ -126,25 +171,17 @@ export default function ForgotPasswordScreen() {
     }
 
     setLocalRecoveryMode(false);
+    setDeliveryIssue(null);
     setLoading(true);
     try {
-      const result = await restCall<{ success: boolean; error?: string | null; emailSent?: boolean }>(
+      const result = await restCall<ResetCodeResponse>(
         '/api/auth/send-reset-code',
         { email: email.trim() }
       );
 
       if (result.success) {
-        if (result.emailSent === false) {
-          setEmailSentInfo(false);
-          console.log('[ForgotPassword] Code created but email failed, still proceeding');
-          Alert.alert(
-            'Bilgi',
-            'Doğrulama kodu oluşturuldu ancak e-posta gönderilemedi. E-posta servisinde geçici bir sorun olabilir. Yine de kod ekranına yönlendirileceksiniz.',
-            [{ text: 'Tamam', onPress: () => animateTransition(() => setStep('code')) }]
-          );
-          return;
-        }
         setEmailSentInfo(true);
+        setDeliveryIssue(null);
         animateTransition(() => setStep('code'));
         console.log('[ForgotPassword] Code sent, emailSent:', result.emailSent);
       } else {
@@ -152,9 +189,14 @@ export default function ForgotPasswordScreen() {
         const handledLocally = resultError.toLowerCase().includes('kayıtlı hesap bulunamadı')
           ? await tryLocalRecoveryFallback(resultError)
           : false;
-        if (!handledLocally) {
-          Alert.alert('Hata', resultError);
+        if (handledLocally) {
+          return;
         }
+        if (result.emailSent === false) {
+          promptWhatsAppSupport(resultError);
+          return;
+        }
+        Alert.alert('Hata', resultError);
       }
     } catch (e) {
       console.log('[ForgotPassword] Send code error:', e);
@@ -162,9 +204,15 @@ export default function ForgotPasswordScreen() {
         ? 'Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edin.'
         : (e instanceof Error ? e.message : 'Bir hata oluştu. Lütfen tekrar deneyin.');
       const handledLocally = await tryLocalRecoveryFallback(sendErr);
-      if (!handledLocally) {
-        Alert.alert('Hata', sendErr);
+      if (handledLocally) {
+        return;
       }
+      const lowerSendErr = sendErr.toLowerCase();
+      if (lowerSendErr.includes('e-posta servisi') || lowerSendErr.includes('e-posta gönderilemedi')) {
+        promptWhatsAppSupport(sendErr);
+        return;
+      }
+      Alert.alert('Hata', sendErr);
     } finally {
       setLoading(false);
     }
@@ -261,16 +309,16 @@ export default function ForgotPasswordScreen() {
   const handleResendCode = async () => {
     setLoading(true);
     try {
-      const result = await restCall<{ success: boolean; error?: string | null; emailSent?: boolean }>(
+      const result = await restCall<ResetCodeResponse>(
         '/api/auth/send-reset-code',
         { email: email.trim() }
       );
       if (result.success) {
-        if (result.emailSent === false) {
-          Alert.alert('Bilgi', 'Yeni kod oluşturuldu ancak e-posta gönderilemedi. Lütfen daha sonra tekrar deneyin.');
-        } else {
-          Alert.alert('Başarılı', 'Yeni doğrulama kodu gönderildi');
-        }
+        setEmailSentInfo(true);
+        setDeliveryIssue(null);
+        Alert.alert('Başarılı', 'Yeni doğrulama kodu gönderildi');
+      } else if (result.emailSent === false) {
+        promptWhatsAppSupport(result.error ?? 'Yeni kod şu anda teslim edilemiyor.');
       } else {
         Alert.alert('Hata', result.error ?? 'Kod gönderilemedi');
       }
@@ -279,6 +327,11 @@ export default function ForgotPasswordScreen() {
       const errorMsg = (e instanceof Error && (e.message === 'Failed to fetch' || e.message === 'Network request failed'))
         ? 'Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edin.'
         : (e instanceof Error ? e.message : 'Bir hata oluştu. Lütfen tekrar deneyin.');
+      const lowerErrorMsg = errorMsg.toLowerCase();
+      if (lowerErrorMsg.includes('e-posta servisi') || lowerErrorMsg.includes('e-posta gönderilemedi')) {
+        promptWhatsAppSupport(errorMsg);
+        return;
+      }
       Alert.alert('Hata', errorMsg);
     } finally {
       setLoading(false);
@@ -318,6 +371,26 @@ export default function ForgotPasswordScreen() {
           />
         </View>
       </View>
+      {deliveryIssue ? (
+        <View style={styles.supportCard}>
+          <View style={styles.supportCardHeader}>
+            <View style={styles.supportIconWrap}>
+              <MessageSquare size={18} color="#25D366" />
+            </View>
+            <Text style={styles.supportTitle}>WhatsApp ile destek al</Text>
+          </View>
+          <Text style={styles.supportDescription}>{deliveryIssue}</Text>
+          <TouchableOpacity
+            style={styles.supportButton}
+            onPress={() => { void openWhatsAppSupport(deliveryIssue); }}
+            activeOpacity={0.85}
+            testID="forgot-open-whatsapp-support-btn"
+          >
+            <Text style={styles.supportButtonText}>WhatsApp Desteğini Aç</Text>
+          </TouchableOpacity>
+          <Text style={styles.supportMeta}>{SUPPORT_WHATSAPP_DISPLAY}</Text>
+        </View>
+      ) : null}
       <TouchableOpacity
         style={[styles.actionButton, loading && styles.actionButtonDisabled, { paddingVertical: isSmall ? 15 : 18, borderRadius: isSmall ? 12 : 16 }]}
         onPress={handleSendCode}
@@ -382,6 +455,15 @@ export default function ForgotPasswordScreen() {
           <Text style={styles.resendLink}>Tekrar Gönder</Text>
         </TouchableOpacity>
       </View>
+      <TouchableOpacity
+        style={styles.inlineWhatsAppButton}
+        onPress={() => { void openWhatsAppSupport(emailSentInfo ? 'Doğrulama kodu kullanıcıya ulaşmadı.' : (deliveryIssue ?? 'Doğrulama kodu teslim edilemedi.')); }}
+        activeOpacity={0.85}
+        testID="forgot-inline-whatsapp-support-btn"
+      >
+        <MessageSquare size={16} color="#25D366" />
+        <Text style={styles.inlineWhatsAppText}>Kod gelmediyse WhatsApp destek</Text>
+      </TouchableOpacity>
       <TouchableOpacity style={styles.backStepButton} onPress={() => animateTransition(() => setStep('email'))}>
         <Text style={styles.backStepText}>Geri Dön</Text>
       </TouchableOpacity>
@@ -707,6 +789,76 @@ const styles = StyleSheet.create({
   },
   resendLink: {
     color: '#F5A623',
+    fontSize: 13,
+    fontWeight: '700' as const,
+  },
+  supportCard: {
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: 'rgba(37,211,102,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(37,211,102,0.16)',
+  },
+  supportCardHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 10,
+    marginBottom: 10,
+  },
+  supportIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(37,211,102,0.14)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  supportTitle: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700' as const,
+  },
+  supportDescription: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 12,
+  },
+  supportButton: {
+    minHeight: 44,
+    borderRadius: 14,
+    backgroundColor: '#25D366',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  supportButtonText: {
+    color: '#07120B',
+    fontSize: 14,
+    fontWeight: '800' as const,
+  },
+  supportMeta: {
+    marginTop: 10,
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 12,
+    textAlign: 'center' as const,
+  },
+  inlineWhatsAppButton: {
+    marginTop: 14,
+    alignSelf: 'center' as const,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: 'rgba(37,211,102,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(37,211,102,0.16)',
+  },
+  inlineWhatsAppText: {
+    color: '#25D366',
     fontSize: 13,
     fontWeight: '700' as const,
   },
