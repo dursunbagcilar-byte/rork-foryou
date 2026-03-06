@@ -1,5 +1,5 @@
 import { trpcServer } from "@hono/trpc-server";
-import { Hono } from "hono";
+import { Hono, type Context, type Next } from "hono";
 import { cors } from "hono/cors";
 
 import { appRouter } from "./trpc/app-router";
@@ -383,14 +383,18 @@ app.post("/auth/logout", async (c) => {
   }
 });
 
-app.use("/trpc/*", async (c, next) => {
+const ensureTrpcRequestReady = async (c: Context, next: Next) => {
   const dbEp = c.req.header('x-db-endpoint');
   const dbNs = c.req.header('x-db-namespace');
   const dbTk = c.req.header('x-db-token');
   await ensureDbReady(dbEp, dbNs, dbTk);
   await next();
-});
+};
+
+app.use("/trpc/*", ensureTrpcRequestReady);
+app.use("/api/trpc/*", ensureTrpcRequestReady);
 app.use("/trpc/*", trpcServer({ endpoint: "/trpc", router: appRouter, createContext }));
+app.use("/api/trpc/*", trpcServer({ endpoint: "/api/trpc", router: appRouter, createContext }));
 
 app.post("/iyzico/callback", async (c) => {
   try {

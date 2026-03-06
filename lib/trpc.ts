@@ -176,12 +176,25 @@ export const waitForBaseUrl = async (maxWaitMs = 10000): Promise<string> => {
   return resolveBaseUrl();
 };
 
+function requestInfoToUrlString(input: RequestInfo | URL): string {
+  if (typeof input === 'string') {
+    return input;
+  }
+  if (input instanceof URL) {
+    return input.toString();
+  }
+  if (typeof Request !== 'undefined' && input instanceof Request) {
+    return input.url;
+  }
+  return '';
+}
+
 async function fetchWithTimeout(url: RequestInfo | URL, options?: RequestInit): Promise<Response> {
   if (isCircuitOpen()) {
     console.log('[TRPC] Circuit open, but allowing auth requests through');
   }
 
-  const urlStr = typeof url === 'string' ? url : String(url);
+  const urlStr = requestInfoToUrlString(url);
   const isAuthRequest = urlStr.includes('register') || urlStr.includes('login') || urlStr.includes('auth');
   const isBootstrap = urlStr.includes('bootstrap');
   const TIMEOUT_MS = isAuthRequest ? 30000 : isBootstrap ? 15000 : 15000;
@@ -226,32 +239,34 @@ async function fetchWithTimeout(url: RequestInfo | URL, options?: RequestInit): 
 
 function buildFullUrl(inputUrl: RequestInfo | URL): string {
   const base = resolveBaseUrl();
-  if (typeof inputUrl === 'string') {
-    if (inputUrl.startsWith('http://') || inputUrl.startsWith('https://')) {
-      if (!base) return inputUrl;
-      try {
-        const urlObj = new URL(inputUrl);
-        const pathname = urlObj.pathname + urlObj.search;
-        if (pathname.startsWith('/api/')) {
-          return `${base}${pathname}`;
-        }
-      } catch {}
-      return inputUrl;
-    }
-    if (base) {
-      const path = inputUrl.startsWith('/') ? inputUrl : `/${inputUrl}`;
-      return `${base}${path}`;
-    }
-    return inputUrl;
+  const resolvedInput = requestInfoToUrlString(inputUrl);
+
+  if (!resolvedInput) {
+    return base ? `${base}/api/trpc` : '/api/trpc';
   }
-  if (inputUrl instanceof URL) {
-    const pathname = inputUrl.pathname + inputUrl.search;
-    if (base && pathname.startsWith('/api/')) {
-      return `${base}${pathname}`;
+
+  if (resolvedInput.startsWith('http://') || resolvedInput.startsWith('https://')) {
+    if (!base) {
+      return resolvedInput;
     }
-    return inputUrl.toString();
+    try {
+      const urlObj = new URL(resolvedInput);
+      const pathname = urlObj.pathname + urlObj.search;
+      if (pathname.startsWith('/api/')) {
+        return `${base}${pathname}`;
+      }
+    } catch (e) {
+      console.log('[TRPC] buildFullUrl parse error:', e);
+    }
+    return resolvedInput;
   }
-  return String(inputUrl);
+
+  if (base) {
+    const path = resolvedInput.startsWith('/') ? resolvedInput : `/${resolvedInput}`;
+    return `${base}${path}`;
+  }
+
+  return resolvedInput;
 }
 
 export function getTrpcUrl(): string {

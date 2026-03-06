@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import createContextHook from '@nkzw/create-context-hook';
 import type { User, Driver, Ride, DriverDocuments } from '@/constants/mockData';
@@ -260,7 +260,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         setIsLoading(false);
       }
     };
-    loadAuth();
+    void loadAuth();
   }, [handleSessionInvalid]);
 
   useEffect(() => {
@@ -794,7 +794,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     console.log('[Auth] Logged out, all state and session cleared');
   }, [directFetch]);
 
-  return {
+  const value = useMemo(() => ({
     user,
     userType,
     isLoading,
@@ -826,5 +826,39 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     updateCustomVehicleImage,
     driverApproved,
     logout,
-  };
+  }), [
+    user,
+    userType,
+    isLoading,
+    isAuthenticated,
+    promoApplied,
+    completedRides,
+    rideHistory,
+    loginAsCustomer,
+    loginAsDriver,
+    registerCustomer,
+    registerDriver,
+    applyPromoCode,
+    incrementCompletedRides,
+    isFreeRide,
+    remainingFreeRides,
+    addRideToHistory,
+    teamMembers,
+    registerTeamMember,
+    driverDocuments,
+    saveDriverDocuments,
+    updateDriverDocument,
+    profilePhoto,
+    updateProfilePhoto,
+    teamMemberPhotos,
+    updateTeamMemberPhoto,
+    teamMemberDocuments,
+    updateTeamMemberDocument,
+    customVehicleImage,
+    updateCustomVehicleImage,
+    driverApproved,
+    logout,
+  ]);
+
+  return value;
 });
