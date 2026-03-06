@@ -1,4 +1,4 @@
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useRef, useState } from "react";
@@ -16,7 +16,7 @@ import { Colors } from "@/constants/colors";
 import { trpc, trpcClient, resetCircuitBreaker } from "@/lib/trpc";
 
 try {
-  SplashScreen.preventAutoHideAsync();
+  void SplashScreen.preventAutoHideAsync();
 } catch (e) {
   console.log('[Layout] SplashScreen.preventAutoHideAsync error:', e);
 }
@@ -122,10 +122,46 @@ const crashStyles = StyleSheet.create({
   buttonText: { fontSize: 16, fontWeight: '700' as const, color: Colors.dark.background },
 });
 
+const bootStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: Colors.dark.background,
+  },
+});
+
+function AppProviders({ queryClient }: { queryClient: QueryClient }) {
+  return (
+    <trpc.Provider client={trpcClient} queryClient={queryClient}>
+      <QueryClientProvider client={queryClient}>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <ErrorBoundary>
+            <ThemeProvider>
+              <PrivacyProvider>
+                <SecurityProvider>
+                  <AuthProvider>
+                    <LanguageProvider>
+                      <NotificationProvider>
+                        <NotificationOverlay />
+                        <RootLayoutNav />
+                      </NotificationProvider>
+                    </LanguageProvider>
+                  </AuthProvider>
+                </SecurityProvider>
+              </PrivacyProvider>
+            </ThemeProvider>
+          </ErrorBoundary>
+        </GestureHandlerRootView>
+      </QueryClientProvider>
+    </trpc.Provider>
+  );
+}
+
 export default function RootLayout() {
   const [initError, setInitError] = useState<string | null>(null);
+  const [clientProvidersReady, setClientProvidersReady] = useState<boolean>(Platform.OS !== 'web');
 
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clientProvidersTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -133,6 +169,18 @@ export default function RootLayout() {
     mountedRef.current = true;
     resetCircuitBreaker();
     SplashScreen.hideAsync().catch((e) => console.log('[Layout] SplashScreen.hideAsync error:', e));
+
+    if (Platform.OS === 'web') {
+      console.log('[Layout] Delaying provider mount on web to avoid concurrent renderer context conflicts');
+      clientProvidersTimerRef.current = setTimeout(() => {
+        if (mountedRef.current) {
+          console.log('[Layout] Web providers ready');
+          setClientProvidersReady(true);
+        }
+      }, 0);
+    } else {
+      setClientProvidersReady(true);
+    }
 
     const bootstrapDb = async () => {
       if (!mountedRef.current) return;
@@ -182,13 +230,17 @@ export default function RootLayout() {
         console.log('[Layout] DB bootstrap error (non-critical):', e);
       }
     };
-    bootstrapDb();
+    void bootstrapDb();
 
     return () => {
       mountedRef.current = false;
       if (retryTimerRef.current) {
         clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;
+      }
+      if (clientProvidersTimerRef.current) {
+        clearTimeout(clientProvidersTimerRef.current);
+        clientProvidersTimerRef.current = null;
       }
     };
   }, []);
@@ -197,28 +249,11 @@ export default function RootLayout() {
     return <CrashFallback error={initError} onRetry={() => setInitError(null)} />;
   }
 
+  if (!clientProvidersReady) {
+    return <View style={bootStyles.container} />;
+  }
+
   const queryClient = getQueryClient();
 
-  return (
-    <trpc.Provider client={trpcClient} queryClient={queryClient}>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <ErrorBoundary>
-          <ThemeProvider>
-            <PrivacyProvider>
-              <SecurityProvider>
-                <AuthProvider>
-                  <LanguageProvider>
-                    <NotificationProvider>
-                      <NotificationOverlay />
-                      <RootLayoutNav />
-                    </NotificationProvider>
-                  </LanguageProvider>
-                </AuthProvider>
-              </SecurityProvider>
-            </PrivacyProvider>
-          </ThemeProvider>
-        </ErrorBoundary>
-      </GestureHandlerRootView>
-    </trpc.Provider>
-  );
+  return <AppProviders queryClient={queryClient} />;
 }
