@@ -12,7 +12,7 @@ import {
   validateEmail,
   validatePassword,
 } from "../../utils/security";
-import { sendEmail, generateResetCode, buildResetCodeEmail, buildVerificationCodeEmail } from "../../utils/email";
+import { sendEmail, generateResetCode, buildResetCodeEmail, buildVerificationCodeEmail, type SendEmailErrorCode } from "../../utils/email";
 
 async function createSession(userId: string, userType: "customer" | "driver"): Promise<string> {
   const token = generateSecureToken(64);
@@ -49,6 +49,18 @@ function getUniqueReferralCode(): string {
   return 'FY' + Date.now().toString(36).toUpperCase().slice(-5);
 }
 
+function getEmailSendErrorMessage(errorCode: SendEmailErrorCode | null): string {
+  if (errorCode === 'missing_from_email' || errorCode === 'invalid_from_email') {
+    return 'E-posta servisi henüz tamamlanmadı. Lütfen daha sonra tekrar deneyin.';
+  }
+
+  if (errorCode === 'missing_api_key') {
+    return 'E-posta servisi geçici olarak kullanılamıyor. Lütfen daha sonra tekrar deneyin.';
+  }
+
+  return 'E-posta gönderilemedi. Lütfen e-posta adresinizi kontrol edin veya daha sonra tekrar deneyin.';
+}
+
 export const authRouter = createTRPCRouter({
   sendVerificationCode: publicProcedure
     .input(z.object({
@@ -74,15 +86,28 @@ export const authRouter = createTRPCRouter({
       db.resetCodes.set(codeKey, code);
       console.log('[AUTH] sendVerificationCode - stored code:', code, 'for key:', codeKey);
 
-      const emailSent = await sendEmail({
+      const emailResult = await sendEmail({
         to: cleanEmail,
         subject: '2GO - E-posta Doğrulama Kodu',
         html: buildVerificationCodeEmail(code, sanitizeInput(input.name)),
       });
 
-      if (!emailSent) {
-        console.log("[AUTH] Verification email send failed for:", cleanEmail, "code:", code);
-        return { success: false, error: "E-posta gönderilemedi. Lütfen e-posta adresinizi kontrol edin veya daha sonra tekrar deneyin.", emailSent: false };
+      if (!emailResult.success) {
+        console.log(
+          "[AUTH] Verification email send failed for:",
+          cleanEmail,
+          "code:",
+          code,
+          "errorCode:",
+          emailResult.errorCode,
+          "providerMessage:",
+          emailResult.providerMessage,
+        );
+        return {
+          success: false,
+          error: getEmailSendErrorMessage(emailResult.errorCode),
+          emailSent: false,
+        };
       }
 
       recordLoginSuccess(`verify_${cleanEmail}`);
@@ -599,25 +624,31 @@ export const authRouter = createTRPCRouter({
       const storedCheck = db.resetCodes.get(cleanEmail);
       console.log('[AUTH] sendResetCode - verify stored code:', storedCheck?.code, 'matches:', storedCheck?.code === code);
 
-      let emailSent = false;
-      try {
-        emailSent = await sendEmail({
-          to: cleanEmail,
-          subject: '2GO - Şifre Sıfırlama Kodu',
-          html: buildResetCodeEmail(code, accountName),
-        });
-      } catch (emailErr) {
-        console.log('[AUTH] Email send threw error:', emailErr);
-        emailSent = false;
+      const emailResult = await sendEmail({
+        to: cleanEmail,
+        subject: '2GO - Şifre Sıfırlama Kodu',
+        html: buildResetCodeEmail(code, accountName),
+      });
+
+      if (!emailResult.success) {
+        console.log(
+          "[AUTH] Reset email send failed for:",
+          cleanEmail,
+          "code:",
+          code,
+          "errorCode:",
+          emailResult.errorCode,
+          "providerMessage:",
+          emailResult.providerMessage,
+        );
+        return {
+          success: false,
+          error: getEmailSendErrorMessage(emailResult.errorCode),
+          emailSent: false,
+        };
       }
 
       recordLoginSuccess(`resetcode_${cleanEmail}`);
-
-      if (!emailSent) {
-        console.log("[AUTH] Email send failed for:", cleanEmail, "code:", code, "- returning success with emailSent=false");
-        return { success: true, error: null, emailSent: false };
-      }
-
       console.log("[AUTH] Reset code sent to:", cleanEmail, 'code:', code);
       return { success: true, error: null, emailSent: true };
     }),
