@@ -108,7 +108,7 @@ export default function ForgotPasswordScreen() {
     setLoading(true);
     try {
       const result = await restCall<{ success: boolean; error?: string | null; emailSent?: boolean }>(
-        '/auth/send-reset-code',
+        '/api/auth/send-reset-code',
         { email: email.trim() }
       );
 
@@ -149,7 +149,7 @@ export default function ForgotPasswordScreen() {
     setLoading(true);
     try {
       const result = await restCall<{ success: boolean; error?: string | null }>(
-        '/auth/verify-reset-code',
+        '/api/auth/verify-reset-code',
         { email: email.trim(), code: code.trim() }
       );
 
@@ -198,7 +198,7 @@ export default function ForgotPasswordScreen() {
     setLoading(true);
     try {
       const result = await restCall<{ success: boolean; error?: string | null }>(
-        '/auth/reset-password',
+        '/api/auth/reset-password',
         { email: email.trim(), code: code.trim(), newPassword: newPassword }
       );
 
@@ -222,7 +222,7 @@ export default function ForgotPasswordScreen() {
     setLoading(true);
     try {
       const result = await restCall<{ success: boolean; error?: string | null; emailSent?: boolean }>(
-        '/auth/send-reset-code',
+        '/api/auth/send-reset-code',
         { email: email.trim() }
       );
       if (result.success) {
