@@ -39,7 +39,7 @@ interface ChatBubbleProps {
   isLast: boolean;
 }
 
-const ChatBubble = React.memo(({ role, text, isLast }: ChatBubbleProps) => {
+const ChatBubble = React.memo(({ role, text, isLast: _isLast }: ChatBubbleProps) => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(role === 'assistant' ? -12 : 12)).current;
 
@@ -57,7 +57,7 @@ const ChatBubble = React.memo(({ role, text, isLast }: ChatBubbleProps) => {
         useNativeDriver: true,
       }),
     ]).start();
-  }, []);
+  }, [fadeAnim, slideAnim]);
 
   const isUser = role === 'user';
 
@@ -92,6 +92,8 @@ const ChatBubble = React.memo(({ role, text, isLast }: ChatBubbleProps) => {
     </Animated.View>
   );
 });
+
+ChatBubble.displayName = 'ChatBubble';
 
 export default function AIChatScreen() {
   const router = useRouter();
@@ -149,7 +151,7 @@ export default function AIChatScreen() {
         },
       ]);
     }
-  }, []);
+  }, [messages.length, isDriver, setMessages, user?.name]);
 
   const handleSend = useCallback(() => {
     const trimmed = input.trim();
@@ -352,7 +354,7 @@ function TypingDot({ delay, color }: { delay: number; color: string }) {
     );
     loop.start();
     return () => loop.stop();
-  }, []);
+  }, [anim, delay]);
 
   return (
     <Animated.View

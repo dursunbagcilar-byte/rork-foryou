@@ -14,7 +14,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { X, Phone, ChevronDown, Copy, Share2, Gift, Users, Ticket } from 'lucide-react-native';
+import { X, ChevronDown, Copy, Share2, Users, Ticket } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
@@ -51,7 +51,7 @@ export default function InviteScreen() {
         useNativeDriver: true,
       }),
     ]).start();
-  }, []);
+  }, [fadeAnim, scaleAnim]);
 
   const handleInvite = async () => {
     if (!phoneNumber || phoneNumber.length < 10) {
@@ -127,7 +127,7 @@ export default function InviteScreen() {
 
           <View style={styles.contentSection}>
             <Text style={styles.title}>
-              Arkadaşını Foryou'ya Davet Et,{'\n'}Ücretsiz 2 Sürüş Kazan!
+              Arkadaşını Foryou’ya Davet Et,{'\n'}Ücretsiz 2 Sürüş Kazan!
             </Text>
 
             <View style={styles.divider} />

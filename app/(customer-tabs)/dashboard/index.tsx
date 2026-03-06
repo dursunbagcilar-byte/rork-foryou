@@ -1,15 +1,15 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput, Image,
-  Animated, Platform, Dimensions, ActivityIndicator, Alert, Linking,
-  KeyboardAvoidingView, ScrollView, Keyboard, PanResponder, useWindowDimensions,
+  Animated, Platform, ActivityIndicator, Alert, Linking,
+  KeyboardAvoidingView, ScrollView, Keyboard, useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import WebMapFallback from '@/components/WebMapFallback';
 import type { WebMapMarker, WebMapPolyline } from '@/components/WebMapFallback';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { MapPin, Navigation, Search, X, Clock, Banknote, Tag, Gift, ChevronRight, ChevronLeft, Car, Phone, MessageCircle, Info, Star, Send, AlertTriangle, Share2, FileText, Shield, Bike, Package, Map, Plus, Minus, CheckCircle, Store, Camera, ImagePlus, Trash2, Edit3, MapPinned, Award, CreditCard, Menu, CloudRain, Bird } from 'lucide-react-native';
+import { MapPin, Navigation, Search, X, Clock, Banknote, Gift, ChevronRight, ChevronLeft, Car, Phone, MessageCircle, Star, Send, AlertTriangle, Share2, FileText, Shield, Bike, Package, Plus, Minus, CheckCircle, Store, Camera, ImagePlus, Edit3, MapPinned, CreditCard, Menu, CloudRain, Bird } from 'lucide-react-native';
 
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
@@ -19,7 +19,7 @@ import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from '@/hooks/useLocation';
 import { trpc } from '@/lib/trpc';
-import { ISTANBUL_REGION, getRandomDriver, findBestAlternativeVehicle, getVehicleTypeLabel } from '@/constants/mockData';
+import { ISTANBUL_REGION, findBestAlternativeVehicle, getVehicleTypeLabel } from '@/constants/mockData';
 import type { MockDriverInfo } from '@/constants/mockData';
 import { getCityByName, getCityRegion } from '@/constants/cities';
 import {
@@ -31,7 +31,6 @@ import {
 } from '@/constants/pricing';
 import type { DestinationOption, VehicleType } from '@/constants/pricing';
 import { usePlacesAutocomplete } from '@/hooks/usePlacesAutocomplete';
-import type { PlacePrediction } from '@/hooks/usePlacesAutocomplete';
 import { getNightlifeVenuesByCity } from '@/constants/nightlifeVenues';
 import { useVenuePhotos } from '@/hooks/useVenuePhotos';
 import { getCourierBusinessesByCity } from '@/constants/courierBusinesses';
@@ -40,7 +39,6 @@ import { useWeather } from '@/hooks/useWeather';
 import { getGoogleMapsApiKey, getDirectionsApiUrl, logMapsKeyStatus } from '@/utils/maps';
 import TrendingMusicPlayer from '@/components/TrendingMusicPlayer';
 
-const INITIAL_SHEET_COLLAPSE = 0;
 const GOOGLE_API_KEY = getGoogleMapsApiKey();
 const DIRECTIONS_API_URL = getDirectionsApiUrl();
 
@@ -84,15 +82,15 @@ function decodePolyline(encoded: string): { latitude: number; longitude: number 
 }
 
 export default function CustomerHomeScreen() {
-  const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = useWindowDimensions();
+  const { height: SCREEN_HEIGHT } = useWindowDimensions();
   const MAP_BOTTOM_PADDING = Math.round(SCREEN_HEIGHT * 0.37);
   const { user, promoApplied, isFreeRide, remainingFreeRides, applyPromoCode, incrementCompletedRides, addRideToHistory, customVehicleImage } = useAuth();
 
-  const { location: gpsLocation, permissionGranted, isLoading: locationLoading } = useLocation(true, 8000);
+  const { location: gpsLocation } = useLocation(true, 8000);
 
   const userCity = user?.city ? getCityByName(user.city) : null;
   const fallbackRegion = userCity ? getCityRegion(userCity) : ISTANBUL_REGION;
-  const { isRainy, weather } = useWeather(userCity?.latitude, userCity?.longitude);
+  const { isRainy } = useWeather(userCity?.latitude, userCity?.longitude);
 
   const mapRegion = gpsLocation
     ? { latitude: gpsLocation.latitude, longitude: gpsLocation.longitude, latitudeDelta: 0.003, longitudeDelta: 0.003 }
@@ -129,6 +127,7 @@ export default function CustomerHomeScreen() {
   const tripPathRef = useRef<{ latitude: number; longitude: number }[]>([]);
   const tripPathIndexRef = useRef<number>(0);
   const tripIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTripRef = useRef<(() => Promise<void>) | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
   const [showChatModal, setShowChatModal] = useState<boolean>(false);
   const [showSOSModal, setShowSOSModal] = useState<boolean>(false);
@@ -151,7 +150,6 @@ export default function CustomerHomeScreen() {
   const [showCustomOrderSuccess, setShowCustomOrderSuccess] = useState<boolean>(false);
   const [currentDriver, setCurrentDriver] = useState<MockDriverInfo | null>(null);
   const [previousDriverIds, setPreviousDriverIds] = useState<string[]>([]);
-  const [driverCancelledAlert, setDriverCancelledAlert] = useState<boolean>(false);
   const [reassigning, setReassigning] = useState<boolean>(false);
   const [showCancelReasonModal, setShowCancelReasonModal] = useState<boolean>(false);
   const [selectedCancelReason, setSelectedCancelReason] = useState<string>('');
@@ -172,47 +170,10 @@ export default function CustomerHomeScreen() {
   const driverPathIndexRef = useRef<number>(0);
   const trackingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const panelAnim = useRef(new Animated.Value(0)).current;
-  const sheetTranslateY = useRef(new Animated.Value(0)).current;
-  const sheetDragOffset = useRef(0);
+  const _sheetTranslateY = useRef(new Animated.Value(0)).current;
+  const _sheetDragOffset = useRef(0);
   const sheetScrollOffsetRef = useRef(0);
-  const sheetMaxExpandRef = useRef(Math.round(SCREEN_HEIGHT * 0.35));
-
-  const sheetPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
-      onMoveShouldSetPanResponderCapture: (_, gestureState) => {
-        if (gestureState.dy < -12 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx)) return true;
-        if (sheetDragOffset.current < 0 && gestureState.dy > 12 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx)) return true;
-        return false;
-      },
-      onPanResponderGrant: () => {
-        sheetTranslateY.setOffset(sheetDragOffset.current);
-        sheetTranslateY.setValue(0);
-      },
-      onPanResponderMove: (_, gestureState) => {
-        const maxExpand = sheetMaxExpandRef.current;
-        const newVal = Math.max(-maxExpand, Math.min(0, sheetDragOffset.current + gestureState.dy));
-        sheetTranslateY.setOffset(0);
-        sheetTranslateY.setValue(newVal);
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        sheetTranslateY.flattenOffset();
-        const maxExpand = sheetMaxExpandRef.current;
-        const currentVal = Math.max(-maxExpand, Math.min(0, sheetDragOffset.current + gestureState.dy));
-        const snapTo = gestureState.dy < -40 || (currentVal < -maxExpand * 0.4 && gestureState.vy <= 0)
-          ? -maxExpand
-          : 0;
-        sheetDragOffset.current = snapTo;
-        Animated.spring(sheetTranslateY, {
-          toValue: snapTo,
-          useNativeDriver: true,
-          tension: 80,
-          friction: 12,
-        }).start();
-      },
-    })
-  ).current;
+  const _sheetMaxExpandRef = useRef(Math.round(SCREEN_HEIGHT * 0.35));
 
   const onPanelLayout = useCallback((_e: { nativeEvent: { layout: { height: number } } }) => {
   }, []);
@@ -253,7 +214,7 @@ export default function CustomerHomeScreen() {
     return getNightlifeVenuesByCity(user?.city ?? '', user?.district ?? '');
   }, [user?.city, user?.district]);
   const venuePhotos = useVenuePhotos(cityVenues);
-  const filteredDestinations = isUserInIstanbul
+  const _filteredDestinations = isUserInIstanbul
     ? POPULAR_DESTINATIONS.filter((d) =>
         destination ? d.name.toLowerCase().includes(destination.toLowerCase()) : true
       )
@@ -459,12 +420,12 @@ export default function CustomerHomeScreen() {
         }
       };
 
-      runApproaching();
+      void runApproaching();
 
       Alert.alert(`Şoför Yaklaşıyor! ${vehicleEmoji}`, 'Şoförünüz 2 km yakınınızda, hazır olun!', [{ text: 'Tamam' }]);
       setDriverApproaching(false);
     }
-  }, [driverApproaching, playArrivalMelody]);
+  }, [driverApproaching, playArrivalMelody, vehicleEmoji]);
 
   useEffect(() => {
     if (driverArrived && !tripStarted) {
@@ -482,7 +443,7 @@ export default function CustomerHomeScreen() {
         }
       };
 
-      runArrival();
+      void runArrival();
 
       Alert.alert(
         `Şoför Geldi! ${vehicleEmoji}`,
@@ -494,17 +455,17 @@ export default function CustomerHomeScreen() {
               console.log('[Trip] Customer confirmed arrival - cancellation blocked, starting trip');
               setCustomerConfirmedArrival(true);
               setDriverArrived(false);
-              startTrip();
+              void startTripRef.current?.();
             },
           },
         ],
         { cancelable: false }
       );
     }
-  }, [driverArrived, tripStarted, playArrivalMelody]);
+  }, [driverArrived, tripStarted, playArrivalMelody, vehicleEmoji]);
 
   const showGoogleResults = destination.length >= 2;
-  const showPopularFallback = !showGoogleResults;
+  const _showPopularFallback = !showGoogleResults;
 
   const fetchDrivingDistance = useCallback(async (
     originLat: number, originLng: number,
@@ -656,6 +617,10 @@ export default function CustomerHomeScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
   }, [selectedDest, mapRegion.latitude, mapRegion.longitude, fetchDriverRoute, densifyPath]);
 
+  useEffect(() => {
+    startTripRef.current = startTrip;
+  }, [startTrip]);
+
   const driverLocationPollQuery = trpc.drivers.getLocation.useQuery(
     { driverId: currentDriver?.id ?? '' },
     {
@@ -668,7 +633,7 @@ export default function CustomerHomeScreen() {
     }
   );
 
-  const customerActiveRideQuery = trpc.rides.getActiveRide.useQuery(
+  const _customerActiveRideQuery = trpc.rides.getActiveRide.useQuery(
     { userId: user?.id ?? '', type: 'customer' as const },
     {
       enabled: !!user?.id && rideRequested && !tripCompleted,
@@ -797,7 +762,7 @@ export default function CustomerHomeScreen() {
       console.log('[Customer] Driver route loaded:', path.length, 'points, dist:', distKm.toFixed(2), 'km');
     }
     return assignedDriver;
-  }, [selectedDest, mapRegion.latitude, mapRegion.longitude, fetchDriverRoute, densifyPath, user?.city, findBestDriverQuery, selectedVehiclePackage]);
+  }, [selectedDest, mapRegion.latitude, mapRegion.longitude, fetchDriverRoute, densifyPath, user?.city, findBestDriverQuery]);
 
   const handleDriverCancelled = useCallback(async () => {
     console.log('[Customer] Driver cancelled! Reassigning...');
@@ -815,7 +780,6 @@ export default function CustomerHomeScreen() {
     approachingPlayedRef.current = false;
 
     const cancelledDriverName = currentDriver?.shortName ?? 'Şoför';
-    setDriverCancelledAlert(true);
     setReassigning(true);
     setDriverFound(false);
 
@@ -830,7 +794,6 @@ export default function CustomerHomeScreen() {
       if (newDriver) {
         setDriverFound(true);
         setReassigning(false);
-        setDriverCancelledAlert(false);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         Alert.alert(
           '✅ Yeni Şoför Atandı!',
@@ -841,16 +804,27 @@ export default function CustomerHomeScreen() {
       } else {
         const alt = findBestAlternativeVehicle(selectedVehiclePackage, previousDriverIds);
         setReassigning(false);
-        setDriverCancelledAlert(false);
         if (alt) {
           setAlternativeVehicle(alt);
           setShowAlternativeSuggestion(true);
         } else {
-          Alert.alert('Şoför Bulunamadı', 'Müsait şoför bulunamadı.', [{ text: 'Tamam', onPress: () => resetRideStates() }]);
+          Alert.alert('Şoför Bulunamadı', 'Müsait şoför bulunamadı.', [{ text: 'Tamam', onPress: () => {
+            setRideRequested(false);
+            setFindingDriver(false);
+            setDriverFound(false);
+            setDestination('');
+            setSelectedDest(null);
+            setCurrentRideFree(false);
+            setDriverLocation(null);
+            setDriverEta(0);
+            setDriverRoutePath([]);
+            setCurrentDriver(null);
+            setPreviousDriverIds([]);
+          } }]);
         }
       }
     }, 2500);
-  }, [currentDriver, previousDriverIds, assignNewDriver]);
+  }, [currentDriver, previousDriverIds, assignNewDriver, selectedVehiclePackage]);
 
   useEffect(() => {
     return () => {
@@ -859,7 +833,7 @@ export default function CustomerHomeScreen() {
         driverCancelTimerRef.current = null;
       }
     };
-  }, [driverFound, currentDriver?.id, tripStarted, reassigning, driverArrived, handleDriverCancelled]);
+  }, [driverFound, currentDriver?.id, tripStarted, reassigning, driverArrived, handleDriverCancelled, pulseAnim]);
 
   useEffect(() => {
     if (findingDriver) {
@@ -903,7 +877,7 @@ export default function CustomerHomeScreen() {
       }, 3000);
       return () => { pulse.stop(); clearTimeout(timer); };
     }
-  }, [findingDriver, assignNewDriver, previousDriverIds, selectedVehiclePackage]);
+  }, [findingDriver, assignNewDriver, previousDriverIds, selectedVehiclePackage, pulseAnim]);
 
   useEffect(() => {
     if (!driverFound || driverArrived || tripStarted || !currentDriver?.id) return;
@@ -1077,7 +1051,7 @@ export default function CustomerHomeScreen() {
     }
 
     console.log(`Ride requested: ${destination}, Free: ${free}, Payment: ${paymentMethod}, Price: ₺${free ? 0 : ridePrice}`);
-  }, [destination, selectedDest, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, mapRegion]);
+  }, [destination, selectedDest, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, mapRegion.latitude, mapRegion.longitude]);
 
   const handleCompleteRide = useCallback(async () => {
     await incrementCompletedRides();
@@ -1338,7 +1312,7 @@ export default function CustomerHomeScreen() {
     }
 
     setDriverFound(true);
-  }, [alternativeVehicle, selectedDest, mapRegion, fetchDriverRoute, densifyPath]);
+  }, [alternativeVehicle, selectedDest, rideDistance, mapRegion.latitude, mapRegion.longitude, fetchDriverRoute, densifyPath]);
 
   const handleRejectAlternative = useCallback(() => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
@@ -1375,11 +1349,11 @@ export default function CustomerHomeScreen() {
     const lng = mapRegion.longitude;
     const message = `2go şöförleri ile eve dönüyorum 📍 Canlı konumum: https://maps.google.com/maps?q=${lat},${lng}`;
     const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(message)}`;
-    Linking.openURL(whatsappUrl).catch(() => {
+    void Linking.openURL(whatsappUrl).catch(() => {
       Alert.alert('Hata', 'WhatsApp açılamadı. Lütfen WhatsApp yüklü olduğundan emin olun.');
     });
     console.log('[SOS] Sharing location via WhatsApp');
-  }, [mapRegion]);
+  }, [mapRegion.latitude, mapRegion.longitude]);
 
   const handleSendSMS = useCallback(() => {
     const lat = mapRegion.latitude;
@@ -1388,11 +1362,11 @@ export default function CustomerHomeScreen() {
     const smsUrl = Platform.OS === 'ios'
       ? `sms:&body=${encodeURIComponent(message)}`
       : `sms:?body=${encodeURIComponent(message)}`;
-    Linking.openURL(smsUrl).catch(() => {
+    void Linking.openURL(smsUrl).catch(() => {
       Alert.alert('Hata', 'SMS uygulaması açılamadı');
     });
     console.log('[SOS] Opening SMS with location');
-  }, [mapRegion]);
+  }, [mapRegion.latitude, mapRegion.longitude]);
 
   const handleSOS = useCallback(() => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
@@ -1416,23 +1390,23 @@ export default function CustomerHomeScreen() {
     console.log('[SOS] Calling 155 Police');
   }, []);
 
-  const openInNativeMaps = useCallback((destLat: number, destLng: number, destName: string) => {
+  const _openInNativeMaps = useCallback((destLat: number, destLng: number, destName: string) => {
     const encodedName = encodeURIComponent(destName);
     const originLat = mapRegion.latitude;
     const originLng = mapRegion.longitude;
 
     if (Platform.OS === 'ios') {
       const appleUrl = `maps:0,0?q=${encodedName}&saddr=${originLat},${originLng}&daddr=${destLat},${destLng}`;
-      Linking.openURL(appleUrl).catch(() => {
-        Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destLat},${destLng}&travelmode=driving`);
+      void Linking.openURL(appleUrl).catch(() => {
+        void Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destLat},${destLng}&travelmode=driving`);
       });
     } else if (Platform.OS === 'android') {
       const googleUrl = `google.navigation:q=${destLat},${destLng}`;
-      Linking.openURL(googleUrl).catch(() => {
-        Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destLat},${destLng}&travelmode=driving`);
+      void Linking.openURL(googleUrl).catch(() => {
+        void Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destLat},${destLng}&travelmode=driving`);
       });
     } else {
-      Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destLat},${destLng}&travelmode=driving`);
+      void Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destLat},${destLng}&travelmode=driving`);
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     console.log('[Maps] Opening native maps for:', destName, 'Platform:', Platform.OS);
@@ -1491,7 +1465,7 @@ export default function CustomerHomeScreen() {
     } else {
       Alert.alert('Hata', 'Geçersiz promosyon kodu veya daha önce kullanılmış.');
     }
-  }, [promoInput, applyPromoCode]);
+  }, [promoInput, applyPromoCode, promoAnim]);
 
   const togglePromo = useCallback(() => {
     const newVal = !showPromo;
@@ -1502,25 +1476,12 @@ export default function CustomerHomeScreen() {
     }).start();
   }, [showPromo, promoAnim]);
 
-  const panelTranslate = panelAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [300, 0],
-  });
-
-  const promoHeight = promoAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 60],
-  });
 
   const freeRidesLeft = remainingFreeRides();
 
   const cityBusinesses = useMemo(() => {
     return getCourierBusinessesByCity(user?.city ?? '');
   }, [user?.city]);
-
-  const safeVenueCount = useMemo(() => {
-    return cityVenues.filter(v => v.safetyLevel && v.safetyLevel > 0).length;
-  }, [cityVenues]);
 
   const sponsorVenueName = useMemo(() => {
     const safeVenues = cityVenues.filter(v => v.safetyLevel && v.safetyLevel >= 2);
@@ -1542,7 +1503,7 @@ export default function CustomerHomeScreen() {
     setSelectedCourierBiz(null);
     setCourierCart([]);
     console.log('[Courier] Opening courier panel for city:', user?.city, 'district:', user?.district, 'couriers:', cityCouriers.length);
-  }, [user?.city, hasCouriersInCity, cityCouriers.length]);
+  }, [user?.city, user?.district, hasCouriersInCity, cityCouriers.length]);
 
   const handleSelectBusiness = useCallback((biz: CourierBusiness) => {
     setSelectedCourierBiz(biz);
@@ -1599,7 +1560,7 @@ export default function CustomerHomeScreen() {
     setShowOrderSuccess(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     console.log('[Courier] Order placed:', selectedCourierBiz.name, 'Total:', courierCartTotal + selectedCourierBiz.deliveryFee, 'online couriers:', onlineCouriersCount);
-  }, [selectedCourierBiz, courierCart, courierCartTotal, onlineCouriersCount, user?.city]);
+  }, [selectedCourierBiz, courierCart, courierCartTotal, onlineCouriersCount, user?.city, user?.district]);
 
   const handleCloseOrderSuccess = useCallback(() => {
     setShowOrderSuccess(false);
@@ -1746,7 +1707,7 @@ export default function CustomerHomeScreen() {
         toggleSearch(true);
       }, 300);
     }
-  }, [searchParams.openSearch, searchParams.vehiclePackage, isRainy]);
+  }, [searchParams.openSearch, searchParams.vehiclePackage, isRainy, toggleSearch]);
 
   const handleInlineVehicleChange = useCallback((pkg: string) => {
     if (isRainy && (pkg === 'scooter' || pkg === 'motorcycle')) {
@@ -1764,7 +1725,7 @@ export default function CustomerHomeScreen() {
       setRideDuration(duration);
       console.log(`[Vehicle] Changed to ${pkg}, new price: ₺${price}`);
     }
-  }, [isRainy, selectedDest, mapRegion.latitude, mapRegion.longitude]);
+  }, [isRainy, selectedDest, rideDistance, rideDuration, mapRegion.latitude, mapRegion.longitude]);
 
   const handleOpenVehicleSelect = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -2230,7 +2191,7 @@ export default function CustomerHomeScreen() {
                         </View>
                       </View>
                       <Text style={styles.venueReviewText} numberOfLines={2}>
-                        "{cityVenues[activeVenueIndex].review}"
+                        {`“${cityVenues[activeVenueIndex].review}”`}
                       </Text>
                     </View>
                     <View style={styles.venueDotsRow}>
@@ -2295,7 +2256,7 @@ export default function CustomerHomeScreen() {
                       <Text style={styles.partnerVenueBadgeText}>2GO İŞ BİRLİĞİ</Text>
                     </View>
                     <Text style={styles.partnerVenueText}>
-                      Siz değerli müşterilerimizi ağırlayan, keyifli vakit ve yüksek memnuniyet yaşatan işletmeler, sizleri uğurlarken güvenliğinizi 2GO'ya emanet eder.
+                      Siz değerli müşterilerimizi ağırlayan, keyifli vakit ve yüksek memnuniyet yaşatan işletmeler, sizleri uğurlarken güvenliğinizi 2GO’ya emanet eder.
                     </Text>
                   </View>
                 </View>
@@ -2396,7 +2357,7 @@ export default function CustomerHomeScreen() {
                       onChangeText={(text) => {
                         setDestination(text);
                         setSelectedDest(null);
-                        fetchPredictions(text);
+                        void fetchPredictions(text);
                       }}
                       autoFocus
                       testID="destination-input"
@@ -2432,7 +2393,7 @@ export default function CustomerHomeScreen() {
                             };
                             setDestination(dest.name);
                             clearPredictions();
-                            selectDestination(dest);
+                            void selectDestination(dest);
                             Keyboard.dismiss();
                           } else {
                             console.warn('[Selection] Details returned null for:', prediction.place_id);
@@ -2555,7 +2516,7 @@ export default function CustomerHomeScreen() {
                     <View style={styles.paymentMethodSelector}>
                       <TouchableOpacity
                         style={[styles.paymentMethodOption, paymentMethod === 'cash' && styles.paymentMethodOptionActive]}
-                        onPress={() => { setPaymentMethod('cash'); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                        onPress={() => { setPaymentMethod('cash'); void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
                         activeOpacity={0.7}
                       >
                         <Banknote size={18} color={paymentMethod === 'cash' ? '#FFF' : '#666'} />
@@ -2975,7 +2936,7 @@ export default function CustomerHomeScreen() {
               onPress={() => {
                 if (selectedCancelReason) {
                   const label = CUSTOMER_CANCEL_REASONS.find(r => r.key === selectedCancelReason)?.label ?? '';
-                  handleConfirmCancelWithReason(label);
+                  void handleConfirmCancelWithReason(label);
                 }
               }}
               disabled={!selectedCancelReason}
@@ -3361,7 +3322,7 @@ export default function CustomerHomeScreen() {
                   <TouchableOpacity
                     style={[styles.callCourierCard, { flex: 1 }]}
                     onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                       Alert.alert('Kurye Çağır', 'Anlık kurye çağırmak istediğinizden emin misiniz?', [
                         { text: 'Vazgeç', style: 'cancel' },
                         { text: 'Kurye Çağır', onPress: () => console.log('[Courier] Call courier pressed') },
