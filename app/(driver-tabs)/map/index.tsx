@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Animated, Switch, Platform, Alert, ScrollView, Linking, Image, Dimensions, ActivityIndicator, useWindowDimensions, TextInput, KeyboardAvoidingView, FlatList,
+  View, Text, StyleSheet, TouchableOpacity, Animated, Switch, Platform, Alert, ScrollView, Linking, Image, Dimensions, ActivityIndicator, TextInput, KeyboardAvoidingView, FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Circle, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
@@ -10,7 +10,7 @@ import {
   Wifi, WifiOff, Users, Navigation, Car, Phone, MapPin,
   Volume2, VolumeX, AlertTriangle, ChevronRight, CornerUpRight,
   CornerUpLeft, ArrowUp, RotateCw, Route, Banknote, Clock,
-  CheckCircle, UserCheck, Camera, Menu, User, X, MessageCircle, Send,
+  UserCheck, Camera, Menu, User, X, MessageCircle, Send,
 } from 'lucide-react-native';
 import * as Speech from 'expo-speech';
 import * as ImagePicker from 'expo-image-picker';
@@ -19,10 +19,10 @@ import { Colors } from '@/constants/colors';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from '@/hooks/useLocation';
-import { ISTANBUL_REGION, generatePickupDropoff, generateHeatPoints } from '@/constants/mockData';
+import { ISTANBUL_REGION, generateHeatPoints } from '@/constants/mockData';
 import type { HeatPoint } from '@/constants/mockData';
 import { getCityByName, getCityRegion } from '@/constants/cities';
-import { calculatePrice, calculateDistance, estimateDuration, PRICING } from '@/constants/pricing';
+import { calculatePrice, calculateDistance, estimateDuration } from '@/constants/pricing';
 import type { VehicleType } from '@/constants/pricing';
 import { getVehicleImageUrl } from '@/constants/vehicleImages';
 import type { Driver } from '@/constants/mockData';
@@ -142,11 +142,11 @@ export default function DriverHomeScreen() {
   const router = useRouter();
   const driver = user as Driver | null;
 
-  const { location: gpsLocation, permissionGranted, isLoading: locationLoading } = useLocation(true, 5000);
+  const { location: gpsLocation, permissionGranted: _permissionGranted, isLoading: _locationLoading } = useLocation(true, 5000);
 
   const DEFAULT_MEGANE_IMAGE = 'https://r2-pub.rork.com/generated-images/046712ad-abc8-4571-8041-039fc3ac0356.png';
 
-  const defaultVehicleImageUrl = React.useMemo(
+  const _defaultVehicleImageUrl = React.useMemo(
     () => getVehicleImageUrl(driver?.vehicleModel ?? ''),
     [driver?.vehicleModel]
   );
@@ -182,13 +182,13 @@ export default function DriverHomeScreen() {
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(false);
   const [voiceDisclaimerShown, setVoiceDisclaimerShown] = useState<boolean>(false);
   const [totalDistance, setTotalDistance] = useState<string>('');
-  const [totalDuration, setTotalDuration] = useState<string>('');
+  const [_totalDuration, setTotalDuration] = useState<string>('');
   const [isFetchingRoute, setIsFetchingRoute] = useState<boolean>(false);
   const [showCourteousWarning, setShowCourteousWarning] = useState<boolean>(false);
   const [dropoffAddressResolved, setDropoffAddressResolved] = useState<string>('');
   const [pickupAddressResolved, setPickupAddressResolved] = useState<string>('');
   const [isProcessingVehicle, setIsProcessingVehicle] = useState<boolean>(false);
-  const [showHeatMap, setShowHeatMap] = useState<boolean>(true);
+  const [showHeatMap, _setShowHeatMap] = useState<boolean>(true);
   const [showDriverCancelReasonModal, setShowDriverCancelReasonModal] = useState<boolean>(false);
   const [selectedDriverCancelReason, setSelectedDriverCancelReason] = useState<string>('');
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
@@ -197,7 +197,7 @@ export default function DriverHomeScreen() {
   const [driverChatInput, setDriverChatInput] = useState<string>('');
   const [driverChatMessages, setDriverChatMessages] = useState<Array<{ id: string; text: string; fromMe: boolean; time: string }>>([]);
   const [currentCustomerPhone, setCurrentCustomerPhone] = useState<string>('');
-  const [currentRidePrice, setCurrentRidePrice] = useState<number>(0);
+  const [_currentRidePrice, setCurrentRidePrice] = useState<number>(0);
 
   const heatPoints = React.useMemo<HeatPoint[]>(() => {
     return generateHeatPoints(cityCenter.latitude, cityCenter.longitude);
@@ -232,7 +232,7 @@ export default function DriverHomeScreen() {
   );
 
   const pendingRidesQuery = trpc.rides.getPendingByCity.useQuery(
-    { city: driver?.city ?? '' },
+    { city: driver?.city ?? '', driverCategory: driver?.driverCategory ?? 'driver' },
     {
       enabled: isOnline && !!driver?.city && !rideAccepted && !hasRideRequest,
       refetchInterval: 15000,
@@ -255,6 +255,14 @@ export default function DriverHomeScreen() {
     return pending[0];
   }, [pendingRidesQuery.data]);
 
+  const activeOrPendingRide = activeRideQuery.data ?? pendingRide;
+  const isBusinessDelivery = activeOrPendingRide?.orderType === 'business_delivery' || activeOrPendingRide?.orderType === 'custom_delivery';
+  const pickupLocationTitle = isBusinessDelivery ? 'İşletme Noktası' : 'Müşteri Konumu';
+  const inlineRequestTitle = isBusinessDelivery ? 'Yeni İşletme Siparişi!' : 'Yeni Yolculuk Talebi!';
+  const pickupActionLabel = isBusinessDelivery ? 'Siparişi Aldım' : 'Müşteriyi Aldım';
+  const pickupWaitingLabel = isBusinessDelivery ? 'Sipariş sizi bekliyor' : 'Müşteri sizi bekliyor';
+  const pickupTravellingLabel = isBusinessDelivery ? 'İşletmeye gidiliyor' : 'Müşteriye gidiliyor';
+
   const pickupCoord = React.useMemo(() => {
     if (pendingRide?.pickupLat && pendingRide?.pickupLng) {
       return { latitude: pendingRide.pickupLat, longitude: pendingRide.pickupLng };
@@ -269,7 +277,7 @@ export default function DriverHomeScreen() {
       latitude: cityCenter.latitude + 0.005,
       longitude: cityCenter.longitude + 0.007,
     };
-  }, [pendingRide, currentRideId, activeRideQuery.data, cityCenter]);
+  }, [pendingRide, currentRideId, activeRideQuery.data, cityCenter.latitude, cityCenter.longitude]);
 
   const dropoffCoord = React.useMemo(() => {
     if (pendingRide?.dropoffLat && pendingRide?.dropoffLng) {
@@ -285,19 +293,19 @@ export default function DriverHomeScreen() {
       latitude: cityCenter.latitude + 0.027,
       longitude: cityCenter.longitude + 0.025,
     };
-  }, [pendingRide, currentRideId, activeRideQuery.data, cityCenter]);
+  }, [pendingRide, currentRideId, activeRideQuery.data, cityCenter.latitude, cityCenter.longitude]);
 
   useEffect(() => {
     if (pendingRide && isOnline && !hasRideRequest && !rideAccepted) {
       console.log('[Driver] New pending ride from backend:', pendingRide.id, pendingRide.pickupAddress);
       setCurrentRideId(pendingRide.id);
-      setCurrentCustomerName((pendingRide as any).customerName ?? 'Müşteri');
+      setCurrentCustomerName((pendingRide as any).businessName ?? (pendingRide as any).customerName ?? 'Müşteri');
       setCurrentCustomerPhone('');
       setCurrentRidePrice(pendingRide.price ?? 0);
       setHasRideRequest(true);
       Animated.spring(requestAnim, { toValue: 1, useNativeDriver: true }).start();
     }
-  }, [pendingRide?.id, isOnline, hasRideRequest, rideAccepted]);
+  }, [pendingRide, isOnline, hasRideRequest, rideAccepted, requestAnim]);
 
   useEffect(() => {
     if (driver?.id) {
@@ -309,10 +317,16 @@ export default function DriverHomeScreen() {
       console.log('[Voice] Sesli yanıt sistemi aktif - şoför müsait');
     } else {
       setVoiceEnabled(false);
-      safeSpeechStop();
+      try {
+        if (Platform.OS !== 'web') {
+          void Speech.stop();
+        }
+      } catch (error) {
+        console.log('[Voice] Stop error while going offline:', error);
+      }
       console.log('[Voice] Sesli yanıt sistemi kapalı - şoför meşgul');
     }
-  }, [isOnline, driver?.id]);
+  }, [isOnline, driver?.id, setOnlineStatusMutation]);
 
   const lastSentLocationRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
 
@@ -367,14 +381,14 @@ export default function DriverHomeScreen() {
     sendLocation();
     const locationInterval = setInterval(sendLocation, locationSendInterval);
     return () => clearInterval(locationInterval);
-  }, [isOnline, driver?.id, gpsLocation?.latitude, gpsLocation?.longitude, fallbackRegion.latitude, fallbackRegion.longitude, locationSendInterval]);
+  }, [isOnline, driver?.id, gpsLocation, fallbackRegion.latitude, fallbackRegion.longitude, locationSendInterval, updateLocationMutation]);
 
-  const pickupAddress = pickupAddressResolved || pendingRide?.pickupAddress || (driver?.district ? `${driver.district} Merkez` : 'Alış Noktası');
+  const pickupAddress = pickupAddressResolved || pendingRide?.pickupAddress || (driver?.district ? `${driver.district} Merkez` : (isBusinessDelivery ? 'İşletme Adresi' : 'Alış Noktası'));
   const dropoffAddress = dropoffAddressResolved || pendingRide?.dropoffAddress || 'Varış Noktası';
 
   useEffect(() => {
     if (dropoffCoord) {
-      cachedReverseGeocode(dropoffCoord.latitude, dropoffCoord.longitude).then(addr => {
+      void cachedReverseGeocode(dropoffCoord.latitude, dropoffCoord.longitude).then(addr => {
         if (addr) {
           setDropoffAddressResolved(addr);
           console.log('[Geocode] Dropoff address resolved:', addr);
@@ -383,20 +397,20 @@ export default function DriverHomeScreen() {
         }
       });
     }
-  }, [dropoffCoord.latitude, dropoffCoord.longitude]);
+  }, [dropoffCoord, driver?.city]);
 
   useEffect(() => {
     if (pickupCoord) {
-      cachedReverseGeocode(pickupCoord.latitude, pickupCoord.longitude).then(addr => {
+      void cachedReverseGeocode(pickupCoord.latitude, pickupCoord.longitude).then(addr => {
         if (addr) {
           setPickupAddressResolved(addr);
           console.log('[Geocode] Pickup address resolved:', addr);
         } else {
-          setPickupAddressResolved(driver?.district ? `${driver.district} Merkez` : 'Alış Noktası');
+          setPickupAddressResolved(driver?.district ? `${driver.district} Merkez` : (isBusinessDelivery ? 'İşletme Adresi' : 'Alış Noktası'));
         }
       });
     }
-  }, [pickupCoord.latitude, pickupCoord.longitude]);
+  }, [pickupCoord, driver?.district, isBusinessDelivery]);
 
   const handlePickProfilePhoto = useCallback(async () => {
     try {
@@ -421,7 +435,7 @@ export default function DriverHomeScreen() {
                   quality: 0.8,
                 });
                 if (!result.canceled && result.assets[0]?.uri) {
-                  updateProfilePhoto(result.assets[0].uri);
+                  void updateProfilePhoto(result.assets[0].uri);
                   console.log('[Driver] Profile photo set from gallery');
                 }
               } catch (e) {
@@ -444,7 +458,7 @@ export default function DriverHomeScreen() {
                   quality: 0.8,
                 });
                 if (!result.canceled && result.assets[0]?.uri) {
-                  updateProfilePhoto(result.assets[0].uri);
+                  void updateProfilePhoto(result.assets[0].uri);
                   console.log('[Driver] Profile photo set from camera');
                 }
               } catch (e) {
@@ -501,7 +515,7 @@ export default function DriverHomeScreen() {
       if (editResult?.image?.base64Data) {
         const mimeType = editResult.image.mimeType || 'image/png';
         const processedUri = `data:${mimeType};base64,${editResult.image.base64Data}`;
-        updateCustomVehicleImage(processedUri);
+        void updateCustomVehicleImage(processedUri);
         console.log('[AI] Vehicle background removed successfully');
       } else {
         throw new Error('No image data in response');
@@ -513,7 +527,7 @@ export default function DriverHomeScreen() {
         'Arka plan kaldırılamadı, orijinal fotoğraf kullanılacak.',
         [{ text: 'Tamam' }]
       );
-      updateCustomVehicleImage(imageUri);
+      void updateCustomVehicleImage(imageUri);
     } finally {
       setIsProcessingVehicle(false);
     }
@@ -542,7 +556,7 @@ export default function DriverHomeScreen() {
                   quality: 0.8,
                 });
                 if (!result.canceled && result.assets[0]?.uri) {
-                  processVehicleBackground(result.assets[0].uri);
+                  void processVehicleBackground(result.assets[0].uri);
                   console.log('[Driver] Custom vehicle image picked from gallery, processing...');
                 }
               } catch (e) {
@@ -565,7 +579,7 @@ export default function DriverHomeScreen() {
                   quality: 0.8,
                 });
                 if (!result.canceled && result.assets[0]?.uri) {
-                  processVehicleBackground(result.assets[0].uri);
+                  void processVehicleBackground(result.assets[0].uri);
                   console.log('[Driver] Custom vehicle image taken from camera, processing...');
                 }
               } catch (e) {
@@ -577,7 +591,7 @@ export default function DriverHomeScreen() {
             text: 'Varsayılana Dön',
             style: 'destructive' as const,
             onPress: () => {
-              updateCustomVehicleImage(null);
+              void updateCustomVehicleImage(null);
               console.log('[Driver] Vehicle image reset to default');
             },
           }] : []),
@@ -597,7 +611,7 @@ export default function DriverHomeScreen() {
         console.log('[Driver] Meşgul durumda - bekleyen yolculuk talebi iptal edildi');
       }
     }
-  }, [isOnline]);
+  }, [isOnline, hasRideRequest, rideAccepted, requestAnim]);
 
   const generateFallbackPath = useCallback((
     origin: { latitude: number; longitude: number },
@@ -800,7 +814,7 @@ export default function DriverHomeScreen() {
   const safeSpeechStop = useCallback(() => {
     try {
       if (Platform.OS !== 'web') {
-        Speech.stop();
+        void Speech.stop();
       }
     } catch (e) {
       console.log('[Voice] Stop error:', e);
@@ -857,7 +871,7 @@ export default function DriverHomeScreen() {
   const handleAcceptRide = useCallback(async () => {
     setHasRideRequest(false);
     setShowCourteousWarning(true);
-  }, [currentRideId, driver]);
+  }, []);
 
   const handleCourteousWarningOk = useCallback(async () => {
     setShowCourteousWarning(false);
@@ -889,9 +903,9 @@ export default function DriverHomeScreen() {
         latitude: path[0].latitude,
         longitude: path[0].longitude,
       };
-      speakInstruction('Yolculuk kabul edildi. Müşteriye doğru yola çıkılıyor.');
+      speakInstruction(isBusinessDelivery ? 'Sipariş kabul edildi. İşletmeye doğru yola çıkılıyor.' : 'Yolculuk kabul edildi. Müşteriye doğru yola çıkılıyor.');
     }
-  }, [requestAnim, fetchDirections, speakInstruction, mapRegion.latitude, mapRegion.longitude, pickupCoord, currentRideId, driver, acceptRideMutation]);
+  }, [requestAnim, fetchDirections, speakInstruction, mapRegion.latitude, mapRegion.longitude, pickupCoord, currentRideId, driver, acceptRideMutation, isBusinessDelivery]);
 
   const handleDeclineRide = useCallback(() => {
     setHasRideRequest(false);
@@ -970,10 +984,12 @@ export default function DriverHomeScreen() {
         } else {
           setEtaToPickup(0);
           setArrivedAtPickup(true);
-          speakInstruction('Müşteri noktasına ulaştınız. Lütfen aracınızın dış detay fotoğraf ve videosunu çekin.');
+          speakInstruction(isBusinessDelivery ? 'İşletme noktasına ulaştınız. Siparişi teslim almadan önce dış detay kaydınızı alın.' : 'Müşteri noktasına ulaştınız. Lütfen aracınızın dış detay fotoğraf ve videosunu çekin.');
           Alert.alert(
             '⚠️ Araç Dış Görünüm Kaydı',
-            'Müşteri adresine ulaştınız.\n\nYolculuğa başlamadan önce aracınızın dış detay fotoğraf ve videosunu çekmeniz gerekmektedir.\n\nBu kayıtlar olası hasar anlaşmazlıklarında sizi koruyacaktır.',
+            isBusinessDelivery
+              ? 'İşletme adresine ulaştınız.\n\nSiparişi teslim almadan önce aracınızın dış detay fotoğraf ve videosunu çekmeniz önerilir.\n\nBu kayıtlar olası anlaşmazlıklarda sizi koruyacaktır.'
+              : 'Müşteri adresine ulaştınız.\n\nYolculuğa başlamadan önce aracınızın dış detay fotoğraf ve videosunu çekmeniz gerekmektedir.\n\nBu kayıtlar olası hasar anlaşmazlıklarında sizi koruyacaktır.',
             [
               {
                 text: 'Tamam, Anladım',
@@ -995,7 +1011,7 @@ export default function DriverHomeScreen() {
         }
       };
     }
-  }, [rideAccepted, !!driverSimLoc, arrivedAtPickup, navigationSteps.length, navigationSteps, currentStepIndex, speakInstruction]);
+  }, [rideAccepted, driverSimLoc, arrivedAtPickup, navigationSteps, currentStepIndex, speakInstruction, isBusinessDelivery]);
 
   useEffect(() => {
     if (customerPickedUp && navigatingToDropoff && driverSimLoc && !arrivedAtDropoff && driverPathRef.current.length > 0) {
@@ -1083,13 +1099,13 @@ export default function DriverHomeScreen() {
         }
       };
     }
-  }, [customerPickedUp, navigatingToDropoff, !!driverSimLoc, arrivedAtDropoff, navigationSteps.length, navigationSteps, currentStepIndex, speakInstruction]);
+  }, [customerPickedUp, navigatingToDropoff, driverSimLoc, arrivedAtDropoff, navigationSteps, currentStepIndex, speakInstruction]);
 
   const driverArrivedMutation = trpc.rides.driverArrived.useMutation();
 
   const handleConfirmArrival = useCallback(() => {
     setConfirmedArrival(true);
-    speakInstruction('Adrese geldiniz. Müşteriye bildirim gönderildi. Müşteriyi aldığınızda bildirin.');
+    speakInstruction(isBusinessDelivery ? 'İşletme noktasına geldiniz. Siparişi aldığınızda devam edin.' : 'Adrese geldiniz. Müşteriye bildirim gönderildi. Müşteriyi aldığınızda bildirin.');
     const rideId = currentRideId ?? 'current_ride';
     console.log('[Ride] Driver confirmed arrival at pickup - sending notification, rideId:', rideId);
     driverArrivedMutation.mutate(
@@ -1103,12 +1119,12 @@ export default function DriverHomeScreen() {
         },
       }
     );
-  }, [speakInstruction, driver?.name, driverArrivedMutation, currentRideId]);
+  }, [speakInstruction, driver?.name, driverArrivedMutation, currentRideId, isBusinessDelivery]);
 
   const handlePickupCustomer = useCallback(() => {
     Alert.alert(
-      'Müşteriyi Aldınız mı?',
-      'Müşteriyi aldığınızı onaylıyorsunuz.',
+      isBusinessDelivery ? 'Siparişi Aldınız mı?' : 'Müşteriyi Aldınız mı?',
+      isBusinessDelivery ? 'İşletmeden siparişi teslim aldığınızı onaylıyorsunuz.' : 'Müşteriyi aldığınızı onaylıyorsunuz.',
       [
         { text: 'İptal', style: 'cancel' },
         {
@@ -1117,7 +1133,7 @@ export default function DriverHomeScreen() {
             if (currentRideId) {
               try {
                 await startRideMutation.mutateAsync({ rideId: currentRideId });
-                console.log('[Ride] Ride started on backend:', currentRideId);
+                console.log('[Ride] Ride started on backend:', currentRideId, 'businessDelivery:', isBusinessDelivery);
               } catch (err) {
                 console.log('[Ride] Start ride backend error (continuing):', err);
               }
@@ -1147,14 +1163,14 @@ export default function DriverHomeScreen() {
                 latitude: path[0].latitude,
                 longitude: path[0].longitude,
               };
-              speakInstruction('Müşteri alındı. Varış noktasına doğru yola çıkılıyor.');
+              speakInstruction(isBusinessDelivery ? 'Sipariş teslim alındı. Varış noktasına doğru yola çıkılıyor.' : 'Müşteri alındı. Varış noktasına doğru yola çıkılıyor.');
             }
             console.log('[Ride] Customer picked up, navigating to dropoff');
           },
         },
       ]
     );
-  }, [speakInstruction, dropoffCoord, driverSimLoc, pickupCoord, fetchDirections]);
+  }, [speakInstruction, dropoffCoord, driverSimLoc, pickupCoord, fetchDirections, startRideMutation, currentRideId, isBusinessDelivery]);
 
   const openLocationInMaps = useCallback((lat: number, lng: number, label: string) => {
     const url = Platform.select({
@@ -1166,13 +1182,13 @@ export default function DriverHomeScreen() {
     Linking.canOpenURL(url)
       .then((supported) => {
         if (supported) {
-          Linking.openURL(url);
+          void Linking.openURL(url);
         } else {
-          Linking.openURL(webUrl);
+          void Linking.openURL(webUrl);
         }
       })
       .catch(() => {
-        Linking.openURL(webUrl);
+        void Linking.openURL(webUrl);
       });
     console.log('[Maps] Opening location:', label, lat, lng);
   }, []);
@@ -1264,7 +1280,7 @@ export default function DriverHomeScreen() {
         ]
       );
     }
-  }, [resetRideState, confirmedArrival, customerPickedUp]);
+  }, [resetRideState, confirmedArrival, customerPickedUp, cancelRideMutation, currentRideId]);
 
   const handleConfirmDriverCancelWithReason = useCallback(async (reason: string) => {
     setShowDriverCancelReasonModal(false);
@@ -1357,7 +1373,7 @@ export default function DriverHomeScreen() {
               id: 'pickup',
               latitude: pickupCoord.latitude,
               longitude: pickupCoord.longitude,
-              title: 'Müşteri Konumu',
+              title: pickupLocationTitle,
               color: '#2ECC71',
             }] : []),
             ...(rideAccepted && navigatingToDropoff ? [{
@@ -1428,7 +1444,7 @@ export default function DriverHomeScreen() {
           </Marker>
         )}
         {rideAccepted && !navigatingToDropoff && (
-          <Marker coordinate={pickupCoord} title="Müşteri Konumu" anchor={{ x: 0.5, y: 1 }}>
+          <Marker coordinate={pickupCoord} title={pickupLocationTitle} anchor={{ x: 0.5, y: 1 }}>
             <View style={styles.pickupMarker}>
               <MapPin size={18} color="#FFF" />
             </View>
@@ -1596,7 +1612,7 @@ export default function DriverHomeScreen() {
                       <View style={styles.inlineRequestPulse}>
                         <Navigation size={18} color="#FFF" />
                       </View>
-                      <Text style={styles.inlineRequestTitle}>Yeni Yolculuk Talebi!</Text>
+                      <Text style={styles.inlineRequestTitle}>{inlineRequestTitle}</Text>
                     </View>
                     <View style={styles.requestRoute}>
                       <View style={styles.routeDots}>
@@ -1736,7 +1752,7 @@ export default function DriverHomeScreen() {
                   <Navigation size={14} color={Colors.dark.primary} />
                 </View>
                 <View style={styles.trackingContent}>
-                  <Text style={styles.trackingLabel}>{navigatingToDropoff ? 'Varış noktasına gidiliyor' : 'Müşteriye gidiliyor'}</Text>
+                  <Text style={styles.trackingLabel}>{navigatingToDropoff ? 'Varış noktasına gidiliyor' : pickupTravellingLabel}</Text>
                   <View style={styles.trackingRow}>
                     <Text style={styles.trackingEta}>~{navigatingToDropoff ? etaToDropoff : etaToPickup} dk</Text>
                     {totalDistance ? (
@@ -1760,7 +1776,7 @@ export default function DriverHomeScreen() {
             {arrivedAtPickup && !confirmedArrival && (
               <View style={styles.arrivedBanner}>
                 <Text style={styles.arrivedEmoji}>📍</Text>
-                <Text style={styles.arrivedText}>Müşteri noktasına ulaştınız!</Text>
+                <Text style={styles.arrivedText}>{isBusinessDelivery ? 'İşletme noktasına ulaştınız!' : 'Müşteri noktasına ulaştınız!'}</Text>
               </View>
             )}
 
@@ -1777,7 +1793,7 @@ export default function DriverHomeScreen() {
             {confirmedArrival && !customerPickedUp && (
               <View style={styles.waitingBanner}>
                 <UserCheck size={18} color={Colors.dark.primary} />
-                <Text style={styles.waitingText}>Müşteriyi bekliyorsunuz...</Text>
+                <Text style={styles.waitingText}>{isBusinessDelivery ? 'Sipariş hazırlanıyor olabilir...' : 'Müşteriyi bekliyorsunuz...'}</Text>
               </View>
             )}
 
@@ -1795,7 +1811,7 @@ export default function DriverHomeScreen() {
               <View style={styles.activeRideInfo}>
                 <Text style={styles.activeRideName}>{currentCustomerName || 'Müşteri'}</Text>
                 <Text style={styles.activeRideSub}>
-                  {navigatingToDropoff ? (arrivedAtDropoff ? 'Varış noktasına ulaşıldı' : 'Varış noktasına gidiliyor') : (arrivedAtPickup ? 'Müşteri sizi bekliyor' : 'Müşteri yolda bekliyor')}
+                  {navigatingToDropoff ? (arrivedAtDropoff ? 'Varış noktasına ulaşıldı' : 'Varış noktasına gidiliyor') : (arrivedAtPickup ? pickupWaitingLabel : pickupTravellingLabel)}
                 </Text>
               </View>
               <TouchableOpacity style={styles.driverChatButton} onPress={() => {
@@ -1872,10 +1888,10 @@ export default function DriverHomeScreen() {
               <View style={styles.driverArrivalActions}>
                 <TouchableOpacity style={styles.pickupButton} onPress={handlePickupCustomer} activeOpacity={0.85}>
                   <UserCheck size={20} color="#FFF" />
-                  <Text style={styles.pickupButtonText}>Müşteriyi Aldım</Text>
+                  <Text style={styles.pickupButtonText}>{pickupActionLabel}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.completeButton, styles.cancelRideButton, { marginTop: 8 }]} onPress={handleCancelRideDriver} activeOpacity={0.85}>
-                  <Text style={styles.cancelRideButtonText}>Müşteri Gelmedi - İptal Et</Text>
+                  <Text style={styles.cancelRideButtonText}>{isBusinessDelivery ? 'Sipariş Hazır Değil - İptal Et' : 'Müşteri Gelmedi - İptal Et'}</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -1944,7 +1960,7 @@ export default function DriverHomeScreen() {
               onPress={() => {
                 if (selectedDriverCancelReason) {
                   const label = DRIVER_CANCEL_REASONS.find(r => r.key === selectedDriverCancelReason)?.label ?? '';
-                  handleConfirmDriverCancelWithReason(label);
+                  void handleConfirmDriverCancelWithReason(label);
                 }
               }}
               disabled={!selectedDriverCancelReason}
@@ -2062,7 +2078,7 @@ export default function DriverHomeScreen() {
   );
 }
 
-const darkMapStyle = [
+const _darkMapStyle = [
   { elementType: 'geometry', stylers: [{ color: '#242f3e' }] },
   { elementType: 'labels.text.stroke', stylers: [{ color: '#242f3e' }] },
   { elementType: 'labels.text.fill', stylers: [{ color: '#746855' }] },

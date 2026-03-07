@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createTRPCRouter, publicProcedure, protectedProcedure } from "../create-context";
+import { createTRPCRouter, protectedProcedure } from "../create-context";
 import { db } from "../../db/store";
 
 async function sendPushToUser(userId: string, title: string, body: string, data?: Record<string, string>): Promise<void> {
@@ -30,6 +30,19 @@ async function sendPushToUser(userId: string, title: string, body: string, data?
   } catch (err) {
     console.log('[RIDES-PUSH] Error sending to', userId, ':', err);
   }
+}
+
+function createRideNotification(userId: string, title: string, body: string, data?: Record<string, string>): void {
+  const notificationId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  db.notifications.set(notificationId, {
+    id: notificationId,
+    userId,
+    title,
+    body,
+    data,
+    read: false,
+    createdAt: new Date().toISOString(),
+  });
 }
 
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -125,18 +138,108 @@ export const ridesRouter = createTRPCRouter({
         const currentRide = db.rides.get(id);
         if (currentRide && currentRide.status === 'pending') {
           const timedOut = { ...currentRide, status: 'cancelled' as const, cancelledBy: 'customer' as const, cancelReason: 'Zaman aşımı - şoför bulunamadı', cancelledAt: new Date().toISOString() };
-          db.rides.setSync(id, timedOut);
-          sendPushToUser(input.customerId, '⏱️ Yolculuk Zaman Aşımı', 'Müsait şoför bulunamadı. Lütfen tekrar deneyin.', { type: 'ride_timeout', rideId: id });
+          void db.rides.setSync(id, timedOut);
+          void sendPushToUser(input.customerId, '⏱️ Yolculuk Zaman Aşımı', 'Müsait şoför bulunamadı. Lütfen tekrar deneyin.', { type: 'ride_timeout', rideId: id });
           console.log('[RIDES] Ride timed out after 5 minutes:', id);
         }
       }, 5 * 60 * 1000);
 
       const onlineDrivers = db.drivers.getOnlineByCity(input.city);
       for (const driver of onlineDrivers) {
-        sendPushToUser(driver.id, '🔔 Yeni Yolculuk Talebi!', `${input.pickupAddress} → ${input.dropoffAddress}`, { type: 'new_ride_request', rideId: id });
+        void sendPushToUser(driver.id, '🔔 Yeni Yolculuk Talebi!', `${input.pickupAddress} → ${input.dropoffAddress}`, { type: 'new_ride_request', rideId: id });
       }
 
       return { success: true, ride };
+    }),
+
+  createBusinessOrder: protectedProcedure
+    .input(
+      z.object({
+        customerId: z.string(),
+        customerName: z.string(),
+        city: z.string(),
+        district: z.string().optional(),
+        businessId: z.string(),
+        businessName: z.string(),
+        businessImage: z.string().optional(),
+        businessWebsite: z.string().optional(),
+        pickupAddress: z.string(),
+        dropoffAddress: z.string(),
+        pickupLat: z.number().optional(),
+        pickupLng: z.number().optional(),
+        dropoffLat: z.number().optional(),
+        dropoffLng: z.number().optional(),
+        orderItems: z.array(z.object({
+          id: z.string(),
+          name: z.string(),
+          quantity: z.number().min(1),
+          unitPrice: z.number().min(0),
+        })).min(1),
+        orderNote: z.string().max(500).optional(),
+        subtotal: z.number().min(0),
+        deliveryFee: z.number().min(0),
+        duration: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const id = `r_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const ride = {
+        id,
+        customerId: input.customerId,
+        customerName: input.customerName,
+        driverId: '',
+        driverName: '',
+        driverRating: 0,
+        pickupAddress: input.pickupAddress,
+        dropoffAddress: input.dropoffAddress,
+        pickupLat: input.pickupLat,
+        pickupLng: input.pickupLng,
+        dropoffLat: input.dropoffLat,
+        dropoffLng: input.dropoffLng,
+        status: 'pending' as const,
+        price: input.subtotal + input.deliveryFee,
+        distance: 'İşletme teslimatı',
+        duration: input.duration ?? '25-35 dk',
+        createdAt: new Date().toISOString(),
+        paymentMethod: 'cash' as const,
+        isFreeRide: false,
+        city: input.city,
+        orderType: 'business_delivery' as const,
+        businessId: input.businessId,
+        businessName: input.businessName,
+        businessImage: input.businessImage,
+        businessWebsite: input.businessWebsite,
+        orderItems: input.orderItems,
+        orderNote: input.orderNote,
+      };
+
+      await db.rides.setSync(id, ride);
+      console.log('[RIDES] Business order created:', id, input.businessName, 'items:', input.orderItems.length, 'city:', input.city);
+
+      const onlineCouriers = db.drivers.getOnlineCouriersByCity(input.city);
+      for (const courier of onlineCouriers) {
+        createRideNotification(
+          courier.id,
+          '📦 Yeni işletme siparişi',
+          `${input.businessName} → ${input.dropoffAddress}`,
+          { type: 'business_delivery', rideId: id, businessId: input.businessId }
+        );
+        await sendPushToUser(
+          courier.id,
+          '📦 Yeni işletme siparişi',
+          `${input.businessName} → ${input.dropoffAddress}`,
+          { type: 'business_delivery', rideId: id, businessId: input.businessId }
+        );
+      }
+
+      createRideNotification(
+        input.customerId,
+        '✅ Siparişiniz alındı',
+        `${input.businessName} siparişiniz kuryelere iletildi.`,
+        { type: 'business_delivery_created', rideId: id, businessId: input.businessId }
+      );
+
+      return { success: true, ride, notifiedCouriers: onlineCouriers.length };
     }),
 
   accept: protectedProcedure
@@ -171,7 +274,7 @@ export const ridesRouter = createTRPCRouter({
       await db.rides.setSync(input.rideId, updated);
       console.log("[RIDES] Accepted ride:", input.rideId, "by driver:", input.driverId);
 
-      sendPushToUser(ride.customerId, '✅ Yolculuk Kabul Edildi', `${input.driverName} yolculuğunuzu kabul etti!`, { type: 'ride_accepted', rideId: input.rideId, driverName: input.driverName });
+      void sendPushToUser(ride.customerId, '✅ Yolculuk Kabul Edildi', `${input.driverName} yolculuğunuzu kabul etti!`, { type: 'ride_accepted', rideId: input.rideId, driverName: input.driverName });
 
       return { success: true, ride: updated };
     }),
@@ -186,7 +289,7 @@ export const ridesRouter = createTRPCRouter({
       await db.rides.setSync(input.rideId, updated);
       console.log("[RIDES] Started ride:", input.rideId);
 
-      sendPushToUser(ride.customerId, '🚗 Yolculuk Başladı', 'Şoförünüz yola çıktı. İyi yolculuklar!', { type: 'ride_started', rideId: input.rideId });
+      void sendPushToUser(ride.customerId, '🚗 Yolculuk Başladı', 'Şoförünüz yola çıktı. İyi yolculuklar!', { type: 'ride_started', rideId: input.rideId });
 
       return { success: true, ride: updated };
     }),
@@ -218,7 +321,7 @@ export const ridesRouter = createTRPCRouter({
 
       console.log("[RIDES] Completed ride:", input.rideId);
 
-      sendPushToUser(ride.customerId, '🎉 Yolculuk Tamamlandı', `Toplam: ₺${ride.price.toFixed(2)}. İyi günler!`, { type: 'ride_completed', rideId: input.rideId, price: ride.price.toString() });
+      void sendPushToUser(ride.customerId, '🎉 Yolculuk Tamamlandı', `Toplam: ₺${ride.price.toFixed(2)}. İyi günler!`, { type: 'ride_completed', rideId: input.rideId, price: ride.price.toString() });
 
       return { success: true, ride: updated };
     }),
@@ -229,7 +332,7 @@ export const ridesRouter = createTRPCRouter({
       const ride = db.rides.get(input.rideId);
       if (!ride) return { success: false, error: "Yolculuk bulunamadı" };
 
-      sendPushToUser(
+      void sendPushToUser(
         ride.customerId,
         '📍 Şoför Adresinize Geldi!',
         `${input.driverName} konumunuza ulaştı. Lütfen varışı onaylayın. Onayladıktan sonra yolculuğu iptal edemezsiniz ve yolculuk bedelini ödemekle yükümlüsünüz.`,
@@ -284,15 +387,15 @@ export const ridesRouter = createTRPCRouter({
       console.log("[RIDES] Cancelled ride:", input.rideId, "by:", cancelledBy, "reason:", input.cancelReason, "fee:", cancellationFee);
 
       if (input.cancelledBy === "driver" && ride.customerId) {
-        sendPushToUser(ride.customerId, '❌ Yolculuk İptal Edildi', `Şoför yolculuğu iptal etti. Sebep: ${input.cancelReason ?? 'Belirtilmedi'}`, { type: 'ride_cancelled', rideId: input.rideId });
+        void sendPushToUser(ride.customerId, '❌ Yolculuk İptal Edildi', `Şoför yolculuğu iptal etti. Sebep: ${input.cancelReason ?? 'Belirtilmedi'}`, { type: 'ride_cancelled', rideId: input.rideId });
       } else if (input.cancelledBy === "customer" && ride.driverId) {
-        sendPushToUser(ride.driverId, '❌ Yolculuk İptal Edildi', `${ride.customerName} yolculuğu iptal etti. Sebep: ${input.cancelReason ?? 'Belirtilmedi'}`, { type: 'ride_cancelled', rideId: input.rideId });
+        void sendPushToUser(ride.driverId, '❌ Yolculuk İptal Edildi', `${ride.customerName} yolculuğu iptal etti. Sebep: ${input.cancelReason ?? 'Belirtilmedi'}`, { type: 'ride_cancelled', rideId: input.rideId });
       } else {
         if (ride.driverId) {
-          sendPushToUser(ride.driverId, '❌ Yolculuk İptal Edildi', `${ride.customerName} yolculuğu iptal etti.`, { type: 'ride_cancelled', rideId: input.rideId });
+          void sendPushToUser(ride.driverId, '❌ Yolculuk İptal Edildi', `${ride.customerName} yolculuğu iptal etti.`, { type: 'ride_cancelled', rideId: input.rideId });
         }
         if (ride.customerId) {
-          sendPushToUser(ride.customerId, '❌ Yolculuk İptal Edildi', 'Yolculuğunuz iptal edildi.', { type: 'ride_cancelled', rideId: input.rideId });
+          void sendPushToUser(ride.customerId, '❌ Yolculuk İptal Edildi', 'Yolculuğunuz iptal edildi.', { type: 'ride_cancelled', rideId: input.rideId });
         }
       }
 
@@ -360,9 +463,13 @@ export const ridesRouter = createTRPCRouter({
     }),
 
   getPendingByCity: protectedProcedure
-    .input(z.object({ city: z.string() }))
+    .input(z.object({ city: z.string(), driverCategory: z.enum(['driver', 'scooter', 'courier']).optional() }))
     .query(({ input }) => {
-      return db.rides.getPendingByCity(input.city);
+      const pendingRides = db.rides.getPendingByCity(input.city);
+      if (input.driverCategory === 'courier') {
+        return pendingRides.filter((ride) => ride.orderType === 'business_delivery' || ride.orderType === 'custom_delivery');
+      }
+      return pendingRides.filter((ride) => ride.orderType !== 'business_delivery' && ride.orderType !== 'custom_delivery');
     }),
 
   findBestDriver: protectedProcedure

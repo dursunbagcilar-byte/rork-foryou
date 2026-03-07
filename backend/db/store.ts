@@ -1,4 +1,4 @@
-import type { User, Driver, Ride, Rating, Message, Payment, Session, PushToken, Notification, DriverDocuments, Referral } from "./types";
+import type { User, Driver, Ride, Rating, Message, Payment, Session, PushToken, Notification, DriverDocuments, Referral, Business } from "./types";
 import { dbLoadAll, dbUpsert, dbDelete, dbGet, isDbConfigured, setDbConfig, reapplyDbConfig, getCachedDbConfig, flushPendingOps, getPendingOpsCount } from "./rork-db";
 
 const users = new Map<string, User>();
@@ -19,6 +19,7 @@ const messageReadStatus = new Map<string, string>();
 const scheduledRides = new Map<string, any>();
 const referrals = new Map<string, Referral>();
 const referralCodeIndex = new Map<string, string>();
+const businesses = new Map<string, Business>();
 
 let _initialized = false;
 let _initPromise: Promise<void> | null = null;
@@ -99,7 +100,7 @@ async function loadFromDb(): Promise<void> {
   console.log('[STORE] Loading data from Rork DB...');
 
   try {
-    const [dbUsers, dbDrivers, dbRides, dbRatings, dbPasswords, dbPayments, dbMessages, dbLocations, dbSessions, dbPushTokens, dbNotifications, dbDriverDocs] = await Promise.all([
+    const [dbUsers, dbDrivers, dbRides, dbRatings, dbPasswords, dbPayments, dbMessages, dbLocations, dbSessions, dbPushTokens, dbNotifications, dbDriverDocs, dbBusinesses] = await Promise.all([
       dbLoadAll<User>('users'),
       dbLoadAll<Driver>('drivers'),
       dbLoadAll<Ride>('rides'),
@@ -112,6 +113,7 @@ async function loadFromDb(): Promise<void> {
       dbLoadAll<PushToken>('push_tokens'),
       dbLoadAll<Notification>('notifications'),
       dbLoadAll<DriverDocuments>('driver_documents'),
+      dbLoadAll<Business>('businesses'),
     ]);
 
     console.log('[STORE] Raw DB counts - users:', dbUsers.length, 'drivers:', dbDrivers.length, 'passwords:', dbPasswords.length, 'sessions:', dbSessions.length);
@@ -205,8 +207,16 @@ async function loadFromDb(): Promise<void> {
         driverDocuments.set(driverId, doc);
       }
     }
+    for (const business of dbBusinesses) {
+      const businessId = recoverOriginalId(business, 'businesses');
+      if (businessId) {
+        business.id = businessId;
+        delete (business as any)._originalId;
+        businesses.set(businessId, business);
+      }
+    }
 
-    console.log(`[STORE] Loaded from DB: ${users.size} users, ${drivers.size} drivers, ${rides.size} rides, ${ratings.size} ratings, ${passwords.size} passwords, ${payments.size} payments, ${sessions.size} sessions`);
+    console.log(`[STORE] Loaded from DB: ${users.size} users, ${drivers.size} drivers, ${rides.size} rides, ${ratings.size} ratings, ${passwords.size} passwords, ${payments.size} payments, ${sessions.size} sessions, ${businesses.size} businesses`);
   } catch (err) {
     console.log('[STORE] Error loading from DB, continuing with in-memory:', err);
   }
@@ -768,6 +778,25 @@ export const db = {
         }
       }
     },
+  },
+  businesses: {
+    get: (id: string) => businesses.get(id),
+    set: (id: string, business: Business) => {
+      businesses.set(id, business);
+      persistInBackground(() => dbUpsert('businesses', id, { ...business, _originalId: id, rorkId: id }));
+    },
+    setSync: async (id: string, business: Business) => {
+      businesses.set(id, business);
+      await persistSync(() => dbUpsert('businesses', id, { ...business, _originalId: id, rorkId: id }));
+    },
+    getByOwner: (ownerDriverId: string) =>
+      Array.from(businesses.values()).find((business) => business.ownerDriverId === ownerDriverId) ?? null,
+    getByCity: (city: string, district?: string) =>
+      Array.from(businesses.values())
+        .filter((business) => business.city === city)
+        .filter((business) => (district ? business.district === district : true))
+        .sort((a, b) => b.rating - a.rating),
+    getAll: () => Array.from(businesses.values()),
   },
   rides: {
     get: (id: string) => rides.get(id),

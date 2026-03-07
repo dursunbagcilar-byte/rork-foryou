@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, Car, Phone, Mail, Lock, User, Palette, Hash, Users, MapPin, ChevronDown, Search, X, CheckCircle, Camera, Bike, Package, Heart, UserPlus, AlertTriangle, ShieldCheck, Square, CheckSquare, FileText, Zap, HardHat } from 'lucide-react-native';
+import { ArrowLeft, Car, Phone, Mail, Lock, User, Palette, Hash, Users, MapPin, ChevronDown, Search, X, CheckCircle, Camera, Bike, Package, Heart, UserPlus, AlertTriangle, ShieldCheck, Square, CheckSquare, FileText, Zap, HardHat, Store, Globe } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Image as ExpoImage } from 'expo-image';
 import { Colors } from '@/constants/colors';
@@ -14,6 +14,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { TURKISH_CITIES, getCityByName } from '@/constants/cities';
 import type { City } from '@/constants/cities';
 import { usePrivacy } from '@/contexts/PrivacyContext';
+import { trpcClient } from '@/lib/trpc';
+import { getGoogleMapsApiKey } from '@/utils/maps';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 
 type DriverCategory = 'driver' | 'scooter' | 'courier';
@@ -45,6 +47,8 @@ const DRIVER_CATEGORIES: { key: DriverCategory; label: string; icon: React.React
   { key: 'scooter', label: 'Scooterli Şoför', icon: <Bike size={20} color="#FFF" />, color: '#00BCD4', description: 'Müşteriye hızlı ulaşım' },
   { key: 'courier', label: 'Kurye Ol', icon: <Package size={20} color="#FFF" />, color: '#8BC34A', description: 'Paket ve kargo taşımacılığı' },
 ];
+
+const GOOGLE_API_KEY = getGoogleMapsApiKey();
 
 export default function RegisterDriverScreen() {
   const router = useRouter();
@@ -90,6 +94,13 @@ export default function RegisterDriverScreen() {
   const [scooterSubType, setScooterSubType] = useState<'escooter' | 'motorcycle'>('escooter');
   const [helmetPhoto, setHelmetPhoto] = useState<string>('');
   const [kvkkAccepted, setKvkkAccepted] = useState<boolean>(false);
+  const [enableBusinessRegistration, setEnableBusinessRegistration] = useState<boolean>(false);
+  const [businessName, setBusinessName] = useState<string>('');
+  const [businessWebsite, setBusinessWebsite] = useState<string>('');
+  const [businessImage, setBusinessImage] = useState<string>('');
+  const [businessDescription, setBusinessDescription] = useState<string>('');
+  const [businessCategory, setBusinessCategory] = useState<string>('Yemek');
+  const [businessAddress, setBusinessAddress] = useState<string>('');
   const { acceptAllConsents } = usePrivacy();
 
 
@@ -206,6 +217,28 @@ export default function RegisterDriverScreen() {
     );
   }, [getImageDataUri]);
 
+  const geocodeBusinessAddress = useCallback(async (address: string, city: string, district: string): Promise<{ latitude: number; longitude: number } | null> => {
+    if (!GOOGLE_API_KEY) {
+      console.log('[RegisterDriver] No Google Maps key for business geocoding');
+      return null;
+    }
+
+    try {
+      const query = encodeURIComponent(`${address}, ${district}, ${city}, Türkiye`);
+      const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${query}&language=tr&key=${GOOGLE_API_KEY}`);
+      const data = await response.json();
+      const location = data?.results?.[0]?.geometry?.location;
+      if (location?.lat && location?.lng) {
+        console.log('[RegisterDriver] Business geocoded:', location.lat, location.lng);
+        return { latitude: location.lat, longitude: location.lng };
+      }
+    } catch (error) {
+      console.log('[RegisterDriver] Business geocode error:', error);
+    }
+
+    return null;
+  }, []);
+
   const parsedLicenseDate = useMemo(() => {
     const d = parseInt(licenseDay, 10);
     const m = parseInt(licenseMonth, 10);
@@ -275,6 +308,10 @@ export default function RegisterDriverScreen() {
       }
       if (!helmetPhoto) {
         Alert.alert('Uyarı', 'Lütfen kask fotoğrafınızı yükleyin');
+        return false;
+      }
+      if (enableBusinessRegistration && (!businessName || !businessWebsite || !businessImage || !businessAddress || !businessCategory)) {
+        Alert.alert('Uyarı', 'İşletme kaydı için isim, website, görsel, kategori ve adres alanlarını doldurun');
         return false;
       }
     } else {
@@ -351,6 +388,28 @@ export default function RegisterDriverScreen() {
       const licenseIssueDateStr = isCourier ? undefined : (parsedLicenseDate ? parsedLicenseDate.toISOString() : undefined);
       await acceptAllConsents();
       await registerDriver(name, normalizedPhone, email, password, isCourier ? '' : vehiclePlate, vehicleModel, vehicleColor, partnerName, selectedCity, selectedDistrict, licenseIssueDateStr, driverCategory);
+
+      if (isCourier && enableBusinessRegistration) {
+        const businessCoordinates = await geocodeBusinessAddress(businessAddress, selectedCity, selectedDistrict);
+        await trpcClient.businesses.register.mutate({
+          name: businessName.trim(),
+          website: businessWebsite.trim(),
+          image: businessImage.trim(),
+          description: businessDescription.trim(),
+          category: businessCategory.trim(),
+          address: businessAddress.trim(),
+          city: selectedCity,
+          district: selectedDistrict,
+          latitude: businessCoordinates?.latitude,
+          longitude: businessCoordinates?.longitude,
+          phone: normalizedPhone,
+          deliveryTime: '25-35 dk',
+          deliveryFee: 25,
+          minOrder: 100,
+        });
+        console.log('[RegisterDriver] Business registration completed for courier account');
+      }
+
       console.log('[RegisterDriver] Registration successful, saving documents...');
       try {
         await saveDriverDocuments({
@@ -409,6 +468,13 @@ export default function RegisterDriverScreen() {
     setLicenseDateError('');
     setAgreementAccepted(false);
     setKvkkAccepted(false);
+    setEnableBusinessRegistration(false);
+    setBusinessName('');
+    setBusinessWebsite('');
+    setBusinessImage('');
+    setBusinessDescription('');
+    setBusinessCategory('Yemek');
+    setBusinessAddress('');
     successAnim.setValue(0);
     successScale.setValue(0.5);
     console.log('Form reset for new driver registration');
@@ -716,6 +782,43 @@ export default function RegisterDriverScreen() {
                 </>
               )}
             </View>
+
+            {driverCategory === 'courier' && (
+              <>
+                <Text style={styles.sectionTitle}>İşletme Kaydı</Text>
+                <Text style={styles.partnerNote}>Yemeksepeti veya Trendyol Go benzeri işletmeleri sisteme açmak için bilgileri ekleyin</Text>
+                <View style={styles.formSection}>
+                  <TouchableOpacity
+                    style={[styles.businessToggleCard, enableBusinessRegistration && styles.businessToggleCardActive]}
+                    onPress={() => setEnableBusinessRegistration((previous) => !previous)}
+                    activeOpacity={0.85}
+                  >
+                    <View style={styles.businessToggleRow}>
+                      <View style={styles.businessToggleTextWrap}>
+                        <Text style={styles.businessToggleTitle}>Bu hesap bir işletme de açsın</Text>
+                        <Text style={styles.businessToggleSub}>İşletme adı, web sitesi, görsel ve adres bilgisi müşteri ana sayfasında gösterilir</Text>
+                      </View>
+                      {enableBusinessRegistration ? (
+                        <CheckSquare size={22} color={Colors.dark.primary} />
+                      ) : (
+                        <Square size={22} color={Colors.dark.textMuted} />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+
+                  {enableBusinessRegistration && (
+                    <>
+                      <InputField renderIcon={() => <Store size={18} color={Colors.dark.textMuted} />} label="İşletme Adı" placeholder="Örnek Burger House" value={businessName} onChangeText={setBusinessName} />
+                      <InputField renderIcon={() => <Globe size={18} color={Colors.dark.textMuted} />} label="Web Sitesi" placeholder="www.isletmeniz.com" value={businessWebsite} onChangeText={setBusinessWebsite} />
+                      <InputField renderIcon={() => <Camera size={18} color={Colors.dark.textMuted} />} label="Kapak Görseli URL" placeholder="https://.../cover.jpg" value={businessImage} onChangeText={setBusinessImage} helpText="İnternette açık bir görsel URL'si girin" />
+                      <InputField renderIcon={() => <Package size={18} color={Colors.dark.textMuted} />} label="Kategori" placeholder="Yemek, market, tatlı" value={businessCategory} onChangeText={setBusinessCategory} />
+                      <InputField renderIcon={() => <MapPin size={18} color={Colors.dark.textMuted} />} label="İşletme Adresi" placeholder="Mahalle, sokak, bina no" value={businessAddress} onChangeText={setBusinessAddress} helpText="Adres otomatik olarak harita konumuna çevrilmeye çalışılır" />
+                      <InputField renderIcon={() => <FileText size={18} color={Colors.dark.textMuted} />} label="Kısa Açıklama" placeholder="Özel menüler ve hızlı teslimat" value={businessDescription} onChangeText={setBusinessDescription} />
+                    </>
+                  )}
+                </View>
+              </>
+            )}
 
             {driverCategory !== 'courier' && (
               <>
@@ -1362,6 +1465,12 @@ const styles = StyleSheet.create({
   inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.dark.inputBg, borderRadius: 14, borderWidth: 1, borderColor: Colors.dark.inputBorder, paddingHorizontal: 16, gap: 12 },
   input: { flex: 1, paddingVertical: 16, fontSize: 16, color: Colors.dark.text },
   inputHelpText: { fontSize: 12, lineHeight: 18, color: Colors.dark.textMuted },
+  businessToggleCard: { backgroundColor: Colors.dark.card, borderRadius: 16, borderWidth: 1, borderColor: Colors.dark.cardBorder, padding: 16 },
+  businessToggleCardActive: { borderColor: Colors.dark.primary, backgroundColor: 'rgba(245,166,35,0.08)' },
+  businessToggleRow: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, gap: 12 },
+  businessToggleTextWrap: { flex: 1 },
+  businessToggleTitle: { fontSize: 15, fontWeight: '700' as const, color: Colors.dark.text, marginBottom: 4 },
+  businessToggleSub: { fontSize: 12, lineHeight: 18, color: Colors.dark.textMuted },
   pickerButton: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.dark.inputBg,
     borderRadius: 14, borderWidth: 1, borderColor: Colors.dark.inputBorder,

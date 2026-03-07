@@ -41,6 +41,46 @@ export interface Driver {
   createdAt: string;
 }
 
+export interface BusinessMenuItem {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  image: string;
+}
+
+export interface BusinessOrderItem {
+  id: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+export interface Business {
+  id: string;
+  ownerDriverId: string;
+  name: string;
+  website: string;
+  image: string;
+  description: string;
+  category: string;
+  city: string;
+  district: string;
+  address: string;
+  latitude?: number;
+  longitude?: number;
+  phone?: string;
+  rating: number;
+  reviewCount: number;
+  deliveryTime: string;
+  deliveryFee: number;
+  minOrder: number;
+  menu: BusinessMenuItem[];
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Ride {
   id: string;
   customerId: string;
@@ -68,6 +108,13 @@ export interface Ride {
   paymentStatus?: "pending" | "paid" | "failed";
   isFreeRide: boolean;
   city: string;
+  orderType?: "ride" | "business_delivery" | "custom_delivery";
+  businessId?: string;
+  businessName?: string;
+  businessImage?: string;
+  businessWebsite?: string;
+  orderItems?: BusinessOrderItem[];
+  orderNote?: string;
 }
 
 export interface Payment {

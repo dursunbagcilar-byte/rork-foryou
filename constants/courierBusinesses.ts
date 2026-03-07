@@ -10,14 +10,20 @@ export interface CourierBusiness {
   id: string;
   name: string;
   city: string;
+  district?: string;
   address: string;
   image: string;
+  website?: string;
+  description?: string;
+  latitude?: number;
+  longitude?: number;
   rating: number;
   reviewCount: number;
   deliveryTime: string;
   deliveryFee: number;
   minOrder: number;
   menu: CourierMenuItem[];
+  isActive?: boolean;
   safetyPartner?: boolean;
   safetyLevel?: 1 | 2 | 3;
 }

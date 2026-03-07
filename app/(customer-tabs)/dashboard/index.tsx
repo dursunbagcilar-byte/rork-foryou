@@ -238,6 +238,14 @@ export default function CustomerHomeScreen() {
       staleTime: 40000,
     }
   );
+  const businessesByCityQuery = trpc.businesses.listByCity.useQuery(
+    { city: user?.city ?? '', district: user?.district ?? '' },
+    {
+      enabled: !!user?.city,
+      refetchInterval: 30000,
+      staleTime: 25000,
+    }
+  );
   const cityCouriers = couriersByCityQuery.data ?? [];
   const hasCouriersInCity = cityCouriers.length > 0;
   const onlineCouriersCount = cityCouriers.filter(c => c.isOnline).length;
@@ -959,6 +967,7 @@ export default function CustomerHomeScreen() {
 
   const initializePaymentMutation = trpc.payments.initializePayment.useMutation();
   const createRideMutation = trpc.rides.create.useMutation();
+  const createBusinessOrderMutation = trpc.rides.createBusinessOrder.useMutation();
   const cancelRideMutation = trpc.rides.cancel.useMutation();
   const createRatingMutation = trpc.ratings.create.useMutation();
   const sendMessageMutation = trpc.messages.send.useMutation();
@@ -1479,9 +1488,13 @@ export default function CustomerHomeScreen() {
 
   const freeRidesLeft = remainingFreeRides();
 
-  const cityBusinesses = useMemo(() => {
+  const cityBusinesses = useMemo<CourierBusiness[]>(() => {
+    const backendBusinesses = businessesByCityQuery.data as CourierBusiness[] | undefined;
+    if (backendBusinesses && backendBusinesses.length > 0) {
+      return backendBusinesses;
+    }
     return getCourierBusinessesByCity(user?.city ?? '');
-  }, [user?.city]);
+  }, [businessesByCityQuery.data, user?.city]);
 
   const sponsorVenueName = useMemo(() => {
     const safeVenues = cityVenues.filter(v => v.safetyLevel && v.safetyLevel >= 2);
@@ -1490,20 +1503,20 @@ export default function CustomerHomeScreen() {
   }, [cityVenues]);
 
   const handleOpenCourier = useCallback(() => {
-    if (!hasCouriersInCity) {
+    if (cityBusinesses.length === 0 && !hasCouriersInCity) {
       Alert.alert(
-        'Kurye Bulunamadı',
-        `${user?.district ?? ''}, ${user?.city ?? 'Bu bölge'} için henüz kayıtlı kurye bulunmamaktadır. Kurye kaydı yapıldığında sipariş verebilirsiniz.`,
+        'İşletme Bulunamadı',
+        `${user?.district ?? ''}, ${user?.city ?? 'Bu bölge'} için henüz kayıtlı işletme veya kurye bulunmamaktadır.`,
         [{ text: 'Tamam' }]
       );
-      console.log('[Courier] No couriers in city/district:', user?.city, user?.district);
+      console.log('[Courier] No businesses or couriers in city/district:', user?.city, user?.district);
       return;
     }
     setShowCourierPanel(true);
     setSelectedCourierBiz(null);
     setCourierCart([]);
-    console.log('[Courier] Opening courier panel for city:', user?.city, 'district:', user?.district, 'couriers:', cityCouriers.length);
-  }, [user?.city, user?.district, hasCouriersInCity, cityCouriers.length]);
+    console.log('[Courier] Opening courier panel for city:', user?.city, 'district:', user?.district, 'couriers:', cityCouriers.length, 'businesses:', cityBusinesses.length);
+  }, [user?.city, user?.district, hasCouriersInCity, cityCouriers.length, cityBusinesses.length]);
 
   const handleSelectBusiness = useCallback((biz: CourierBusiness) => {
     setSelectedCourierBiz(biz);
@@ -1542,7 +1555,7 @@ export default function CustomerHomeScreen() {
     return courierCart.reduce((sum, c) => sum + c.quantity, 0);
   }, [courierCart]);
 
-  const handlePlaceCourierOrder = useCallback(() => {
+  const handlePlaceCourierOrder = useCallback(async () => {
     if (!selectedCourierBiz || courierCart.length === 0) return;
     if (courierCartTotal < selectedCourierBiz.minOrder) {
       Alert.alert('Minimum Sipariş', `Minimum sipariş tutarı ₺${selectedCourierBiz.minOrder}`);
@@ -1557,10 +1570,49 @@ export default function CustomerHomeScreen() {
       console.log('[Courier] No online couriers, order blocked');
       return;
     }
-    setShowOrderSuccess(true);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    console.log('[Courier] Order placed:', selectedCourierBiz.name, 'Total:', courierCartTotal + selectedCourierBiz.deliveryFee, 'online couriers:', onlineCouriersCount);
-  }, [selectedCourierBiz, courierCart, courierCartTotal, onlineCouriersCount, user?.city, user?.district]);
+
+    try {
+      const result = await createBusinessOrderMutation.mutateAsync({
+        customerId: user?.id ?? '',
+        customerName: user?.name ?? 'Müşteri',
+        city: user?.city ?? '',
+        district: user?.district ?? '',
+        businessId: selectedCourierBiz.id,
+        businessName: selectedCourierBiz.name,
+        businessImage: selectedCourierBiz.image,
+        businessWebsite: selectedCourierBiz.website,
+        pickupAddress: selectedCourierBiz.address,
+        dropoffAddress: user?.city ? `${user.city}${user.district ? ` / ${user.district}` : ''}` : 'Teslimat Adresi',
+        pickupLat: selectedCourierBiz.latitude,
+        pickupLng: selectedCourierBiz.longitude,
+        dropoffLat: mapRegion.latitude,
+        dropoffLng: mapRegion.longitude,
+        orderItems: courierCart.map((item) => ({
+          id: item.menuItem.id,
+          name: item.menuItem.name,
+          quantity: item.quantity,
+          unitPrice: item.menuItem.price,
+        })),
+        orderNote: courierCart.map((item) => `${item.quantity}x ${item.menuItem.name}`).join(', '),
+        subtotal: courierCartTotal,
+        deliveryFee: selectedCourierBiz.deliveryFee,
+        duration: selectedCourierBiz.deliveryTime,
+      });
+
+      if (result.success && result.ride) {
+        setCurrentBackendRideId(result.ride.id);
+        setShowOrderSuccess(true);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        console.log('[Courier] Order created on backend:', result.ride.id, 'notified couriers:', result.notifiedCouriers ?? 0);
+        return;
+      }
+
+      Alert.alert('Hata', 'Sipariş oluşturulamadı. Lütfen tekrar deneyin.');
+    } catch (error) {
+      console.log('[Courier] createBusinessOrder error:', error);
+      Alert.alert('Hata', 'Sipariş oluşturulamadı. Lütfen tekrar deneyin.');
+    }
+  }, [selectedCourierBiz, courierCart, courierCartTotal, onlineCouriersCount, user?.id, user?.name, user?.city, user?.district, mapRegion.latitude, mapRegion.longitude, createBusinessOrderMutation]);
 
   const handleCloseOrderSuccess = useCallback(() => {
     setShowOrderSuccess(false);
