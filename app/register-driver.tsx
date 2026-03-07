@@ -19,6 +19,7 @@ import { getGoogleMapsApiKey } from '@/utils/maps';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 
 type DriverCategory = 'driver' | 'scooter' | 'courier';
+type RegistrationCategory = DriverCategory | 'business';
 
 function extractDriverErrorMessage(e: unknown): string {
   const errObj = e as any;
@@ -42,10 +43,11 @@ function extractDriverErrorMessage(e: unknown): string {
   return 'Kayıt oluşturulamadı. Lütfen tekrar deneyin.';
 }
 
-const DRIVER_CATEGORIES: { key: DriverCategory; label: string; icon: React.ReactNode; color: string; description: string }[] = [
+const DRIVER_CATEGORIES: { key: RegistrationCategory; label: string; icon: React.ReactNode; color: string; description: string }[] = [
   { key: 'driver', label: 'Şoför Ol', icon: <Car size={20} color="#FFF" />, color: Colors.dark.primary, description: 'Müşteri ve aracını konuma ulaştır' },
   { key: 'scooter', label: 'Scooterli Şoför', icon: <Bike size={20} color="#FFF" />, color: '#00BCD4', description: 'Müşteriye hızlı ulaşım' },
   { key: 'courier', label: 'Kurye Ol', icon: <Package size={20} color="#FFF" />, color: '#8BC34A', description: 'Paket ve kargo taşımacılığı' },
+  { key: 'business', label: 'İşletme', icon: <Store size={20} color="#FFF" />, color: '#FF8A65', description: 'İşletmeni ve sipariş akışını ekle' },
 ];
 
 const GOOGLE_API_KEY = getGoogleMapsApiKey();
@@ -57,7 +59,7 @@ export default function RegisterDriverScreen() {
   const isSmall = width < 360;
   const isTablet = width >= 600;
   const hPad = isSmall ? 18 : isTablet ? 40 : 24;
-  const [driverCategory, setDriverCategory] = useState<DriverCategory>('driver');
+  const [registrationCategory, setRegistrationCategory] = useState<RegistrationCategory>('driver');
   const [name, setName] = useState<string>('');
   const [phone, setPhone] = useState<string>('');
   const [email, setEmail] = useState<string>('');
@@ -101,6 +103,10 @@ export default function RegisterDriverScreen() {
   const [businessDescription, setBusinessDescription] = useState<string>('');
   const [businessCategory, setBusinessCategory] = useState<string>('Yemek');
   const [businessAddress, setBusinessAddress] = useState<string>('');
+  const driverCategory: DriverCategory = registrationCategory === 'business' ? 'courier' : registrationCategory;
+  const isCourierLike = driverCategory === 'courier';
+  const isBusinessCategorySelected = registrationCategory === 'business';
+  const shouldShowBusinessFields = isBusinessCategorySelected || enableBusinessRegistration;
   const { acceptAllConsents } = usePrivacy();
 
 
@@ -310,7 +316,7 @@ export default function RegisterDriverScreen() {
         Alert.alert('Uyarı', 'Lütfen kask fotoğrafınızı yükleyin');
         return false;
       }
-      if (enableBusinessRegistration && (!businessName || !businessWebsite || !businessImage || !businessAddress || !businessCategory)) {
+      if (shouldShowBusinessFields && (!businessName || !businessWebsite || !businessImage || !businessAddress || !businessCategory)) {
         Alert.alert('Uyarı', 'İşletme kaydı için isim, website, görsel, kategori ve adres alanlarını doldurun');
         return false;
       }
@@ -383,13 +389,13 @@ export default function RegisterDriverScreen() {
     if (!validateFormFields()) return;
     setLoading(true);
     try {
-      const isCourier = driverCategory === 'courier';
+      const isCourier = isCourierLike;
       const normalizedPhone = normalizeTurkishPhone(phone);
       const licenseIssueDateStr = isCourier ? undefined : (parsedLicenseDate ? parsedLicenseDate.toISOString() : undefined);
       await acceptAllConsents();
       await registerDriver(name, normalizedPhone, email, password, isCourier ? '' : vehiclePlate, vehicleModel, vehicleColor, partnerName, selectedCity, selectedDistrict, licenseIssueDateStr, driverCategory);
 
-      if (isCourier && enableBusinessRegistration) {
+      if (isCourier && shouldShowBusinessFields) {
         const businessCoordinates = await geocodeBusinessAddress(businessAddress, selectedCity, selectedDistrict);
         await trpcClient.businesses.register.mutate({
           name: businessName.trim(),
@@ -459,7 +465,7 @@ export default function RegisterDriverScreen() {
     setRegistrationBack('');
     setCriminalRecord('');
     setTaxCertificate('');
-    setDriverCategory('driver');
+    setRegistrationCategory('driver');
     setScooterSubType('escooter');
     setHelmetPhoto('');
     setLicenseDay('');
@@ -490,6 +496,40 @@ export default function RegisterDriverScreen() {
     router.replace('/(driver-tabs)/map');
   };
 
+  const handleCategoryChange = (category: RegistrationCategory) => {
+    setRegistrationCategory(category);
+    setEnableBusinessRegistration(category === 'business');
+    console.log('Selected registration category:', category);
+  };
+
+  const badgeLabel = isBusinessCategorySelected
+    ? 'İşletme Kaydı'
+    : driverCategory === 'driver'
+      ? 'Şoför Kaydı'
+      : driverCategory === 'scooter'
+        ? 'Scooter Şoför Kaydı'
+        : 'Kurye Kaydı';
+
+  const screenTitle = isBusinessCategorySelected
+    ? 'İşletme Kaydı Oluştur'
+    : driverCategory === 'driver'
+      ? 'Şoför Ol'
+      : driverCategory === 'scooter'
+        ? 'Scooterli Şoför Ol'
+        : 'Kurye Ol';
+
+  const screenSubtitle = isBusinessCategorySelected
+    ? 'İşletmenizi sisteme ekleyin ve teslimat akışınızı başlatın'
+    : 'Ekibimize katılın ve kazanmaya başlayın';
+
+  const registerButtonLabel = isBusinessCategorySelected
+    ? 'İşletme Olarak Kayıt Ol'
+    : driverCategory === 'driver'
+      ? 'Şoför Olarak Kayıt Ol'
+      : driverCategory === 'scooter'
+        ? 'Scooter Şoför Olarak Kayıt Ol'
+        : 'Kurye Olarak Kayıt Ol';
+
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
@@ -502,21 +542,18 @@ export default function RegisterDriverScreen() {
 
             </View>
             <View style={styles.badge}>
-              {driverCategory === 'driver' && <Car size={16} color={Colors.dark.primary} />}
-              {driverCategory === 'scooter' && <Bike size={16} color="#00BCD4" />}
-              {driverCategory === 'courier' && <Package size={16} color="#8BC34A" />}
-              <Text style={styles.badgeText}>
-                {driverCategory === 'driver' ? 'Şoför Kaydı' : driverCategory === 'scooter' ? 'Scooter Şoför Kaydı' : 'Kurye Kaydı'}
-              </Text>
+              {registrationCategory === 'driver' && <Car size={16} color={Colors.dark.primary} />}
+              {registrationCategory === 'scooter' && <Bike size={16} color="#00BCD4" />}
+              {registrationCategory === 'courier' && <Package size={16} color="#8BC34A" />}
+              {registrationCategory === 'business' && <Store size={16} color="#FF8A65" />}
+              <Text style={styles.badgeText}>{badgeLabel}</Text>
             </View>
-            <Text style={[styles.title, { fontSize: isSmall ? 26 : isTablet ? 34 : 30 }]}>
-              {driverCategory === 'driver' ? 'Şoför Ol' : driverCategory === 'scooter' ? 'Scooterli Şoför Ol' : 'Kurye Ol'}
-            </Text>
-            <Text style={[styles.subtitle, { fontSize: isSmall ? 13 : 15 }]}>Ekibimize katılın ve kazanmaya başlayın</Text>
+            <Text style={[styles.title, { fontSize: isSmall ? 26 : isTablet ? 34 : 30 }]}>{screenTitle}</Text>
+            <Text style={[styles.subtitle, { fontSize: isSmall ? 13 : 15 }]}>{screenSubtitle}</Text>
 
             <View style={styles.categorySelector}>
               {DRIVER_CATEGORIES.map((cat) => {
-                const isSelected = driverCategory === cat.key;
+                const isSelected = registrationCategory === cat.key;
                 if (cat.key === 'scooter') {
                   return (
                     <TouchableOpacity
@@ -525,11 +562,9 @@ export default function RegisterDriverScreen() {
                         styles.categoryCard,
                         isSelected && { borderColor: cat.color, backgroundColor: `${cat.color}12` },
                       ]}
-                      onPress={() => {
-                        setDriverCategory(cat.key);
-                        console.log('Selected driver category:', cat.key);
-                      }}
+                      onPress={() => handleCategoryChange(cat.key)}
                       activeOpacity={0.7}
+                      testID={`register-category-${cat.key}`}
                     >
                       <View style={styles.scooterCategoryImagesRow}>
                         <View style={styles.scooterCategoryImgWrap}>
@@ -564,11 +599,9 @@ export default function RegisterDriverScreen() {
                       styles.categoryCard,
                       isSelected && { borderColor: cat.color, backgroundColor: `${cat.color}12` },
                     ]}
-                    onPress={() => {
-                      setDriverCategory(cat.key);
-                      console.log('Selected driver category:', cat.key);
-                    }}
+                    onPress={() => handleCategoryChange(cat.key)}
                     activeOpacity={0.7}
+                    testID={`register-category-${cat.key}`}
                   >
                     <View style={[styles.categoryIconWrap, { backgroundColor: isSelected ? cat.color : Colors.dark.cardBorder }]}>
                       {cat.icon}
@@ -783,30 +816,37 @@ export default function RegisterDriverScreen() {
               )}
             </View>
 
-            {driverCategory === 'courier' && (
+            {isCourierLike && (
               <>
-                <Text style={styles.sectionTitle}>İşletme Kaydı</Text>
-                <Text style={styles.partnerNote}>Yemeksepeti veya Trendyol Go benzeri işletmeleri sisteme açmak için bilgileri ekleyin</Text>
+                <Text style={styles.sectionTitle}>{isBusinessCategorySelected ? 'İşletme Bilgileri' : 'İşletme Kaydı'}</Text>
+                <Text style={styles.partnerNote}>
+                  {isBusinessCategorySelected
+                    ? 'İşletme bilgilerinizi ekleyin. Bu seçim işletme kartınızı müşteri ana sayfasında yayınlar.'
+                    : 'Yemeksepeti veya Trendyol Go benzeri işletmeleri sisteme açmak için bilgileri ekleyin'}
+                </Text>
                 <View style={styles.formSection}>
-                  <TouchableOpacity
-                    style={[styles.businessToggleCard, enableBusinessRegistration && styles.businessToggleCardActive]}
-                    onPress={() => setEnableBusinessRegistration((previous) => !previous)}
-                    activeOpacity={0.85}
-                  >
-                    <View style={styles.businessToggleRow}>
-                      <View style={styles.businessToggleTextWrap}>
-                        <Text style={styles.businessToggleTitle}>Bu hesap bir işletme de açsın</Text>
-                        <Text style={styles.businessToggleSub}>İşletme adı, web sitesi, görsel ve adres bilgisi müşteri ana sayfasında gösterilir</Text>
+                  {!isBusinessCategorySelected && (
+                    <TouchableOpacity
+                      style={[styles.businessToggleCard, enableBusinessRegistration && styles.businessToggleCardActive]}
+                      onPress={() => setEnableBusinessRegistration((previous) => !previous)}
+                      activeOpacity={0.85}
+                      testID="toggle-business-registration"
+                    >
+                      <View style={styles.businessToggleRow}>
+                        <View style={styles.businessToggleTextWrap}>
+                          <Text style={styles.businessToggleTitle}>Bu hesap bir işletme de açsın</Text>
+                          <Text style={styles.businessToggleSub}>İşletme adı, web sitesi, görsel ve adres bilgisi müşteri ana sayfasında gösterilir</Text>
+                        </View>
+                        {enableBusinessRegistration ? (
+                          <CheckSquare size={22} color={Colors.dark.primary} />
+                        ) : (
+                          <Square size={22} color={Colors.dark.textMuted} />
+                        )}
                       </View>
-                      {enableBusinessRegistration ? (
-                        <CheckSquare size={22} color={Colors.dark.primary} />
-                      ) : (
-                        <Square size={22} color={Colors.dark.textMuted} />
-                      )}
-                    </View>
-                  </TouchableOpacity>
+                    </TouchableOpacity>
+                  )}
 
-                  {enableBusinessRegistration && (
+                  {shouldShowBusinessFields && (
                     <>
                       <InputField renderIcon={() => <Store size={18} color={Colors.dark.textMuted} />} label="İşletme Adı" placeholder="Örnek Burger House" value={businessName} onChangeText={setBusinessName} />
                       <InputField renderIcon={() => <Globe size={18} color={Colors.dark.textMuted} />} label="Web Sitesi" placeholder="www.isletmeniz.com" value={businessWebsite} onChangeText={setBusinessWebsite} />
@@ -1048,9 +1088,7 @@ export default function RegisterDriverScreen() {
               {loading ? (
                 <ActivityIndicator color={Colors.dark.background} size="small" />
               ) : (
-                <Text style={styles.registerButtonText}>
-                  {driverCategory === 'driver' ? 'Şoför Olarak Kayıt Ol' : driverCategory === 'scooter' ? 'Scooter Şoför Olarak Kayıt Ol' : 'Kurye Olarak Kayıt Ol'}
-                </Text>
+                <Text style={styles.registerButtonText}>{registerButtonLabel}</Text>
               )}
             </TouchableOpacity>
           </ScrollView>
@@ -1277,13 +1315,14 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 13, fontWeight: '600' as const, color: Colors.dark.primary },
   title: { fontSize: 30, fontWeight: '800' as const, color: Colors.dark.text, letterSpacing: -0.5 },
   subtitle: { fontSize: 15, color: Colors.dark.textSecondary, marginTop: 6, marginBottom: 20 },
-  categorySelector: { flexDirection: 'row', gap: 10, marginBottom: 28 },
+  categorySelector: { flexDirection: 'row', gap: 8, marginBottom: 28 },
   categoryCard: {
     flex: 1,
+    minHeight: 130,
     backgroundColor: Colors.dark.card,
     borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
     alignItems: 'center',
     borderWidth: 1.5,
     borderColor: Colors.dark.cardBorder,
@@ -1291,25 +1330,25 @@ const styles = StyleSheet.create({
     overflow: 'hidden' as const,
   },
   categoryIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
+    width: 36,
+    height: 36,
+    borderRadius: 12,
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
     marginBottom: 8,
   },
   categoryLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700' as const,
     color: Colors.dark.text,
     textAlign: 'center' as const,
-    marginBottom: 3,
+    marginBottom: 4,
   },
   categoryDesc: {
-    fontSize: 10,
+    fontSize: 9,
     color: Colors.dark.textMuted,
     textAlign: 'center' as const,
-    lineHeight: 13,
+    lineHeight: 12,
   },
   categoryCheck: {
     position: 'absolute' as const,
@@ -1324,13 +1363,13 @@ const styles = StyleSheet.create({
   scooterCategoryImagesRow: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    gap: 4,
-    marginBottom: 6,
+    gap: 3,
+    marginBottom: 8,
   },
   scooterCategoryImgWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 8,
     backgroundColor: 'rgba(0,188,212,0.1)',
     overflow: 'hidden' as const,
   },
