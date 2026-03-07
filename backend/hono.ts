@@ -6,7 +6,7 @@ import { appRouter } from "./trpc/app-router";
 import { createContext } from "./trpc/create-context";
 import { db, initializeStore, bootstrapDbConfig, reinitializeStore } from "./db/store";
 import { setDbConfig, isDbConfigured } from "./db/rork-db";
-import type { User, Driver } from "./db/types";
+import type { User, Driver, Business, BusinessMenuItem } from "./db/types";
 import { checkRateLimit, getClientIP, isIPBlocked, trackSuspiciousActivity } from "./utils/security";
 import {
   SUPPORT_WHATSAPP_DISPLAY,
@@ -105,6 +105,42 @@ function resolveResetAccount(identifier: string): {
 function buildResetLookupKey(identifier: string): string {
   const resolved = resolveResetAccount(identifier);
   return `resetcode_${resolved.normalizedIdentifier}`;
+}
+
+function normalizeBusinessWebsite(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
+}
+
+function buildDefaultBusinessMenu(name: string, image: string, category: string): BusinessMenuItem[] {
+  const categoryLabel = category || 'İşletme';
+  return [
+    {
+      id: `menu_${Date.now()}_standard`,
+      name: `${categoryLabel} Standart Teslimat`,
+      description: `${name} için standart kurye teslimat siparişi`,
+      price: 120,
+      image,
+    },
+    {
+      id: `menu_${Date.now()}_express`,
+      name: `${categoryLabel} Express Teslimat`,
+      description: `${name} için öncelikli ve hızlı teslimat seçeneği`,
+      price: 180,
+      image,
+    },
+    {
+      id: `menu_${Date.now()}_bulk`,
+      name: `${categoryLabel} Toplu Sipariş`,
+      description: `${name} için çoklu paket veya büyük sepet teslimatı`,
+      price: 240,
+      image,
+    },
+  ];
 }
 
 initializeStore()
@@ -750,6 +786,86 @@ app.post("/auth/reset-password", async (c) => {
   } catch (err: unknown) {
     console.log('[REST] reset-password error:', err instanceof Error ? err.message : err);
     return c.json({ success: false, error: 'Bir hata oluştu. Lütfen tekrar deneyin.' }, 500);
+  }
+});
+
+app.post("/auth/register-business", async (c) => {
+  const startTime = Date.now();
+  try {
+    const dbEp = c.req.header('x-db-endpoint');
+    const dbNs = c.req.header('x-db-namespace');
+    const dbTk = c.req.header('x-db-token');
+    await ensureDbReady(dbEp, dbNs, dbTk);
+
+    const authHeader = c.req.header('authorization') || c.req.header('Authorization') || '';
+    const sessionToken = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!sessionToken) {
+      return c.json({ success: false, error: 'Oturum bulunamadı', business: null }, 401);
+    }
+
+    const session = db.sessions.get(sessionToken);
+    const isExpired = session ? new Date(session.expiresAt).getTime() < Date.now() : true;
+    if (!session || isExpired || session.userType !== 'driver') {
+      if (session && isExpired) {
+        db.sessions.delete(sessionToken);
+      }
+      return c.json({ success: false, error: 'Geçersiz oturum', business: null }, 401);
+    }
+
+    const ownerDriver = db.drivers.get(session.userId);
+    if (!ownerDriver) {
+      return c.json({ success: false, error: 'Şoför hesabı bulunamadı', business: null }, 404);
+    }
+
+    const body = await c.req.json();
+    const { sanitizeInput } = await import('./utils/security');
+    const safeName = sanitizeInput(body.name || '');
+    const safeWebsite = sanitizeInput(body.website || '');
+    const safeImage = sanitizeInput(body.image || '');
+    const safeCategory = sanitizeInput(body.category || '');
+    const safeAddress = sanitizeInput(body.address || '');
+    const safeCity = sanitizeInput(body.city || ownerDriver.city || '');
+    const safeDistrict = sanitizeInput(body.district || ownerDriver.district || '');
+    const safeDescription = sanitizeInput(body.description || '');
+
+    if (!safeName || !safeWebsite || !safeImage || !safeCategory || !safeAddress || !safeCity || !safeDistrict) {
+      return c.json({ success: false, error: 'İşletme alanları eksik', business: null }, 400);
+    }
+
+    const existingBusiness = db.businesses.getByOwner(session.userId);
+    const now = new Date().toISOString();
+    const businessId = existingBusiness?.id ?? `biz_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const business: Business = {
+      id: businessId,
+      ownerDriverId: session.userId,
+      name: safeName,
+      website: normalizeBusinessWebsite(safeWebsite),
+      image: safeImage,
+      description: safeDescription || `${safeName} işletmesi 2GO üzerinde sipariş kabul ediyor.`,
+      category: safeCategory,
+      city: safeCity,
+      district: safeDistrict,
+      address: safeAddress,
+      latitude: typeof body.latitude === 'number' ? body.latitude : undefined,
+      longitude: typeof body.longitude === 'number' ? body.longitude : undefined,
+      phone: sanitizeInput(body.phone || ownerDriver.phone || ''),
+      rating: existingBusiness?.rating ?? 4.8,
+      reviewCount: existingBusiness?.reviewCount ?? 0,
+      deliveryTime: sanitizeInput(body.deliveryTime || existingBusiness?.deliveryTime || '25-35 dk'),
+      deliveryFee: typeof body.deliveryFee === 'number' ? body.deliveryFee : (existingBusiness?.deliveryFee ?? 25),
+      minOrder: typeof body.minOrder === 'number' ? body.minOrder : (existingBusiness?.minOrder ?? 100),
+      menu: existingBusiness?.menu?.length ? existingBusiness.menu : buildDefaultBusinessMenu(safeName, safeImage, safeCategory),
+      isActive: true,
+      createdAt: existingBusiness?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    await db.businesses.setSync(businessId, business);
+    console.log('[REST] Business registered:', businessId, safeName, 'owner:', session.userId, 'elapsed:', Date.now() - startTime, 'ms');
+    return c.json({ success: true, error: null, business });
+  } catch (err: unknown) {
+    console.log('[REST] register-business error:', err instanceof Error ? err.message : err, 'elapsed:', Date.now() - startTime, 'ms');
+    return c.json({ success: false, error: 'İşletme kaydı oluşturulamadı. Lütfen tekrar deneyin.', business: null }, 500);
   }
 });
 

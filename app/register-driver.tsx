@@ -14,7 +14,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { TURKISH_CITIES, getCityByName } from '@/constants/cities';
 import type { City } from '@/constants/cities';
 import { usePrivacy } from '@/contexts/PrivacyContext';
-import { trpcClient } from '@/lib/trpc';
+import { buildApiUrl, getSessionToken } from '@/lib/trpc';
 import { getGoogleMapsApiKey } from '@/utils/maps';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 
@@ -51,6 +51,93 @@ const DRIVER_CATEGORIES: { key: RegistrationCategory; label: string; icon: React
 ];
 
 const GOOGLE_API_KEY = getGoogleMapsApiKey();
+
+interface RegisterBusinessPayload {
+  name: string;
+  website: string;
+  image: string;
+  description?: string;
+  category: string;
+  address: string;
+  city: string;
+  district: string;
+  latitude?: number;
+  longitude?: number;
+  phone?: string;
+  deliveryTime?: string;
+  deliveryFee?: number;
+  minOrder?: number;
+}
+
+interface RegisterBusinessResponse {
+  success: boolean;
+  error: string | null;
+  business?: {
+    id: string;
+    name: string;
+  } | null;
+}
+
+async function registerBusinessAccount(payload: RegisterBusinessPayload): Promise<RegisterBusinessResponse> {
+  const sessionToken = await getSessionToken();
+  if (!sessionToken) {
+    throw new Error('Oturum oluşturulamadı. Lütfen tekrar giriş yapın.');
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    authorization: `Bearer ${sessionToken}`,
+  };
+
+  const dbEndpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT;
+  const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
+  const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
+
+  if (dbEndpoint && dbNamespace && dbToken) {
+    headers['x-db-endpoint'] = dbEndpoint;
+    headers['x-db-namespace'] = dbNamespace;
+    headers['x-db-token'] = dbToken;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+  try {
+    const endpoint = buildApiUrl('/auth/register-business');
+    console.log('[RegisterDriver] registerBusinessAccount start:', endpoint, payload.city, payload.district);
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    const rawText = await response.text();
+    let data: RegisterBusinessResponse | null = null;
+
+    try {
+      data = rawText ? JSON.parse(rawText) as RegisterBusinessResponse : null;
+    } catch (parseError) {
+      console.log('[RegisterDriver] registerBusinessAccount parse error:', parseError, rawText.substring(0, 200));
+      throw new Error('İşletme kaydı sırasında sunucu geçersiz yanıt verdi.');
+    }
+
+    if (!response.ok || !data?.success) {
+      console.log('[RegisterDriver] registerBusinessAccount failed:', response.status, data?.error);
+      throw new Error(data?.error ?? 'İşletme kaydı tamamlanamadı.');
+    }
+
+    console.log('[RegisterDriver] registerBusinessAccount success:', data.business?.id ?? 'unknown');
+    return data;
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('İşletme kaydı zaman aşımına uğradı. Lütfen tekrar deneyin.');
+    }
+    throw error instanceof Error ? error : new Error('İşletme kaydı tamamlanamadı.');
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 export default function RegisterDriverScreen() {
   const router = useRouter();
@@ -413,25 +500,31 @@ export default function RegisterDriverScreen() {
       await acceptAllConsents();
       await registerDriver(name, normalizedPhone, email, password, isCourier ? '' : vehiclePlate, registrationVehicleModel, registrationVehicleColor, partnerName, selectedCity, selectedDistrict, licenseIssueDateStr, driverCategory);
 
+      let businessRegistrationWarning: string | null = null;
       if (isCourier && shouldShowBusinessFields) {
-        const businessCoordinates = await geocodeBusinessAddress(businessAddress, selectedCity, selectedDistrict);
-        await trpcClient.businesses.register.mutate({
-          name: businessName.trim(),
-          website: businessWebsite.trim(),
-          image: businessImage.trim(),
-          description: businessDescription.trim(),
-          category: businessCategory.trim(),
-          address: businessAddress.trim(),
-          city: selectedCity,
-          district: selectedDistrict,
-          latitude: businessCoordinates?.latitude,
-          longitude: businessCoordinates?.longitude,
-          phone: normalizedPhone,
-          deliveryTime: '25-35 dk',
-          deliveryFee: 25,
-          minOrder: 100,
-        });
-        console.log('[RegisterDriver] Business registration completed for courier account');
+        try {
+          const businessCoordinates = await geocodeBusinessAddress(businessAddress, selectedCity, selectedDistrict);
+          await registerBusinessAccount({
+            name: businessName.trim(),
+            website: businessWebsite.trim(),
+            image: businessImage.trim(),
+            description: businessDescription.trim(),
+            category: businessCategory.trim(),
+            address: businessAddress.trim(),
+            city: selectedCity,
+            district: selectedDistrict,
+            latitude: businessCoordinates?.latitude,
+            longitude: businessCoordinates?.longitude,
+            phone: normalizedPhone,
+            deliveryTime: '25-35 dk',
+            deliveryFee: 25,
+            minOrder: 100,
+          });
+          console.log('[RegisterDriver] Business registration completed for courier account');
+        } catch (businessError: unknown) {
+          businessRegistrationWarning = extractDriverErrorMessage(businessError);
+          console.log('[RegisterDriver] Business registration warning:', businessRegistrationWarning, businessError);
+        }
       }
 
       console.log('[RegisterDriver] Registration successful, saving documents...');
@@ -455,6 +548,9 @@ export default function RegisterDriverScreen() {
         RNAnimated.timing(successAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
         RNAnimated.spring(successScale, { toValue: 1, friction: 5, tension: 80, useNativeDriver: true }),
       ]).start();
+      if (businessRegistrationWarning) {
+        Alert.alert('Bilgi', `Şoför hesabınız açıldı ancak işletme profili tamamlanamadı: ${businessRegistrationWarning}`);
+      }
     } catch (err: unknown) {
       console.log('[RegisterDriver] Registration error:', err);
       const errorMessage = extractDriverErrorMessage(err);
