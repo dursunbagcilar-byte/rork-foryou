@@ -7,7 +7,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Mail, Lock, CheckCircle, KeyRound, MessageSquare, Phone } from 'lucide-react-native';
+import { ArrowLeft, Mail, Lock, CheckCircle, KeyRound, MessageSquare } from 'lucide-react-native';
 import { getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -116,7 +116,7 @@ export default function ForgotPasswordScreen() {
 
   const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState<string>('');
-  const [phone, setPhone] = useState<string>('');
+  const [phone] = useState<string>('');
   const [code, setCode] = useState<string>('');
   const [newPassword, setNewPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
@@ -124,12 +124,16 @@ export default function ForgotPasswordScreen() {
   const [emailSentInfo, setEmailSentInfo] = useState<boolean>(true);
   const [localRecoveryMode, setLocalRecoveryMode] = useState<boolean>(false);
   const [deliveryIssue, setDeliveryIssue] = useState<string | null>(null);
-  const [deliveryChannel, setDeliveryChannel] = useState<DeliveryChannel>('whatsapp');
+  const [deliveryChannel, setDeliveryChannel] = useState<DeliveryChannel>('email');
+  const [preferredDeliveryMethod] = useState<DeliveryChannel>('email');
   const [whatsappDeliveryMode, setWhatsappDeliveryMode] = useState<WhatsAppDeliveryMode>('support');
   const [registeredPhoneMask, setRegisteredPhoneMask] = useState<string | null>(null);
   const [supportWhatsAppUrl, setSupportWhatsAppUrl] = useState<string | null>(null);
   const [deliveryNote, setDeliveryNote] = useState<string | null>(null);
 
+  const isEmailRecovery = preferredDeliveryMethod === 'email';
+  const trimmedEmail = email.trim();
+  const trimmedPhone = phone.trim();
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
   const animateTransition = (callback: () => void) => {
@@ -207,7 +211,11 @@ export default function ForgotPasswordScreen() {
   }, [openWhatsAppSupport]);
 
   const handleSendCode = async () => {
-    const recoveryContact = getRecoveryContact(email, phone);
+    const recoveryContact = isEmailRecovery ? trimmedEmail : getRecoveryContact(trimmedEmail, trimmedPhone);
+    if (isEmailRecovery && !isEmailLike(trimmedEmail)) {
+      Alert.alert('Uyarı', 'E-posta ile şifre sıfırlamak için geçerli bir e-posta adresi girin');
+      return;
+    }
     if (!recoveryContact) {
       Alert.alert('Uyarı', 'Lütfen e-posta adresinizi veya telefon numaranızı girin');
       return;
@@ -221,9 +229,9 @@ export default function ForgotPasswordScreen() {
         '/api/auth/send-reset-code',
         {
           contact: recoveryContact,
-          email: email.trim(),
-          phone: phone.trim(),
-          deliveryMethod: 'whatsapp',
+          email: trimmedEmail,
+          phone: trimmedPhone,
+          deliveryMethod: preferredDeliveryMethod,
         }
       );
 
@@ -385,16 +393,21 @@ export default function ForgotPasswordScreen() {
   };
 
   const handleResendCode = async () => {
-    const recoveryContact = getRecoveryContact(email, phone);
+    const recoveryContact = isEmailRecovery ? trimmedEmail : getRecoveryContact(trimmedEmail, trimmedPhone);
+    if (isEmailRecovery && !isEmailLike(trimmedEmail)) {
+      Alert.alert('Uyarı', 'E-posta ile şifre sıfırlamak için geçerli bir e-posta adresi girin');
+      return;
+    }
+
     setLoading(true);
     try {
       const result = await restCall<ResetCodeResponse>(
         '/api/auth/send-reset-code',
         {
           contact: recoveryContact,
-          email: email.trim(),
-          phone: phone.trim(),
-          deliveryMethod: 'whatsapp',
+          email: trimmedEmail,
+          phone: trimmedPhone,
+          deliveryMethod: preferredDeliveryMethod,
         }
       );
       if (result.success) {
@@ -451,26 +464,12 @@ export default function ForgotPasswordScreen() {
     <>
       <View style={styles.stepHeader}>
         <View style={styles.stepIconWrap}>
-          <Phone size={28} color="#F5A623" />
+          <Mail size={28} color="#F5A623" />
         </View>
-        <Text style={[styles.stepTitle, { fontSize: isSmall ? 18 : 22 }]}>WhatsApp ile Kurtarma</Text>
+        <Text style={[styles.stepTitle, { fontSize: isSmall ? 18 : 22 }]}>E-posta ile Kurtarma</Text>
         <Text style={[styles.stepDesc, { fontSize: isSmall ? 12 : 14 }]}>
-          Müşteri veya şöför hesabınız için kayıtlı telefon numaranızı yazın. İsterseniz e-posta adresinizi de ekleyebilirsiniz.
+          Instagram benzeri ücretsiz akış için kayıtlı e-posta adresinizi yazın. Size 6 haneli şifre sıfırlama kodu gönderelim.
         </Text>
-      </View>
-      <View style={styles.inputGroup}>
-        <View style={[styles.inputWrapper, { paddingHorizontal: isSmall ? 12 : 16, borderRadius: isSmall ? 12 : 14 }]}>
-          <Phone size={isSmall ? 16 : 18} color="rgba(255,255,255,0.35)" />
-          <TextInput
-            style={[styles.input, { paddingVertical: isSmall ? 13 : 16, fontSize: isSmall ? 14 : 16 }]}
-            placeholder="05xx xxx xx xx"
-            placeholderTextColor="rgba(255,255,255,0.3)"
-            keyboardType="phone-pad"
-            value={phone}
-            onChangeText={setPhone}
-            testID="forgot-phone-input"
-          />
-        </View>
       </View>
       <View style={styles.inputGroup}>
         <View style={[styles.inputWrapper, { paddingHorizontal: isSmall ? 12 : 16, borderRadius: isSmall ? 12 : 14 }]}>
@@ -518,7 +517,7 @@ export default function ForgotPasswordScreen() {
         {loading ? (
           <ActivityIndicator color="#0A0A12" size="small" />
         ) : (
-          <Text style={[styles.actionButtonText, { fontSize: isSmall ? 15 : 17 }]}>WhatsApp ile Kod Talep Et</Text>
+          <Text style={[styles.actionButtonText, { fontSize: isSmall ? 15 : 17 }]}>E-posta ile Kod Gönder</Text>
         )}
       </TouchableOpacity>
     </>
