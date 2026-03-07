@@ -22,11 +22,17 @@ export function getWhatsAppDeliveryNote(maskedPhone?: string | null): string {
   return `Kod, kayıtlı${phoneLabel} numarasının bağlı olduğu WhatsApp hesabına yönlendirilir. WhatsApp veya WhatsApp Business fark etmez.`;
 }
 
-export function buildPasswordResetSupportMessage(email: string, maskedPhone: string | null, reason?: string): string {
+function isEmailLike(value: string): boolean {
+  return value.includes('@');
+}
+
+export function buildPasswordResetSupportMessage(identifier: string, maskedPhone: string | null, reason?: string): string {
+  const trimmedIdentifier = identifier.trim();
+  const identifierLabel = isEmailLike(trimmedIdentifier) ? 'E-posta' : 'Telefon';
   const lines: string[] = [
     'Merhaba 2GO destek,',
     'şifre sıfırlama kodu talep ediyorum.',
-    `E-posta: ${email}`,
+    `${identifierLabel}: ${trimmedIdentifier || 'belirtilmedi'}`,
     `Kayıtlı telefon: ${maskedPhone ?? 'sistemde kontrol ediniz'}`,
     getWhatsAppDeliveryNote(maskedPhone),
   ];
@@ -38,6 +44,6 @@ export function buildPasswordResetSupportMessage(email: string, maskedPhone: str
   return lines.join('\n');
 }
 
-export function buildPasswordResetSupportWhatsAppUrl(email: string, maskedPhone: string | null, reason?: string): string {
-  return buildSupportWhatsAppUrl(buildPasswordResetSupportMessage(email, maskedPhone, reason));
+export function buildPasswordResetSupportWhatsAppUrl(identifier: string, maskedPhone: string | null, reason?: string): string {
+  return buildSupportWhatsAppUrl(buildPasswordResetSupportMessage(identifier, maskedPhone, reason));
 }

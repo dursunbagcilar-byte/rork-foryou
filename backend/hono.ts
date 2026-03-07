@@ -6,8 +6,15 @@ import { appRouter } from "./trpc/app-router";
 import { createContext } from "./trpc/create-context";
 import { db, initializeStore, bootstrapDbConfig, reinitializeStore } from "./db/store";
 import { setDbConfig, isDbConfigured } from "./db/rork-db";
+import type { User, Driver } from "./db/types";
 import { checkRateLimit, getClientIP, isIPBlocked, trackSuspiciousActivity } from "./utils/security";
-import { SUPPORT_WHATSAPP_DISPLAY, SUPPORT_WHATSAPP_NUMBER, buildPasswordResetSupportWhatsAppUrl } from "../constants/support";
+import {
+  SUPPORT_WHATSAPP_DISPLAY,
+  SUPPORT_WHATSAPP_NUMBER,
+  buildPasswordResetSupportWhatsAppUrl,
+  getWhatsAppDeliveryNote,
+  normalizePhoneForWhatsApp,
+} from "../constants/support";
 
 const app = new Hono();
 
@@ -28,8 +35,76 @@ function maskPhoneNumber(phone: string | undefined): string | null {
   return `${prefix}${'•'.repeat(hiddenLength)}${suffix}`;
 }
 
-function buildPasswordResetWhatsAppUrl(email: string, maskedPhone: string | null, reason?: string): string {
-  return buildPasswordResetSupportWhatsAppUrl(email, maskedPhone, reason);
+function buildPasswordResetWhatsAppUrl(identifier: string, maskedPhone: string | null, reason?: string): string {
+  return buildPasswordResetSupportWhatsAppUrl(identifier, maskedPhone, reason);
+}
+
+function isEmailIdentifier(value: string): boolean {
+  return value.includes('@');
+}
+
+function normalizePhoneForLookup(phone: string | undefined): string | null {
+  const digits = (phone ?? '').replace(/\D/g, '');
+  if (!digits) return null;
+  return normalizePhoneForWhatsApp(phone) ?? digits;
+}
+
+function findStoredAccountByPhone(phone: string): { account: User | Driver | null; emailKey: string | null } {
+  const normalizedPhone = normalizePhoneForLookup(phone);
+  if (!normalizedPhone) {
+    return { account: null, emailKey: null };
+  }
+
+  const exactUser = db.users.getByPhone(phone);
+  if (exactUser?.email) {
+    return { account: exactUser, emailKey: exactUser.email.toLowerCase().trim() };
+  }
+
+  const exactDriver = db.drivers.getByPhone(phone);
+  if (exactDriver?.email) {
+    return { account: exactDriver, emailKey: exactDriver.email.toLowerCase().trim() };
+  }
+
+  const storedAccount = [...db.users.getAll(), ...db.drivers.getAll()].find((item) => {
+    const storedPhone = typeof item.phone === 'string' ? item.phone : undefined;
+    return normalizePhoneForLookup(storedPhone) === normalizedPhone;
+  }) ?? null;
+
+  const emailKey = typeof storedAccount?.email === 'string'
+    ? storedAccount.email.toLowerCase().trim()
+    : null;
+
+  return { account: storedAccount, emailKey };
+}
+
+function resolveResetAccount(identifier: string): {
+  account: User | Driver | null;
+  emailKey: string | null;
+  identifierType: 'email' | 'phone';
+  normalizedIdentifier: string;
+} {
+  const trimmedIdentifier = identifier.trim();
+  if (isEmailIdentifier(trimmedIdentifier)) {
+    const cleanEmail = trimmedIdentifier.toLowerCase().trim();
+    return {
+      account: db.users.getByEmail(cleanEmail) || db.drivers.getByEmail(cleanEmail) || null,
+      emailKey: cleanEmail,
+      identifierType: 'email',
+      normalizedIdentifier: cleanEmail,
+    };
+  }
+
+  const phoneResult = findStoredAccountByPhone(trimmedIdentifier);
+  return {
+    ...phoneResult,
+    identifierType: 'phone',
+    normalizedIdentifier: normalizePhoneForLookup(trimmedIdentifier) ?? trimmedIdentifier,
+  };
+}
+
+function buildResetLookupKey(identifier: string): string {
+  const resolved = resolveResetAccount(identifier);
+  return `resetcode_${resolved.normalizedIdentifier}`;
 }
 
 initializeStore()
@@ -393,67 +468,104 @@ app.post("/auth/send-reset-code", async (c) => {
     await ensureDbReady(dbEp, dbNs, dbTk);
 
     const body = await c.req.json();
-    const cleanEmail = (body.email || '').toLowerCase().trim();
+    const rawIdentifier = typeof body.contact === 'string' && body.contact.trim()
+      ? body.contact
+      : typeof body.phone === 'string' && body.phone.trim()
+        ? body.phone
+        : body.email;
+    const identifier = typeof rawIdentifier === 'string' ? rawIdentifier.trim() : '';
     const deliveryMethod = body.deliveryMethod === 'email' ? 'email' : 'whatsapp';
-    if (!cleanEmail) return c.json({ success: false, error: 'E-posta adresi gerekli' });
+    if (!identifier) return c.json({ success: false, error: 'E-posta veya telefon numarası gerekli' });
 
-    console.log('[REST] send-reset-code:', cleanEmail, 'deliveryMethod:', deliveryMethod);
+    console.log('[REST] send-reset-code:', identifier, 'deliveryMethod:', deliveryMethod);
     const { checkLoginAttempt, recordLoginFailure, recordLoginSuccess } = await import('./utils/security');
     const { sendEmail, generateResetCode, buildResetCodeEmail } = await import('./utils/email');
 
-    const loginCheck = checkLoginAttempt(`resetcode_${cleanEmail}`);
+    const resetLookupKey = buildResetLookupKey(identifier);
+    const loginCheck = checkLoginAttempt(resetLookupKey);
     if (!loginCheck.allowed) {
       return c.json({ success: false, error: 'Çok fazla deneme. Lütfen daha sonra tekrar deneyin.' });
     }
 
-    let user = db.users.getByEmail(cleanEmail);
-    let driver = db.drivers.getByEmail(cleanEmail);
-    let account: any = user || driver;
-    let hasPassword = db.passwords.get(cleanEmail);
+    let resolvedAccount = resolveResetAccount(identifier);
+    let account = resolvedAccount.account;
+    let accountEmail = resolvedAccount.emailKey;
+    let hasPassword = accountEmail ? db.passwords.get(accountEmail) : null;
 
     if (!account || !hasPassword) {
       try {
-        const { initializeStore } = await import('./db/store');
         await initializeStore();
-        if (!account) { user = db.users.getByEmail(cleanEmail); driver = db.drivers.getByEmail(cleanEmail); account = user || driver; }
-        if (!hasPassword) hasPassword = db.passwords.get(cleanEmail);
-      } catch (e) { console.log('[REST] send-reset-code init err:', e); }
+        resolvedAccount = resolveResetAccount(identifier);
+        account = resolvedAccount.account;
+        accountEmail = resolvedAccount.emailKey;
+        hasPassword = accountEmail ? db.passwords.get(accountEmail) : null;
+      } catch (e) {
+        console.log('[REST] send-reset-code init err:', e);
+      }
     }
 
-    if (!account || !hasPassword) {
+    if ((!account || !hasPassword) && resolvedAccount.identifierType === 'email' && accountEmail) {
       try {
         const { dbFindByEmail, dbSearchPasswordByEmail } = await import('./db/rork-db');
         if (!account) {
-          const dbU = await dbFindByEmail<any>('users', cleanEmail);
-          if (dbU) { const uid = dbU.rorkId || dbU._originalId || dbU.id; if (uid) { dbU.id = uid; account = dbU; db.users.set(uid, dbU); } }
+          const dbUser = await dbFindByEmail<Record<string, unknown>>('users', accountEmail);
+          if (dbUser) {
+            const userId = dbUser.rorkId || dbUser._originalId || dbUser.id;
+            if (typeof userId === 'string') {
+              const hydratedUser = { ...dbUser, id: userId } as User;
+              account = hydratedUser;
+              accountEmail = hydratedUser.email.toLowerCase().trim();
+              db.users.set(userId, hydratedUser);
+            }
+          }
         }
         if (!account) {
-          const dbD = await dbFindByEmail<any>('drivers', cleanEmail);
-          if (dbD) { const did = dbD.rorkId || dbD._originalId || dbD.id; if (did) { dbD.id = did; account = dbD; db.drivers.set(did, dbD); } }
+          const dbDriver = await dbFindByEmail<Record<string, unknown>>('drivers', accountEmail);
+          if (dbDriver) {
+            const driverId = dbDriver.rorkId || dbDriver._originalId || dbDriver.id;
+            if (typeof driverId === 'string') {
+              const hydratedDriver = { ...dbDriver, id: driverId } as Driver;
+              account = hydratedDriver;
+              accountEmail = hydratedDriver.email.toLowerCase().trim();
+              db.drivers.set(driverId, hydratedDriver);
+            }
+          }
         }
-        if (!hasPassword) {
-          const r = await dbSearchPasswordByEmail(cleanEmail);
-          if (r?.hash) { hasPassword = r.hash; db.passwords.set(cleanEmail, r.hash); }
+        if (!hasPassword && accountEmail) {
+          const passwordResult = await dbSearchPasswordByEmail(accountEmail);
+          if (passwordResult?.hash) {
+            hasPassword = passwordResult.hash;
+            db.passwords.set(accountEmail, passwordResult.hash);
+          }
         }
-      } catch (e) { console.log('[REST] send-reset-code db lookup err:', e); }
+      } catch (e) {
+        console.log('[REST] send-reset-code db lookup err:', e);
+      }
     }
 
-    if (!account && !hasPassword) {
-      recordLoginFailure(`resetcode_${cleanEmail}`);
-      return c.json({ success: false, error: 'Bu e-posta adresiyle kayıtlı hesap bulunamadı' });
+    if (!account || !accountEmail || !hasPassword) {
+      recordLoginFailure(resetLookupKey);
+      return c.json({
+        success: false,
+        error: resolvedAccount.identifierType === 'phone'
+          ? 'Bu telefon numarasıyla kayıtlı hesap bulunamadı'
+          : 'Bu e-posta adresiyle kayıtlı hesap bulunamadı',
+      });
     }
 
-    const accountName = account?.name || cleanEmail.split('@')[0];
+    const accountName = account.name || accountEmail.split('@')[0];
     const code = generateResetCode();
-    db.resetCodes.set(cleanEmail, code);
-    console.log('[REST] send-reset-code stored code for:', cleanEmail);
+    db.resetCodes.set(accountEmail, code);
+    console.log('[REST] send-reset-code stored code for:', accountEmail, 'identifier:', identifier);
 
-    const maskedPhone = maskPhoneNumber(typeof account?.phone === 'string' ? account.phone : undefined);
-    const whatsappUrl = buildPasswordResetWhatsAppUrl(cleanEmail, maskedPhone, 'Şifre sıfırlama doğrulama kodu talebi');
+    const maskedPhone = maskPhoneNumber(typeof account.phone === 'string' ? account.phone : undefined);
+    const whatsappTargetPhone = normalizePhoneForWhatsApp(typeof account.phone === 'string' ? account.phone : undefined);
+    const deliveryNote = getWhatsAppDeliveryNote(maskedPhone);
+    const whatsappUrl = buildPasswordResetWhatsAppUrl(accountEmail, maskedPhone, 'Şifre sıfırlama doğrulama kodu talebi');
 
     if (deliveryMethod === 'whatsapp') {
-      recordLoginSuccess(`resetcode_${cleanEmail}`);
-      console.log('[REST] Reset code prepared for WhatsApp support:', cleanEmail, 'maskedPhone:', maskedPhone);
+      recordLoginSuccess(resetLookupKey);
+      console.log('[REST] Reset code prepared for WhatsApp support:', accountEmail, 'maskedPhone:', maskedPhone, 'whatsappTargetPhone:', whatsappTargetPhone);
       return c.json({
         success: true,
         error: null,
@@ -463,11 +575,13 @@ app.post("/auth/send-reset-code", async (c) => {
         supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
         whatsappUrl,
         maskedPhone,
+        whatsappTargetPhone,
+        deliveryNote,
       });
     }
 
     const emailResult = await sendEmail({
-      to: cleanEmail,
+      to: accountEmail,
       subject: '2GO - Şifre Sıfırlama Kodu',
       html: buildResetCodeEmail(code, accountName),
     });
@@ -483,11 +597,13 @@ app.post("/auth/send-reset-code", async (c) => {
         supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
         whatsappUrl,
         maskedPhone,
+        whatsappTargetPhone,
+        deliveryNote,
       });
     }
 
-    recordLoginSuccess(`resetcode_${cleanEmail}`);
-    console.log('[REST] Reset code sent to:', cleanEmail, 'channel: email');
+    recordLoginSuccess(resetLookupKey);
+    console.log('[REST] Reset code sent to:', accountEmail, 'channel: email');
     return c.json({
       success: true,
       error: null,
@@ -496,9 +612,11 @@ app.post("/auth/send-reset-code", async (c) => {
       supportPhone: SUPPORT_WHATSAPP_NUMBER,
       supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
       maskedPhone,
+      whatsappTargetPhone,
+      deliveryNote,
     });
-  } catch (err: any) {
-    console.log('[REST] send-reset-code error:', err?.message);
+  } catch (err: unknown) {
+    console.log('[REST] send-reset-code error:', err instanceof Error ? err.message : err);
     return c.json({ success: false, error: 'Bir hata oluştu. Lütfen tekrar deneyin.' }, 500);
   }
 });
@@ -511,32 +629,58 @@ app.post("/auth/verify-reset-code", async (c) => {
     await ensureDbReady(dbEp, dbNs, dbTk);
 
     const body = await c.req.json();
-    const cleanEmail = (body.email || '').toLowerCase().trim();
-    const inputCode = (body.code || '').trim();
-    if (!cleanEmail || !inputCode) return c.json({ success: false, error: 'E-posta ve kod gerekli' });
+    const rawIdentifier = typeof body.contact === 'string' && body.contact.trim()
+      ? body.contact
+      : typeof body.phone === 'string' && body.phone.trim()
+        ? body.phone
+        : body.email;
+    const identifier = typeof rawIdentifier === 'string' ? rawIdentifier.trim() : '';
+    const inputCode = typeof body.code === 'string' ? body.code.trim() : '';
+    if (!identifier || !inputCode) return c.json({ success: false, error: 'E-posta veya telefon numarası ile kod gerekli' });
 
-    console.log('[REST] verify-reset-code:', cleanEmail);
+    let resolvedAccount = resolveResetAccount(identifier);
+    let accountEmail = resolvedAccount.emailKey;
 
-    const stored = await db.resetCodes.getAsync(cleanEmail);
+    if (!accountEmail && resolvedAccount.identifierType === 'phone') {
+      try {
+        await initializeStore();
+        resolvedAccount = resolveResetAccount(identifier);
+        accountEmail = resolvedAccount.emailKey;
+      } catch (e) {
+        console.log('[REST] verify-reset-code init err:', e);
+      }
+    }
+
+    if (!accountEmail && isEmailIdentifier(identifier)) {
+      accountEmail = identifier.toLowerCase().trim();
+    }
+
+    if (!accountEmail) {
+      return c.json({ success: false, error: 'Bu telefon numarasıyla kayıtlı hesap bulunamadı' });
+    }
+
+    console.log('[REST] verify-reset-code:', accountEmail, 'identifier:', identifier);
+
+    const stored = await db.resetCodes.getAsync(accountEmail);
     if (!stored) {
       return c.json({ success: false, error: 'Doğrulama kodu bulunamadı veya süresi dolmuş. Lütfen yeni kod talep edin.' });
     }
 
     if (stored.attempts >= 5) {
-      db.resetCodes.delete(cleanEmail);
+      db.resetCodes.delete(accountEmail);
       return c.json({ success: false, error: 'Çok fazla hatalı deneme. Yeni kod talep edin.' });
     }
 
     if (stored.code !== inputCode) {
-      await db.resetCodes.incrementAttemptsAsync(cleanEmail);
+      await db.resetCodes.incrementAttemptsAsync(accountEmail);
       const remaining = 4 - stored.attempts;
       return c.json({ success: false, error: remaining > 0 ? `Doğrulama kodu hatalı. ${remaining} deneme hakkınız kaldı.` : 'Doğrulama kodu hatalı. Yeni kod talep edin.' });
     }
 
-    console.log('[REST] Reset code verified for:', cleanEmail);
+    console.log('[REST] Reset code verified for:', accountEmail);
     return c.json({ success: true, error: null });
-  } catch (err: any) {
-    console.log('[REST] verify-reset-code error:', err?.message);
+  } catch (err: unknown) {
+    console.log('[REST] verify-reset-code error:', err instanceof Error ? err.message : err);
     return c.json({ success: false, error: 'Bir hata oluştu. Lütfen tekrar deneyin.' }, 500);
   }
 });
@@ -549,15 +693,41 @@ app.post("/auth/reset-password", async (c) => {
     await ensureDbReady(dbEp, dbNs, dbTk);
 
     const body = await c.req.json();
-    const cleanEmail = (body.email || '').toLowerCase().trim();
-    const inputCode = (body.code || '').trim();
-    const newPassword = body.newPassword || '';
-    if (!cleanEmail || !inputCode || !newPassword) return c.json({ success: false, error: 'Tüm alanlar gerekli' });
+    const rawIdentifier = typeof body.contact === 'string' && body.contact.trim()
+      ? body.contact
+      : typeof body.phone === 'string' && body.phone.trim()
+        ? body.phone
+        : body.email;
+    const identifier = typeof rawIdentifier === 'string' ? rawIdentifier.trim() : '';
+    const inputCode = typeof body.code === 'string' ? body.code.trim() : '';
+    const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+    if (!identifier || !inputCode || !newPassword) return c.json({ success: false, error: 'Tüm alanlar gerekli' });
 
-    console.log('[REST] reset-password:', cleanEmail);
+    let resolvedAccount = resolveResetAccount(identifier);
+    let accountEmail = resolvedAccount.emailKey;
+
+    if (!accountEmail && resolvedAccount.identifierType === 'phone') {
+      try {
+        await initializeStore();
+        resolvedAccount = resolveResetAccount(identifier);
+        accountEmail = resolvedAccount.emailKey;
+      } catch (e) {
+        console.log('[REST] reset-password init err:', e);
+      }
+    }
+
+    if (!accountEmail && isEmailIdentifier(identifier)) {
+      accountEmail = identifier.toLowerCase().trim();
+    }
+
+    if (!accountEmail) {
+      return c.json({ success: false, error: 'Bu telefon numarasıyla kayıtlı hesap bulunamadı' });
+    }
+
+    console.log('[REST] reset-password:', accountEmail, 'identifier:', identifier);
     const { validatePassword, hashPassword } = await import('./utils/security');
 
-    const stored = await db.resetCodes.getAsync(cleanEmail);
+    const stored = await db.resetCodes.getAsync(accountEmail);
     if (!stored) {
       return c.json({ success: false, error: 'Doğrulama kodu bulunamadı veya süresi dolmuş. Lütfen yeni kod talep edin.' });
     }
@@ -572,13 +742,13 @@ app.post("/auth/reset-password", async (c) => {
     }
 
     const hashedPwd = await hashPassword(newPassword);
-    await db.passwords.setSync(cleanEmail, hashedPwd);
-    db.resetCodes.delete(cleanEmail);
+    await db.passwords.setSync(accountEmail, hashedPwd);
+    db.resetCodes.delete(accountEmail);
 
-    console.log('[REST] Password reset OK for:', cleanEmail);
+    console.log('[REST] Password reset OK for:', accountEmail);
     return c.json({ success: true, error: null });
-  } catch (err: any) {
-    console.log('[REST] reset-password error:', err?.message);
+  } catch (err: unknown) {
+    console.log('[REST] reset-password error:', err instanceof Error ? err.message : err);
     return c.json({ success: false, error: 'Bir hata oluştu. Lütfen tekrar deneyin.' }, 500);
   }
 });

@@ -7,7 +7,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Mail, Lock, CheckCircle, KeyRound, MessageSquare } from 'lucide-react-native';
+import { ArrowLeft, Mail, Lock, CheckCircle, KeyRound, MessageSquare, Phone } from 'lucide-react-native';
 import { getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
 import { SUPPORT_WHATSAPP_DISPLAY, buildPasswordResetSupportMessage, buildSupportWhatsAppUrl, getWhatsAppDeliveryNote } from '@/constants/support';
@@ -81,6 +81,19 @@ type ResetCodeResponse = {
   deliveryNote?: string | null;
 };
 
+function isEmailLike(value: string): boolean {
+  return value.includes('@');
+}
+
+function getRecoveryContact(email: string, phone: string): string {
+  const trimmedPhone = phone.trim();
+  if (trimmedPhone) {
+    return trimmedPhone;
+  }
+
+  return email.trim();
+}
+
 export default function ForgotPasswordScreen() {
   const router = useRouter();
   const { hasLocalRecoveryAccount, recoverLocalPassword } = useAuth();
@@ -91,6 +104,7 @@ export default function ForgotPasswordScreen() {
 
   const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState<string>('');
+  const [phone, setPhone] = useState<string>('');
   const [code, setCode] = useState<string>('');
   const [newPassword, setNewPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
@@ -122,6 +136,10 @@ export default function ForgotPasswordScreen() {
 
   const tryLocalRecoveryFallback = async (reason: string): Promise<boolean> => {
     const trimmedEmail = email.trim();
+    if (!trimmedEmail || !isEmailLike(trimmedEmail)) {
+      return false;
+    }
+
     const hasLocalAccount = await hasLocalRecoveryAccount(trimmedEmail);
 
     console.log('[ForgotPassword] Local recovery fallback check:', trimmedEmail, 'reason:', reason, 'hasLocalAccount:', hasLocalAccount);
@@ -139,12 +157,12 @@ export default function ForgotPasswordScreen() {
   };
 
   const buildWhatsAppSupportUrl = useCallback((reason: string): string => {
-    const contactEmail = email.trim() || 'belirtilmedi';
+    const contactValue = getRecoveryContact(email, phone) || 'belirtilmedi';
     const phoneInfo = registeredPhoneMask ?? null;
-    const message = buildPasswordResetSupportMessage(contactEmail, phoneInfo, reason);
+    const message = buildPasswordResetSupportMessage(contactValue, phoneInfo, reason);
 
     return buildSupportWhatsAppUrl(message);
-  }, [email, registeredPhoneMask]);
+  }, [email, phone, registeredPhoneMask]);
 
   const openWhatsAppSupport = useCallback(async (reason: string, overrideUrl?: string | null) => {
     const url = overrideUrl ?? supportWhatsAppUrl ?? buildWhatsAppSupportUrl(reason);
@@ -175,8 +193,9 @@ export default function ForgotPasswordScreen() {
   }, [openWhatsAppSupport]);
 
   const handleSendCode = async () => {
-    if (!email.trim()) {
-      Alert.alert('Uyarı', 'Lütfen e-posta adresinizi girin');
+    const recoveryContact = getRecoveryContact(email, phone);
+    if (!recoveryContact) {
+      Alert.alert('Uyarı', 'Lütfen e-posta adresinizi veya telefon numaranızı girin');
       return;
     }
 
@@ -186,7 +205,12 @@ export default function ForgotPasswordScreen() {
     try {
       const result = await restCall<ResetCodeResponse>(
         '/api/auth/send-reset-code',
-        { email: email.trim(), deliveryMethod: 'whatsapp' }
+        {
+          contact: recoveryContact,
+          email: email.trim(),
+          phone: phone.trim(),
+          deliveryMethod: 'whatsapp',
+        }
       );
 
       if (result.success) {
@@ -244,11 +268,17 @@ export default function ForgotPasswordScreen() {
       return;
     }
 
+    const recoveryContact = getRecoveryContact(email, phone);
     setLoading(true);
     try {
       const result = await restCall<{ success: boolean; error?: string | null }>(
         '/api/auth/verify-reset-code',
-        { email: email.trim(), code: code.trim() }
+        {
+          contact: recoveryContact,
+          email: email.trim(),
+          phone: phone.trim(),
+          code: code.trim(),
+        }
       );
 
       if (result.success) {
@@ -307,7 +337,13 @@ export default function ForgotPasswordScreen() {
 
       const result = await restCall<{ success: boolean; error?: string | null }>(
         '/api/auth/reset-password',
-        { email: email.trim(), code: code.trim(), newPassword: newPassword }
+        {
+          contact: getRecoveryContact(email, phone),
+          email: email.trim(),
+          phone: phone.trim(),
+          code: code.trim(),
+          newPassword,
+        }
       );
 
       if (result.success) {
@@ -327,11 +363,17 @@ export default function ForgotPasswordScreen() {
   };
 
   const handleResendCode = async () => {
+    const recoveryContact = getRecoveryContact(email, phone);
     setLoading(true);
     try {
       const result = await restCall<ResetCodeResponse>(
         '/api/auth/send-reset-code',
-        { email: email.trim(), deliveryMethod: 'whatsapp' }
+        {
+          contact: recoveryContact,
+          email: email.trim(),
+          phone: phone.trim(),
+          deliveryMethod: 'whatsapp',
+        }
       );
       if (result.success) {
         const nextDeliveryChannel: DeliveryChannel = result.deliveryChannel === 'email' ? 'email' : 'whatsapp';
@@ -380,12 +422,26 @@ export default function ForgotPasswordScreen() {
     <>
       <View style={styles.stepHeader}>
         <View style={styles.stepIconWrap}>
-          <Mail size={28} color="#F5A623" />
+          <Phone size={28} color="#F5A623" />
         </View>
         <Text style={[styles.stepTitle, { fontSize: isSmall ? 18 : 22 }]}>WhatsApp ile Kurtarma</Text>
         <Text style={[styles.stepDesc, { fontSize: isSmall ? 12 : 14 }]}>
-          Hesabınıza kayıtlı e-posta adresinizi girin. Kod talebinizi WhatsApp destek hattına hazırlayalım.
+          Müşteri veya şöför hesabınız için kayıtlı telefon numaranızı yazın. İsterseniz e-posta adresinizi de ekleyebilirsiniz.
         </Text>
+      </View>
+      <View style={styles.inputGroup}>
+        <View style={[styles.inputWrapper, { paddingHorizontal: isSmall ? 12 : 16, borderRadius: isSmall ? 12 : 14 }]}>
+          <Phone size={isSmall ? 16 : 18} color="rgba(255,255,255,0.35)" />
+          <TextInput
+            style={[styles.input, { paddingVertical: isSmall ? 13 : 16, fontSize: isSmall ? 14 : 16 }]}
+            placeholder="05xx xxx xx xx"
+            placeholderTextColor="rgba(255,255,255,0.3)"
+            keyboardType="phone-pad"
+            value={phone}
+            onChangeText={setPhone}
+            testID="forgot-phone-input"
+          />
+        </View>
       </View>
       <View style={styles.inputGroup}>
         <View style={[styles.inputWrapper, { paddingHorizontal: isSmall ? 12 : 16, borderRadius: isSmall ? 12 : 14 }]}>
@@ -448,7 +504,7 @@ export default function ForgotPasswordScreen() {
         <Text style={[styles.stepTitle, { fontSize: isSmall ? 18 : 22 }]}>Kodu Girin</Text>
         <Text style={[styles.stepDesc, { fontSize: isSmall ? 12 : 14 }]}>
           {deliveryChannel === 'whatsapp'
-            ? `WhatsApp destek üzerinden kayıtlı numaranızın bağlı olduğu hesaba iletilecek 6 haneli kodu girin${registeredPhoneMask ? ` • kayıtlı hat: ${registeredPhoneMask}` : ''}`
+            ? `Kayıtlı telefon numaranızın bağlı olduğu WhatsApp hesabı için iletilen 6 haneli kodu girin${registeredPhoneMask ? ` • kayıtlı hat: ${registeredPhoneMask}` : ''}`
             : emailSentInfo
               ? `${email} adresine gönderilen 6 haneli kodu girin`
               : 'Doğrulama kodu oluşturuldu. E-posta gönderilemedi, lütfen tekrar deneyin.'
