@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Mail, Lock, CheckCircle, KeyRound, MessageSquare } from 'lucide-react-native';
 import { getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
-import { SUPPORT_WHATSAPP_DISPLAY, buildSupportWhatsAppUrl } from '@/constants/support';
+import { SUPPORT_WHATSAPP_DISPLAY, buildPasswordResetSupportMessage, buildSupportWhatsAppUrl, getWhatsAppDeliveryNote } from '@/constants/support';
 
 function getDbHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -77,6 +77,8 @@ type ResetCodeResponse = {
   whatsappUrl?: string;
   supportPhoneDisplay?: string;
   maskedPhone?: string | null;
+  whatsappTargetPhone?: string | null;
+  deliveryNote?: string | null;
 };
 
 export default function ForgotPasswordScreen() {
@@ -99,6 +101,7 @@ export default function ForgotPasswordScreen() {
   const [deliveryChannel, setDeliveryChannel] = useState<DeliveryChannel>('whatsapp');
   const [registeredPhoneMask, setRegisteredPhoneMask] = useState<string | null>(null);
   const [supportWhatsAppUrl, setSupportWhatsAppUrl] = useState<string | null>(null);
+  const [deliveryNote, setDeliveryNote] = useState<string | null>(null);
 
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
@@ -137,14 +140,8 @@ export default function ForgotPasswordScreen() {
 
   const buildWhatsAppSupportUrl = useCallback((reason: string): string => {
     const contactEmail = email.trim() || 'belirtilmedi';
-    const phoneInfo = registeredPhoneMask ?? 'sistemde kontrol ediniz';
-    const message = [
-      'Merhaba 2GO destek,',
-      'şifre sıfırlama kodu talep ediyorum.',
-      `E-posta: ${contactEmail}`,
-      `Kayıtlı telefon: ${phoneInfo}`,
-      `Not: ${reason}`,
-    ].join('\n');
+    const phoneInfo = registeredPhoneMask ?? null;
+    const message = buildPasswordResetSupportMessage(contactEmail, phoneInfo, reason);
 
     return buildSupportWhatsAppUrl(message);
   }, [email, registeredPhoneMask]);
@@ -197,6 +194,7 @@ export default function ForgotPasswordScreen() {
         setDeliveryChannel(nextDeliveryChannel);
         setRegisteredPhoneMask(result.maskedPhone ?? null);
         setSupportWhatsAppUrl(result.whatsappUrl ?? null);
+        setDeliveryNote(result.deliveryNote ?? getWhatsAppDeliveryNote(result.maskedPhone ?? null));
         setEmailSentInfo(result.emailSent !== false);
         setDeliveryIssue(nextDeliveryChannel === 'whatsapp'
           ? 'Kod talebiniz WhatsApp destek hattına hazırlandı. Sohbeti açıp mesajı gönderin.'
@@ -340,6 +338,7 @@ export default function ForgotPasswordScreen() {
         setDeliveryChannel(nextDeliveryChannel);
         setRegisteredPhoneMask(result.maskedPhone ?? null);
         setSupportWhatsAppUrl(result.whatsappUrl ?? null);
+        setDeliveryNote(result.deliveryNote ?? getWhatsAppDeliveryNote(result.maskedPhone ?? null));
         setEmailSentInfo(result.emailSent !== false);
         setDeliveryIssue(nextDeliveryChannel === 'whatsapp'
           ? 'WhatsApp mesajı yeniden hazırlandı. Sohbeti açıp mesajı tekrar gönderin.'
@@ -412,6 +411,7 @@ export default function ForgotPasswordScreen() {
             <Text style={styles.supportTitle}>WhatsApp ile destek al</Text>
           </View>
           <Text style={styles.supportDescription}>{deliveryIssue ?? 'Kod talebiniz WhatsApp destek hattı üzerinden ilerler.'}</Text>
+          <Text style={styles.supportMeta}>{deliveryNote ?? getWhatsAppDeliveryNote(registeredPhoneMask)}</Text>
           <TouchableOpacity
             style={styles.supportButton}
             onPress={() => { void openWhatsAppSupport(deliveryIssue ?? 'WhatsApp üzerinden şifre sıfırlama kodu talebi'); }}
@@ -448,7 +448,7 @@ export default function ForgotPasswordScreen() {
         <Text style={[styles.stepTitle, { fontSize: isSmall ? 18 : 22 }]}>Kodu Girin</Text>
         <Text style={[styles.stepDesc, { fontSize: isSmall ? 12 : 14 }]}>
           {deliveryChannel === 'whatsapp'
-            ? `WhatsApp destek üzerinden paylaşılacak 6 haneli kodu girin${registeredPhoneMask ? ` • kayıtlı hat: ${registeredPhoneMask}` : ''}`
+            ? `WhatsApp destek üzerinden kayıtlı numaranızın bağlı olduğu hesaba iletilecek 6 haneli kodu girin${registeredPhoneMask ? ` • kayıtlı hat: ${registeredPhoneMask}` : ''}`
             : emailSentInfo
               ? `${email} adresine gönderilen 6 haneli kodu girin`
               : 'Doğrulama kodu oluşturuldu. E-posta gönderilemedi, lütfen tekrar deneyin.'

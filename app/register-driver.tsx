@@ -606,7 +606,7 @@ export default function RegisterDriverScreen() {
             <Text style={styles.sectionTitle}>Kişisel Bilgiler</Text>
             <View style={styles.formSection}>
               <InputField renderIcon={() => <User size={18} color={Colors.dark.textMuted} />} label="Ad Soyad" placeholder="Adınızı girin" value={name} onChangeText={setName} />
-              <InputField renderIcon={() => <Phone size={18} color={Colors.dark.textMuted} />} label="Telefon" placeholder="+90 5XX XXX XXXX" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
+              <InputField renderIcon={() => <Phone size={18} color={Colors.dark.textMuted} />} label="Telefon" placeholder="+90 5XX XXX XXXX" value={phone} onChangeText={setPhone} keyboardType="phone-pad" helpText="Şifre sıfırlama kodları bu numaranın bağlı olduğu WhatsApp hesabına yönlendirilir. WhatsApp Business kullanıyorsanız aynı numara yeterlidir." />
               <InputField renderIcon={() => <Mail size={18} color={Colors.dark.textMuted} />} label="E-posta" placeholder="ornek@email.com" value={email} onChangeText={setEmail} keyboardType="email-address" />
               <InputField renderIcon={() => <Lock size={18} color={Colors.dark.textMuted} />} label="Şifre" placeholder="En az 8 karakter, büyük/küçük harf, rakam" value={password} onChangeText={setPassword} secure />
             </View>
@@ -1132,9 +1132,9 @@ function DocUploadBox({ label, uri, onPress, onRemove }: {
   );
 }
 
-function InputField({ renderIcon, label, placeholder, value, onChangeText, keyboardType, secure, autoCapitalize }: {
+function InputField({ renderIcon, label, placeholder, value, onChangeText, keyboardType, secure, autoCapitalize, helpText }: {
   renderIcon: () => React.ReactElement; label: string; placeholder: string; value: string;
-  onChangeText: (t: string) => void; keyboardType?: 'default' | 'phone-pad' | 'email-address'; secure?: boolean; autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
+  onChangeText: (t: string) => void; keyboardType?: 'default' | 'phone-pad' | 'email-address'; secure?: boolean; autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters'; helpText?: string;
 }) {
   return (
     <View style={styles.inputGroup}>
@@ -1152,6 +1152,7 @@ function InputField({ renderIcon, label, placeholder, value, onChangeText, keybo
           autoCapitalize={autoCapitalize}
         />
       </View>
+      {helpText ? <Text style={styles.inputHelpText}>{helpText}</Text> : null}
     </View>
   );
 }
@@ -1353,6 +1354,7 @@ const styles = StyleSheet.create({
   inputLabel: { fontSize: 13, fontWeight: '600' as const, color: Colors.dark.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
   inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.dark.inputBg, borderRadius: 14, borderWidth: 1, borderColor: Colors.dark.inputBorder, paddingHorizontal: 16, gap: 12 },
   input: { flex: 1, paddingVertical: 16, fontSize: 16, color: Colors.dark.text },
+  inputHelpText: { fontSize: 12, lineHeight: 18, color: Colors.dark.textMuted },
   pickerButton: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.dark.inputBg,
     borderRadius: 14, borderWidth: 1, borderColor: Colors.dark.inputBorder,

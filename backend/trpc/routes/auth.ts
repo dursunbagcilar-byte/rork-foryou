@@ -13,7 +13,7 @@ import {
   validatePassword,
 } from "../../utils/security";
 import { sendEmail, generateResetCode, buildResetCodeEmail, buildVerificationCodeEmail, type SendEmailErrorCode } from "../../utils/email";
-import { SUPPORT_WHATSAPP_DISPLAY, SUPPORT_WHATSAPP_NUMBER, buildSupportWhatsAppUrl } from "../../../constants/support";
+import { SUPPORT_WHATSAPP_DISPLAY, SUPPORT_WHATSAPP_NUMBER, buildPasswordResetSupportWhatsAppUrl, getWhatsAppDeliveryNote, normalizePhoneForWhatsApp } from "../../../constants/support";
 
 async function createSession(userId: string, userType: "customer" | "driver"): Promise<string> {
   const token = generateSecureToken(64);
@@ -75,15 +75,7 @@ function maskPhoneNumber(phone: string | undefined): string | null {
 }
 
 function buildPasswordResetWhatsAppUrl(email: string, maskedPhone: string | null, reason?: string): string {
-  const lines: (string | null)[] = [
-    'Merhaba 2GO destek,',
-    'şifre sıfırlama kodu talep ediyorum.',
-    `E-posta: ${email}`,
-    `Kayıtlı telefon: ${maskedPhone ?? 'sistemde kontrol ediniz'}`,
-    reason ? `Not: ${reason}` : null,
-  ];
-  const message = lines.filter((line): line is string => Boolean(line)).join('\n');
-  return buildSupportWhatsAppUrl(message);
+  return buildPasswordResetSupportWhatsAppUrl(email, maskedPhone, reason);
 }
 
 export const authRouter = createTRPCRouter({
@@ -652,12 +644,15 @@ export const authRouter = createTRPCRouter({
       const storedCheck = db.resetCodes.get(cleanEmail);
       console.log('[AUTH] sendResetCode - verify stored code:', storedCheck?.code, 'matches:', storedCheck?.code === code);
 
-      const maskedPhone = maskPhoneNumber(typeof account?.phone === 'string' ? account.phone : undefined);
+      const rawPhone = typeof account?.phone === 'string' ? account.phone : undefined;
+      const maskedPhone = maskPhoneNumber(rawPhone);
+      const whatsappTargetPhone = normalizePhoneForWhatsApp(rawPhone);
+      const deliveryNote = getWhatsAppDeliveryNote(maskedPhone);
       const whatsappUrl = buildPasswordResetWhatsAppUrl(cleanEmail, maskedPhone, 'Şifre sıfırlama doğrulama kodu talebi');
 
       if (deliveryMethod === 'whatsapp') {
         recordLoginSuccess(`resetcode_${cleanEmail}`);
-        console.log('[AUTH] Reset code prepared for WhatsApp support:', cleanEmail, 'maskedPhone:', maskedPhone);
+        console.log('[AUTH] Reset code prepared for WhatsApp support:', cleanEmail, 'maskedPhone:', maskedPhone, 'whatsappTargetPhone:', whatsappTargetPhone);
         return {
           success: true,
           error: null,
@@ -667,6 +662,8 @@ export const authRouter = createTRPCRouter({
           supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
           whatsappUrl,
           maskedPhone,
+          whatsappTargetPhone,
+          deliveryNote,
         };
       }
 
@@ -696,6 +693,8 @@ export const authRouter = createTRPCRouter({
           supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
           whatsappUrl,
           maskedPhone,
+          whatsappTargetPhone,
+          deliveryNote,
         };
       }
 
@@ -709,6 +708,8 @@ export const authRouter = createTRPCRouter({
         supportPhone: SUPPORT_WHATSAPP_NUMBER,
         supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
         maskedPhone,
+        whatsappTargetPhone,
+        deliveryNote,
       };
     }),
 

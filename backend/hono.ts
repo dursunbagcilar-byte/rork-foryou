@@ -7,7 +7,7 @@ import { createContext } from "./trpc/create-context";
 import { db, initializeStore, bootstrapDbConfig, reinitializeStore } from "./db/store";
 import { setDbConfig, isDbConfigured } from "./db/rork-db";
 import { checkRateLimit, getClientIP, isIPBlocked, trackSuspiciousActivity } from "./utils/security";
-import { SUPPORT_WHATSAPP_DISPLAY, SUPPORT_WHATSAPP_NUMBER, buildSupportWhatsAppUrl } from "../constants/support";
+import { SUPPORT_WHATSAPP_DISPLAY, SUPPORT_WHATSAPP_NUMBER, buildPasswordResetSupportWhatsAppUrl } from "../constants/support";
 
 const app = new Hono();
 
@@ -29,15 +29,7 @@ function maskPhoneNumber(phone: string | undefined): string | null {
 }
 
 function buildPasswordResetWhatsAppUrl(email: string, maskedPhone: string | null, reason?: string): string {
-  const lines: (string | null)[] = [
-    'Merhaba 2GO destek,',
-    'şifre sıfırlama kodu talep ediyorum.',
-    `E-posta: ${email}`,
-    `Kayıtlı telefon: ${maskedPhone ?? 'sistemde kontrol ediniz'}`,
-    reason ? `Not: ${reason}` : null,
-  ];
-  const message = lines.filter((line): line is string => Boolean(line)).join('\n');
-  return buildSupportWhatsAppUrl(message);
+  return buildPasswordResetSupportWhatsAppUrl(email, maskedPhone, reason);
 }
 
 initializeStore()

@@ -6,3 +6,38 @@ export const SUPPORT_WHATSAPP_URL = `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}`;
 export function buildSupportWhatsAppUrl(message: string): string {
   return `${SUPPORT_WHATSAPP_URL}?text=${encodeURIComponent(message)}`;
 }
+
+export function normalizePhoneForWhatsApp(phone: string | null | undefined): string | null {
+  const digits = (phone ?? '').replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.startsWith('0090') && digits.length >= 14) return digits.slice(2);
+  if (digits.startsWith('90') && digits.length >= 12) return digits;
+  if (digits.startsWith('0') && digits.length === 11) return `90${digits.slice(1)}`;
+  if (digits.length === 10) return `90${digits}`;
+  return digits;
+}
+
+export function getWhatsAppDeliveryNote(maskedPhone?: string | null): string {
+  const phoneLabel = maskedPhone ? ` ${maskedPhone}` : '';
+  return `Kod, kayıtlı${phoneLabel} numarasının bağlı olduğu WhatsApp hesabına yönlendirilir. WhatsApp veya WhatsApp Business fark etmez.`;
+}
+
+export function buildPasswordResetSupportMessage(email: string, maskedPhone: string | null, reason?: string): string {
+  const lines: string[] = [
+    'Merhaba 2GO destek,',
+    'şifre sıfırlama kodu talep ediyorum.',
+    `E-posta: ${email}`,
+    `Kayıtlı telefon: ${maskedPhone ?? 'sistemde kontrol ediniz'}`,
+    getWhatsAppDeliveryNote(maskedPhone),
+  ];
+
+  if (reason) {
+    lines.push(`Not: ${reason}`);
+  }
+
+  return lines.join('\n');
+}
+
+export function buildPasswordResetSupportWhatsAppUrl(email: string, maskedPhone: string | null, reason?: string): string {
+  return buildSupportWhatsAppUrl(buildPasswordResetSupportMessage(email, maskedPhone, reason));
+}
