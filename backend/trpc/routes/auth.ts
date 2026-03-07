@@ -78,6 +78,39 @@ function buildPasswordResetWhatsAppUrl(email: string, maskedPhone: string | null
   return buildPasswordResetSupportWhatsAppUrl(email, maskedPhone, reason);
 }
 
+function normalizePhoneForComparison(phone: string | undefined): string {
+  return (phone ?? '').replace(/\D/g, '');
+}
+
+function isPhoneTakenByAnotherAccount(phone: string, excludedId?: string): boolean {
+  const normalizedPhone = normalizePhoneForComparison(phone);
+  if (!normalizedPhone) {
+    return false;
+  }
+
+  const matchingUser = db.users.getAll().find((item) => {
+    return item.id !== excludedId && normalizePhoneForComparison(item.phone) === normalizedPhone;
+  });
+
+  if (matchingUser) {
+    return true;
+  }
+
+  const matchingDriver = db.drivers.getAll().find((item) => {
+    return item.id !== excludedId && normalizePhoneForComparison(item.phone) === normalizedPhone;
+  });
+
+  return !!matchingDriver;
+}
+
+function getSanitizedPhone(phone: string | undefined): string {
+  return sanitizeInput(phone ?? '');
+}
+
+function getProfileUpdateErrorPayload(message: string) {
+  return { success: false, error: message, user: null };
+}
+
 export const authRouter = createTRPCRouter({
   sendVerificationCode: publicProcedure
     .input(z.object({
@@ -807,21 +840,36 @@ export const authRouter = createTRPCRouter({
         avatar: z.string().max(500).optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (ctx.userType !== 'customer' || ctx.userId !== input.userId) {
+        return getProfileUpdateErrorPayload('Bu işlem için yetkiniz yok');
+      }
+
       const user = db.users.get(input.userId);
-      if (!user) return { success: false, error: "Kullanıcı bulunamadı", user: null };
+      if (!user) {
+        return getProfileUpdateErrorPayload('Kullanıcı bulunamadı');
+      }
+
+      const sanitizedPhone = input.phone ? getSanitizedPhone(input.phone) : undefined;
+      if (input.phone && !sanitizedPhone) {
+        return getProfileUpdateErrorPayload('Telefon numarası gerekli');
+      }
+
+      if (sanitizedPhone && isPhoneTakenByAnotherAccount(sanitizedPhone, input.userId)) {
+        return getProfileUpdateErrorPayload('Bu telefon numarası başka bir hesapta kullanılıyor');
+      }
 
       const updated = {
         ...user,
         ...(input.name && { name: sanitizeInput(input.name) }),
-        ...(input.phone && { phone: sanitizeInput(input.phone) }),
+        ...(sanitizedPhone && { phone: sanitizedPhone }),
         ...(input.city && { city: sanitizeInput(input.city) }),
         ...(input.district && { district: sanitizeInput(input.district) }),
         ...(input.avatar !== undefined && { avatar: input.avatar }),
       };
 
       await db.users.setSync(input.userId, updated);
-      console.log("[AUTH] Customer profile updated:", input.userId, updated.name);
+      console.log('[AUTH] Customer profile updated:', input.userId, updated.phone);
       return { success: true, error: null, user: updated };
     }),
 

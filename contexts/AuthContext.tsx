@@ -4,7 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 import createContextHook from '@nkzw/create-context-hook';
 import type { User, Driver, Ride, DriverDocuments } from '@/constants/mockData';
 import { PRICING } from '@/constants/pricing';
-import { setSessionToken, getSessionToken, getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl } from '@/lib/trpc';
+import { setSessionToken, getSessionToken, getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl, trpcClient } from '@/lib/trpc';
 
 type UserType = 'customer' | 'driver' | null;
 
@@ -437,6 +437,128 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     const legacyUser = await buildLegacyLocalUser(email);
     return !!legacyUser;
   }, [buildLegacyLocalUser, getLocalAuthBackup]);
+
+  const syncStoredAccount = useCallback(async (account: User | Driver): Promise<void> => {
+    const normalizedEmail = normalizeAuthEmail(account.email);
+    const normalizedAccount = {
+      ...account,
+      email: normalizedEmail,
+    } as User | Driver;
+
+    setUser(normalizedAccount);
+    setUserType(normalizedAccount.type);
+    setIsAuthenticated(true);
+    await AsyncStorage.setItem('auth_user', JSON.stringify(normalizedAccount));
+
+    try {
+      const rawCredentials = await AsyncStorage.getItem('auth_credentials');
+      if (rawCredentials) {
+        const credentials = JSON.parse(rawCredentials) as LocalAuthLegacyCredentials;
+        if (normalizeAuthEmail(credentials.email ?? '') === normalizedEmail) {
+          const updatedCredentials: LocalAuthLegacyCredentials = {
+            ...credentials,
+            type: normalizedAccount.type,
+            name: normalizedAccount.name,
+            phone: normalizedAccount.phone,
+            email: normalizedEmail,
+            city: normalizedAccount.city,
+            district: normalizedAccount.district,
+            vehiclePlate: normalizedAccount.vehiclePlate,
+          };
+
+          if (normalizedAccount.type === 'customer') {
+            updatedCredentials.gender = normalizedAccount.gender;
+          }
+
+          if (normalizedAccount.type === 'driver') {
+            const driverAccount = normalizedAccount as Driver;
+            updatedCredentials.vehicleModel = driverAccount.vehicleModel;
+            updatedCredentials.vehicleColor = driverAccount.vehicleColor;
+            updatedCredentials.partnerDriverName = driverAccount.partnerDriverName;
+            updatedCredentials.licenseIssueDate = driverAccount.licenseIssueDate;
+            updatedCredentials.driverCategory = driverAccount.driverCategory;
+          }
+
+          await AsyncStorage.setItem('auth_credentials', JSON.stringify(updatedCredentials));
+        }
+      }
+    } catch (error) {
+      console.log('[Auth] syncStoredAccount auth_credentials error:', error);
+    }
+
+    try {
+      const backup = await getLocalAuthBackup(normalizedEmail);
+      if (backup) {
+        const updatedBackup: LocalAuthBackup = {
+          ...backup,
+          type: normalizedAccount.type,
+          user: normalizedAccount,
+          updatedAt: new Date().toISOString(),
+        };
+        await SecureStore.setItemAsync(buildLocalAuthKey(normalizedEmail), JSON.stringify(updatedBackup));
+        console.log('[Auth] Local auth backup refreshed for:', normalizedEmail);
+      }
+    } catch (error) {
+      console.log('[Auth] syncStoredAccount local backup error:', error);
+    }
+
+    console.log('[Auth] Stored account synced:', normalizedAccount.id, normalizedAccount.type, normalizedAccount.phone);
+  }, [getLocalAuthBackup]);
+
+  const updateAccountPhone = useCallback(async (phone: string): Promise<User | Driver> => {
+    if (!user) {
+      throw new Error('Aktif oturum bulunamadı');
+    }
+
+    const cleanPhone = phone.trim();
+    if (!cleanPhone) {
+      throw new Error('Telefon numarası gerekli');
+    }
+
+    console.log('[Auth] updateAccountPhone start:', user.id, user.type, cleanPhone);
+
+    try {
+      if (user.type === 'customer') {
+        const result = await trpcClient.auth.updateCustomerProfile.mutate({
+          userId: user.id,
+          phone: cleanPhone,
+        });
+
+        if (!result?.success || !result.user) {
+          throw new Error(result?.error ?? 'Telefon numarası güncellenemedi');
+        }
+
+        const updatedUser: User = {
+          ...result.user,
+          type: 'customer',
+        };
+        await syncStoredAccount(updatedUser);
+        return updatedUser;
+      }
+
+      const result = await trpcClient.drivers.updateProfile.mutate({
+        driverId: user.id,
+        phone: cleanPhone,
+      });
+
+      if (!result?.success || !result.driver) {
+        throw new Error(result?.error ?? 'Telefon numarası güncellenemedi');
+      }
+
+      const updatedDriver: Driver = {
+        ...result.driver,
+        type: 'driver',
+      };
+      await syncStoredAccount(updatedDriver);
+      return updatedDriver;
+    } catch (error) {
+      console.log('[Auth] updateAccountPhone error:', error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error('Telefon numarası güncellenemedi. Lütfen tekrar deneyin.');
+    }
+  }, [syncStoredAccount, user]);
 
   const recoverLocalPassword = useCallback(async (email: string, newPassword: string): Promise<boolean> => {
     const normalizedEmail = normalizeAuthEmail(email);
@@ -1119,6 +1241,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     driverApproved,
     hasLocalRecoveryAccount,
     recoverLocalPassword,
+    updateAccountPhone,
     logout,
   }), [
     user,
@@ -1153,6 +1276,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     driverApproved,
     hasLocalRecoveryAccount,
     recoverLocalPassword,
+    updateAccountPhone,
     logout,
   ]);
 

@@ -1,16 +1,45 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { User, Phone, Mail, MapPin, Shield, Bell, HelpCircle, LogOut, ChevronRight, ArrowLeft } from 'lucide-react-native';
+import { Phone, Mail, MapPin, LogOut, ChevronRight, ArrowLeft } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
+import { PhoneNumberEditorCard } from '@/components/PhoneNumberEditorCard';
 
 export default function CustomerProfileScreen() {
-  const { user, logout } = useAuth();
+  const { user, logout, updateAccountPhone } = useAuth();
   const router = useRouter();
+  const [phoneDraft, setPhoneDraft] = useState<string>(user?.phone ?? '');
+  const [isUpdatingPhone, setIsUpdatingPhone] = useState<boolean>(false);
 
+  useEffect(() => {
+    setPhoneDraft(user?.phone ?? '');
+  }, [user?.phone]);
 
+  const handlePhoneSave = useCallback(async () => {
+    const trimmedPhone = phoneDraft.trim();
+    if (!trimmedPhone) {
+      Alert.alert('Uyarı', 'Lütfen telefon numaranızı girin.');
+      return;
+    }
+
+    if (trimmedPhone === (user?.phone ?? '').trim()) {
+      Alert.alert('Bilgi', 'Telefon numaranız zaten güncel.');
+      return;
+    }
+
+    try {
+      setIsUpdatingPhone(true);
+      await updateAccountPhone(trimmedPhone);
+      Alert.alert('Başarılı', 'Telefon numaranız tüm sistemde güncellendi.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Telefon numarası güncellenemedi.';
+      Alert.alert('Hata', message);
+    } finally {
+      setIsUpdatingPhone(false);
+    }
+  }, [phoneDraft, updateAccountPhone, user?.phone]);
 
   const handleLogout = () => {
     Alert.alert('Çıkış', 'Çıkış yapmak istediğinize emin misiniz?', [
@@ -69,6 +98,16 @@ export default function CustomerProfileScreen() {
               <Text style={styles.infoText}>{user?.city ?? '-'}{user?.district ? ` / ${user.district}` : ''}</Text>
             </View>
           </View>
+          <PhoneNumberEditorCard
+            title="Telefon numarasını güncelle"
+            subtitle="Buradan değiştirdiğiniz numara şifre sıfırlama ve hesap bilgilerinde hemen kullanılır."
+            value={phoneDraft}
+            onChangeText={setPhoneDraft}
+            onSave={handlePhoneSave}
+            isSaving={isUpdatingPhone}
+            inputTestID="customer-phone-update-input"
+            buttonTestID="customer-phone-update-button"
+          />
           <View style={styles.menuSection}>
             {[
               { icon: MapPin, label: 'Kayıtlı Adresler', color: Colors.light.primary, route: '__saved_addresses__' },

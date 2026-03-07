@@ -1,7 +1,33 @@
 import { z } from "zod";
-import { createTRPCRouter, publicProcedure, protectedProcedure } from "../create-context";
+import { createTRPCRouter, protectedProcedure } from "../create-context";
 import { db, initializeStore, forceReloadStore } from "../../db/store";
 import type { Ride } from "../../db/types";
+import { sanitizeInput } from "../../utils/security";
+
+function normalizePhoneForComparison(phone: string | undefined): string {
+  return (phone ?? '').replace(/\D/g, '');
+}
+
+function isPhoneTakenByAnotherAccount(phone: string, excludedId?: string): boolean {
+  const normalizedPhone = normalizePhoneForComparison(phone);
+  if (!normalizedPhone) {
+    return false;
+  }
+
+  const matchingUser = db.users.getAll().find((item) => {
+    return item.id !== excludedId && normalizePhoneForComparison(item.phone) === normalizedPhone;
+  });
+
+  if (matchingUser) {
+    return true;
+  }
+
+  const matchingDriver = db.drivers.getAll().find((item) => {
+    return item.id !== excludedId && normalizePhoneForComparison(item.phone) === normalizedPhone;
+  });
+
+  return !!matchingDriver;
+}
 
 export const driversRouter = createTRPCRouter({
   updateLocation: protectedProcedure
@@ -202,7 +228,7 @@ export const driversRouter = createTRPCRouter({
 
       const driver = db.drivers.get(input.driverId);
       const todayStr = now.toISOString().split('T')[0];
-      const todayCompleted = rides.filter((r: Ride) => {
+      rides.filter((r: Ride) => {
         if (r.status !== 'completed') return false;
         const rDate = new Date(r.completedAt ?? r.createdAt).toISOString().split('T')[0];
         return rDate === todayStr;
@@ -272,21 +298,36 @@ export const driversRouter = createTRPCRouter({
         vehicleColor: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (ctx.userType !== 'driver' || ctx.userId !== input.driverId) {
+        return { success: false, error: 'Bu işlem için yetkiniz yok' };
+      }
+
       const driver = db.drivers.get(input.driverId);
-      if (!driver) return { success: false, error: "Şoför bulunamadı" };
+      if (!driver) {
+        return { success: false, error: 'Şoför bulunamadı' };
+      }
+
+      const sanitizedPhone = input.phone ? sanitizeInput(input.phone) : undefined;
+      if (input.phone && !sanitizedPhone) {
+        return { success: false, error: 'Telefon numarası gerekli' };
+      }
+
+      if (sanitizedPhone && isPhoneTakenByAnotherAccount(sanitizedPhone, input.driverId)) {
+        return { success: false, error: 'Bu telefon numarası başka bir hesapta kullanılıyor' };
+      }
 
       const updated = {
         ...driver,
-        ...(input.name && { name: input.name }),
-        ...(input.phone && { phone: input.phone }),
-        ...(input.vehiclePlate && { vehiclePlate: input.vehiclePlate }),
-        ...(input.vehicleModel && { vehicleModel: input.vehicleModel }),
-        ...(input.vehicleColor && { vehicleColor: input.vehicleColor }),
+        ...(input.name && { name: sanitizeInput(input.name) }),
+        ...(sanitizedPhone && { phone: sanitizedPhone }),
+        ...(input.vehiclePlate && { vehiclePlate: sanitizeInput(input.vehiclePlate) }),
+        ...(input.vehicleModel && { vehicleModel: sanitizeInput(input.vehicleModel) }),
+        ...(input.vehicleColor && { vehicleColor: sanitizeInput(input.vehicleColor) }),
       };
 
       await db.drivers.setSync(input.driverId, updated);
-      console.log("[DRIVERS] Updated profile:", input.driverId);
+      console.log('[DRIVERS] Updated profile:', input.driverId, updated.phone);
       return { success: true, driver: updated };
     }),
 });

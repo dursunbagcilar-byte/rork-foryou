@@ -1,20 +1,27 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Image, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Phone, Mail, Car, Star, Shield, Bell, HelpCircle, LogOut, ChevronRight, Hash, MapPin, UserPlus, Users, FileText, Camera, Info, ArrowLeft, X } from 'lucide-react-native';
+import { Phone, Mail, Car, Star, LogOut, Hash, MapPin, UserPlus, Camera, Info, ArrowLeft, X } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Driver } from '@/constants/mockData';
+import { PhoneNumberEditorCard } from '@/components/PhoneNumberEditorCard';
 
 export default function DriverProfileScreen() {
-  const { user, logout, teamMembers, profilePhoto, updateProfilePhoto, teamMemberPhotos, updateTeamMemberPhoto } = useAuth();
+  const { user, logout, teamMembers, profilePhoto, updateProfilePhoto, teamMemberPhotos, updateTeamMemberPhoto, updateAccountPhone } = useAuth();
   const router = useRouter();
   const driver = user as Driver | null;
 
   const navigatedAwayRef = useRef(false);
-  const [showHomeBtn, setShowHomeBtn] = useState(false);
+  const [showHomeBtn, setShowHomeBtn] = useState<boolean>(false);
+  const [phoneDraft, setPhoneDraft] = useState<string>(driver?.phone ?? '');
+  const [isUpdatingPhone, setIsUpdatingPhone] = useState<boolean>(false);
+
+  useEffect(() => {
+    setPhoneDraft(driver?.phone ?? '');
+  }, [driver?.phone]);
 
   useFocusEffect(
     useCallback(() => {
@@ -76,6 +83,30 @@ export default function DriverProfileScreen() {
       Alert.alert('Hata', 'Fotoğraf seçilirken bir hata oluştu.');
     }
   };
+
+  const handlePhoneSave = useCallback(async () => {
+    const trimmedPhone = phoneDraft.trim();
+    if (!trimmedPhone) {
+      Alert.alert('Uyarı', 'Lütfen telefon numaranızı girin.');
+      return;
+    }
+
+    if (trimmedPhone === (driver?.phone ?? '').trim()) {
+      Alert.alert('Bilgi', 'Telefon numaranız zaten güncel.');
+      return;
+    }
+
+    try {
+      setIsUpdatingPhone(true);
+      await updateAccountPhone(trimmedPhone);
+      Alert.alert('Başarılı', 'Telefon numaranız tüm sistemde güncellendi.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Telefon numarası güncellenemedi.';
+      Alert.alert('Hata', message);
+    } finally {
+      setIsUpdatingPhone(false);
+    }
+  }, [driver?.phone, phoneDraft, updateAccountPhone]);
 
   const handleLogout = () => {
     Alert.alert('Çıkış', 'Çıkış yapmak istediğinize emin misiniz?', [
@@ -238,6 +269,17 @@ export default function DriverProfileScreen() {
               <Text style={styles.infoText}>{driver?.city ?? '-'}{driver?.district ? ` / ${driver.district}` : ''}</Text>
             </View>
           </View>
+
+          <PhoneNumberEditorCard
+            title="Telefon numarasını güncelle"
+            subtitle="Yeni numaranız sürücü profilinde, şifre sıfırlamada ve hesap genelinde hemen kullanılır."
+            value={phoneDraft}
+            onChangeText={setPhoneDraft}
+            onSave={handlePhoneSave}
+            isSaving={isUpdatingPhone}
+            inputTestID="driver-phone-update-input"
+            buttonTestID="driver-phone-update-button"
+          />
 
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.7}>
             <LogOut size={18} color={Colors.light.accent} />
