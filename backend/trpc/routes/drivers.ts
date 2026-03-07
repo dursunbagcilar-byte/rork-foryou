@@ -4,6 +4,7 @@ import { db, initializeStore, forceReloadStore } from "../../db/store";
 import type { Ride } from "../../db/types";
 import { sanitizeInput } from "../../utils/security";
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../../../utils/phone";
+import { tryDispatchWaitingBusinessOrdersForCourier } from "./business-order-dispatch";
 
 function normalizePhoneForComparison(phone: string | undefined): string {
   return normalizeTurkishPhone(phone);
@@ -39,11 +40,18 @@ export const driversRouter = createTRPCRouter({
         longitude: z.number(),
       })
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       db.driverLocations.set(input.driverId, {
         latitude: input.latitude,
         longitude: input.longitude,
       });
+
+      const driver = db.drivers.get(input.driverId);
+      if (driver?.isOnline && driver.driverCategory === 'courier') {
+        const dispatchedCount = await tryDispatchWaitingBusinessOrdersForCourier(input.driverId);
+        console.log('[DRIVERS] updateLocation triggered business order dispatch:', input.driverId, 'count:', dispatchedCount);
+      }
+
       return { success: true };
     }),
 
@@ -66,6 +74,12 @@ export const driversRouter = createTRPCRouter({
 
       await db.drivers.setSync(input.driverId, { ...driver, isOnline: input.isOnline });
       console.log("[DRIVERS] Online status:", input.driverId, input.isOnline);
+
+      if (input.isOnline && driver.driverCategory === 'courier') {
+        const dispatchedCount = await tryDispatchWaitingBusinessOrdersForCourier(input.driverId);
+        console.log('[DRIVERS] setOnlineStatus triggered business order dispatch:', input.driverId, 'count:', dispatchedCount);
+      }
+
       return { success: true };
     }),
 

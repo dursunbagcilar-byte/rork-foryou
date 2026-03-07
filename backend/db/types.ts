@@ -115,6 +115,12 @@ export interface Ride {
   businessWebsite?: string;
   orderItems?: BusinessOrderItem[];
   orderNote?: string;
+  assignedCourierId?: string;
+  courierRequestExpiresAt?: string;
+  courierDispatchedAt?: string;
+  courierAttemptedDriverIds?: string[];
+  courierRejectedDriverIds?: string[];
+  maxCourierDistanceKm?: number;
 }
 
 export interface Payment {

@@ -1,49 +1,14 @@
 import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "../create-context";
 import { db } from "../../db/store";
-
-async function sendPushToUser(userId: string, title: string, body: string, data?: Record<string, string>): Promise<void> {
-  const tokenData = db.pushTokens.get(userId);
-  if (!tokenData) {
-    console.log('[RIDES-PUSH] No push token for user:', userId);
-    return;
-  }
-  try {
-    const response = await fetch('https://exp.host/--/api/v2/push/send', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        to: tokenData.token,
-        sound: 'default',
-        title,
-        body,
-        data: data ?? {},
-        priority: 'high',
-        channelId: 'rides',
-      }),
-    });
-    const result = await response.json();
-    console.log('[RIDES-PUSH] Sent to', userId, ':', JSON.stringify(result));
-  } catch (err) {
-    console.log('[RIDES-PUSH] Error sending to', userId, ':', err);
-  }
-}
-
-function createRideNotification(userId: string, title: string, body: string, data?: Record<string, string>): void {
-  const notificationId = `notif_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-  db.notifications.set(notificationId, {
-    id: notificationId,
-    userId,
-    title,
-    body,
-    data,
-    read: false,
-    createdAt: new Date().toISOString(),
-  });
-}
+import type { Ride } from "../../db/types";
+import {
+  createRideNotification,
+  dispatchBusinessOrderToNearestCourier,
+  isBusinessRide,
+  refreshExpiredBusinessOrderAssignments,
+  sendPushToUser,
+} from "./business-order-dispatch";
 
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
@@ -183,7 +148,7 @@ export const ridesRouter = createTRPCRouter({
     )
     .mutation(async ({ input }) => {
       const id = `r_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      const ride = {
+      const ride: Ride = {
         id,
         customerId: input.customerId,
         customerName: input.customerName,
@@ -211,46 +176,75 @@ export const ridesRouter = createTRPCRouter({
         businessWebsite: input.businessWebsite,
         orderItems: input.orderItems,
         orderNote: input.orderNote,
+        assignedCourierId: undefined,
+        courierRequestExpiresAt: undefined,
+        courierDispatchedAt: undefined,
+        courierAttemptedDriverIds: [],
+        courierRejectedDriverIds: [],
+        maxCourierDistanceKm: 10,
       };
 
       await db.rides.setSync(id, ride);
       console.log('[RIDES] Business order created:', id, input.businessName, 'items:', input.orderItems.length, 'city:', input.city);
 
-      const districtCouriers = input.district
-        ? db.drivers.getOnlineCouriersByCityAndDistrict(input.city, input.district)
-        : [];
-      const onlineCouriers = districtCouriers.length > 0
-        ? districtCouriers
-        : db.drivers.getOnlineCouriersByCity(input.city);
-      const notifiedScope = districtCouriers.length > 0
-        ? `district:${input.district}`
-        : `city:${input.city}`;
-
-      console.log('[RIDES] Business order courier targeting:', id, notifiedScope, 'couriers:', onlineCouriers.length);
-
-      for (const courier of onlineCouriers) {
-        createRideNotification(
-          courier.id,
-          '📦 Yeni işletme siparişi',
-          `${input.businessName} → ${input.dropoffAddress}`,
-          { type: 'business_delivery', rideId: id, businessId: input.businessId }
-        );
-        await sendPushToUser(
-          courier.id,
-          '📦 Yeni işletme siparişi',
-          `${input.businessName} → ${input.dropoffAddress}`,
-          { type: 'business_delivery', rideId: id, businessId: input.businessId }
-        );
-      }
+      const dispatchResult = await dispatchBusinessOrderToNearestCourier(id, { trigger: 'created' });
+      const storedRide = db.rides.get(id) ?? ride;
+      const customerNotificationTitle = dispatchResult.assigned ? '✅ Siparişiniz alındı' : '⚠️ Kurye aranıyor';
+      const customerNotificationBody = dispatchResult.assigned
+        ? `${input.businessName} siparişiniz en yakın kuryeye gönderildi.`
+        : `${input.businessName} siparişiniz alındı. 10 km içinde müsait kurye aranıyor.`;
+      const notifiedScope = dispatchResult.assigned ? 'nearest_courier_within_10km' : 'waiting_for_courier_within_10km';
 
       createRideNotification(
         input.customerId,
-        '✅ Siparişiniz alındı',
-        `${input.businessName} siparişiniz kuryelere iletildi.`,
-        { type: 'business_delivery_created', rideId: id, businessId: input.businessId }
+        customerNotificationTitle,
+        customerNotificationBody,
+        {
+          type: dispatchResult.assigned ? 'business_delivery_created' : 'business_delivery_waiting',
+          rideId: id,
+          businessId: input.businessId,
+        }
+      );
+      void sendPushToUser(
+        input.customerId,
+        customerNotificationTitle,
+        customerNotificationBody,
+        {
+          type: dispatchResult.assigned ? 'business_delivery_created' : 'business_delivery_waiting',
+          rideId: id,
+          businessId: input.businessId,
+        }
       );
 
-      return { success: true, ride, notifiedCouriers: onlineCouriers.length, notifiedScope };
+      return {
+        success: true,
+        ride: storedRide,
+        notifiedCouriers: dispatchResult.assigned ? 1 : 0,
+        notifiedScope,
+        dispatchResult,
+      };
+    }),
+
+  declineBusinessOrder: protectedProcedure
+    .input(
+      z.object({
+        rideId: z.string(),
+        driverId: z.string(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const ride = db.rides.get(input.rideId);
+      if (!isBusinessRide(ride)) return { success: false, error: 'İşletme siparişi bulunamadı' };
+      if (ride.status !== 'pending') return { success: false, error: 'Sipariş artık beklemede değil' };
+      if (ride.assignedCourierId !== input.driverId) return { success: false, error: 'Bu sipariş size atanmadı' };
+
+      const reassignment = await dispatchBusinessOrderToNearestCourier(input.rideId, {
+        skippedCourierId: input.driverId,
+        trigger: 'declined',
+      });
+
+      console.log('[RIDES] Business order declined by courier:', input.rideId, input.driverId, 'reassigned:', reassignment.assigned);
+      return { success: true, reassignment };
     }),
 
   accept: protectedProcedure
@@ -274,18 +268,47 @@ export const ridesRouter = createTRPCRouter({
         return { success: false, error: "Yolculuk başka bir şoför tarafından kabul edildi" };
       }
 
-      const updated = {
+      if (isBusinessRide(ride)) {
+        if (!ride.assignedCourierId || ride.assignedCourierId !== input.driverId) {
+          return { success: false, error: 'Bu sipariş size atanmadı' };
+        }
+
+        const expiresAtMs = ride.courierRequestExpiresAt ? new Date(ride.courierRequestExpiresAt).getTime() : 0;
+        if (expiresAtMs > 0 && Date.now() > expiresAtMs) {
+          await refreshExpiredBusinessOrderAssignments(ride.city);
+          return { success: false, error: 'Sipariş süresi doldu. Sistem başka kurye arıyor.' };
+        }
+      }
+
+      const updated: Ride = {
         ...ride,
         status: "accepted" as const,
         driverId: input.driverId,
         driverName: input.driverName,
         driverRating: input.driverRating,
+        assignedCourierId: undefined,
+        courierRequestExpiresAt: undefined,
       };
 
       await db.rides.setSync(input.rideId, updated);
       console.log("[RIDES] Accepted ride:", input.rideId, "by driver:", input.driverId);
 
-      void sendPushToUser(ride.customerId, '✅ Yolculuk Kabul Edildi', `${input.driverName} yolculuğunuzu kabul etti!`, { type: 'ride_accepted', rideId: input.rideId, driverName: input.driverName });
+      const customerTitle = isBusinessRide(ride) ? '✅ Kurye siparişi kabul etti' : '✅ Yolculuk Kabul Edildi';
+      const customerBody = isBusinessRide(ride)
+        ? `${input.driverName} siparişinizi teslim almak için yola çıktı!`
+        : `${input.driverName} yolculuğunuzu kabul etti!`;
+      const customerType = isBusinessRide(ride) ? 'business_delivery_accepted' : 'ride_accepted';
+
+      createRideNotification(ride.customerId, customerTitle, customerBody, {
+        type: customerType,
+        rideId: input.rideId,
+        driverName: input.driverName,
+      });
+      void sendPushToUser(ride.customerId, customerTitle, customerBody, {
+        type: customerType,
+        rideId: input.rideId,
+        driverName: input.driverName,
+      });
 
       return { success: true, ride: updated };
     }),
@@ -474,13 +497,29 @@ export const ridesRouter = createTRPCRouter({
     }),
 
   getPendingByCity: protectedProcedure
-    .input(z.object({ city: z.string(), driverCategory: z.enum(['driver', 'scooter', 'courier']).optional() }))
-    .query(({ input }) => {
+    .input(z.object({
+      city: z.string(),
+      driverCategory: z.enum(['driver', 'scooter', 'courier']).optional(),
+      driverId: z.string().optional(),
+    }))
+    .query(async ({ input }) => {
+      await refreshExpiredBusinessOrderAssignments(input.city);
       const pendingRides = db.rides.getPendingByCity(input.city);
       if (input.driverCategory === 'courier') {
-        return pendingRides.filter((ride) => ride.orderType === 'business_delivery' || ride.orderType === 'custom_delivery');
+        if (!input.driverId) {
+          return [];
+        }
+        return pendingRides
+          .filter((ride) => isBusinessRide(ride))
+          .filter((ride) => ride.assignedCourierId === input.driverId)
+          .filter((ride) => {
+            if (!ride.courierRequestExpiresAt) {
+              return true;
+            }
+            return new Date(ride.courierRequestExpiresAt).getTime() > Date.now();
+          });
       }
-      return pendingRides.filter((ride) => ride.orderType !== 'business_delivery' && ride.orderType !== 'custom_delivery');
+      return pendingRides.filter((ride) => !isBusinessRide(ride));
     }),
 
   findBestDriver: protectedProcedure

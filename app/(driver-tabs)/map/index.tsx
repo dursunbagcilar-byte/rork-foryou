@@ -222,6 +222,7 @@ export default function DriverHomeScreen() {
   const updateLocationMutation = trpc.drivers.updateLocation.useMutation();
   const setOnlineStatusMutation = trpc.drivers.setOnlineStatus.useMutation();
   const acceptRideMutation = trpc.rides.accept.useMutation();
+  const declineBusinessOrderMutation = trpc.rides.declineBusinessOrder.useMutation();
   const startRideMutation = trpc.rides.startRide.useMutation();
   const completeRideMutation = trpc.rides.complete.useMutation();
   const cancelRideMutation = trpc.rides.cancel.useMutation();
@@ -232,11 +233,15 @@ export default function DriverHomeScreen() {
   );
 
   const pendingRidesQuery = trpc.rides.getPendingByCity.useQuery(
-    { city: driver?.city ?? '', driverCategory: driver?.driverCategory ?? 'driver' },
+    {
+      city: driver?.city ?? '',
+      driverCategory: driver?.driverCategory ?? 'driver',
+      driverId: driver?.id ?? '',
+    },
     {
       enabled: isOnline && !!driver?.city && !rideAccepted && !hasRideRequest,
-      refetchInterval: 15000,
-      staleTime: 12000,
+      refetchInterval: 5000,
+      staleTime: 3000,
     }
   );
 
@@ -306,6 +311,18 @@ export default function DriverHomeScreen() {
       Animated.spring(requestAnim, { toValue: 1, useNativeDriver: true }).start();
     }
   }, [pendingRide, isOnline, hasRideRequest, rideAccepted, requestAnim]);
+
+  useEffect(() => {
+    if (!hasRideRequest || rideAccepted) return;
+    if (pendingRide) return;
+    if (activeRideQuery.data) return;
+    if (!currentRideId) return;
+
+    console.log('[Driver] Pending ride request cleared or reassigned:', currentRideId);
+    setHasRideRequest(false);
+    setCurrentRideId(null);
+    Animated.timing(requestAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+  }, [activeRideQuery.data, currentRideId, hasRideRequest, pendingRide, requestAnim, rideAccepted]);
 
   useEffect(() => {
     if (driver?.id) {
@@ -875,24 +892,42 @@ export default function DriverHomeScreen() {
 
   const handleCourteousWarningOk = useCallback(async () => {
     setShowCourteousWarning(false);
+
+    if (!currentRideId || !driver) {
+      Alert.alert('Hata', 'Sipariş bilgisi bulunamadı.');
+      return;
+    }
+
+    try {
+      const result = await acceptRideMutation.mutateAsync({
+        rideId: currentRideId,
+        driverId: driver.id,
+        driverName: driver.name ?? 'Şoför',
+        driverRating: driver.rating ?? 5.0,
+      });
+
+      if (!result?.success) {
+        Alert.alert('Sipariş alınamadı', result?.error ?? 'Sipariş başka bir kuryeye geçti.');
+        setHasRideRequest(false);
+        setCurrentRideId(null);
+        Animated.timing(requestAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+        return;
+      }
+
+      console.log('[Driver] Ride accepted on backend:', currentRideId);
+    } catch (err) {
+      console.log('[Driver] Accept ride backend error:', err);
+      Alert.alert('Sipariş alınamadı', 'Sipariş başka bir kuryeye geçti veya süresi doldu.');
+      setHasRideRequest(false);
+      setCurrentRideId(null);
+      Animated.timing(requestAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+      return;
+    }
+
     setRideAccepted(true);
     setArrivedAtPickup(false);
     spokenStepsRef.current = new Set();
     Animated.timing(requestAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
-
-    if (currentRideId && driver) {
-      try {
-        await acceptRideMutation.mutateAsync({
-          rideId: currentRideId,
-          driverId: driver.id,
-          driverName: driver.name ?? 'Şoför',
-          driverRating: driver.rating ?? 5.0,
-        });
-        console.log('[Driver] Ride accepted on backend:', currentRideId);
-      } catch (err) {
-        console.log('[Driver] Accept ride backend error (continuing):', err);
-      }
-    }
 
     const driverOrigin = { latitude: mapRegion.latitude, longitude: mapRegion.longitude };
     const path = await fetchDirections(driverOrigin, pickupCoord);
@@ -907,11 +942,23 @@ export default function DriverHomeScreen() {
     }
   }, [requestAnim, fetchDirections, speakInstruction, mapRegion.latitude, mapRegion.longitude, pickupCoord, currentRideId, driver, acceptRideMutation, isBusinessDelivery]);
 
-  const handleDeclineRide = useCallback(() => {
+  const handleDeclineRide = useCallback(async () => {
+    if (currentRideId && driver?.id && isBusinessDelivery) {
+      try {
+        const result = await declineBusinessOrderMutation.mutateAsync({
+          rideId: currentRideId,
+          driverId: driver.id,
+        });
+        console.log('[Driver] Business order declined:', currentRideId, 'reassigned:', result?.reassignment?.assigned ?? false);
+      } catch (error) {
+        console.log('[Driver] Decline business order error:', error);
+      }
+    }
+
     setHasRideRequest(false);
     setCurrentRideId(null);
     Animated.timing(requestAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
-  }, [requestAnim]);
+  }, [currentRideId, declineBusinessOrderMutation, driver?.id, isBusinessDelivery, requestAnim]);
 
   useEffect(() => {
     if (rideAccepted && driverSimLoc && !arrivedAtPickup && driverPathRef.current.length > 0) {
