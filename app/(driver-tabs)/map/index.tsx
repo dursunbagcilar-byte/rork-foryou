@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated, Switch, Platform, Alert, ScrollView, Linking, Image, Dimensions, ActivityIndicator, TextInput, KeyboardAvoidingView, FlatList,
 } from 'react-native';
@@ -26,7 +27,7 @@ import { calculatePrice, calculateDistance, estimateDuration } from '@/constants
 import type { VehicleType } from '@/constants/pricing';
 import { getVehicleImageUrl } from '@/constants/vehicleImages';
 import type { Driver } from '@/constants/mockData';
-import { trpc } from '@/lib/trpc';
+import { buildApiUrl, getSessionToken, trpc } from '@/lib/trpc';
 import { getGoogleMapsApiKey, getGeocodingUrl, logMapsKeyStatus } from '@/utils/maps';
 
 const GOOGLE_API_KEY = getGoogleMapsApiKey();
@@ -115,6 +116,58 @@ function decodePolyline(encoded: string): { latitude: number; longitude: number 
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+}
+
+interface DriverSyncResponse {
+  success: boolean;
+  error?: string | null;
+}
+
+async function postDriverSync(path: string, body: Record<string, unknown>): Promise<DriverSyncResponse> {
+  const sessionToken = await getSessionToken();
+  if (!sessionToken) {
+    throw new Error('Oturum bulunamadı');
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    authorization: `Bearer ${sessionToken}`,
+  };
+
+  const dbEndpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT;
+  const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
+  const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
+
+  if (dbEndpoint && dbNamespace && dbToken) {
+    headers['x-db-endpoint'] = dbEndpoint;
+    headers['x-db-namespace'] = dbNamespace;
+    headers['x-db-token'] = dbToken;
+  }
+
+  const endpoint = buildApiUrl(path);
+  console.log('[Driver] REST sync request:', endpoint, JSON.stringify(body));
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+
+  const rawText = await response.text();
+  let data: DriverSyncResponse | null = null;
+
+  try {
+    data = rawText ? JSON.parse(rawText) as DriverSyncResponse : null;
+  } catch (error) {
+    console.log('[Driver] REST sync parse error:', path, error, rawText.substring(0, 180));
+    throw new Error('Sunucu geçersiz yanıt verdi');
+  }
+
+  if (!response.ok || !data?.success) {
+    console.log('[Driver] REST sync failed:', path, response.status, data?.error);
+    throw new Error(data?.error ?? 'Sürücü durumu eşitlenemedi');
+  }
+
+  return data;
 }
 
 function getManeuverIcon(maneuver?: string) {
@@ -219,8 +272,16 @@ export default function DriverHomeScreen() {
     lat: (Math.random() - 0.5) * 0.01,
     lng: (Math.random() - 0.5) * 0.01,
   });
-  const updateLocationMutation = trpc.drivers.updateLocation.useMutation();
-  const setOnlineStatusMutation = trpc.drivers.setOnlineStatus.useMutation();
+  const updateLocationMutation = useMutation({
+    mutationFn: async (payload: { driverId: string; latitude: number; longitude: number }) => {
+      return postDriverSync('/drivers/update-location', payload);
+    },
+  });
+  const setOnlineStatusMutation = useMutation({
+    mutationFn: async (payload: { driverId: string; isOnline: boolean }) => {
+      return postDriverSync('/drivers/set-online-status', payload);
+    },
+  });
   const acceptRideMutation = trpc.rides.accept.useMutation();
   const declineBusinessOrderMutation = trpc.rides.declineBusinessOrder.useMutation();
   const startRideMutation = trpc.rides.startRide.useMutation();
@@ -326,8 +387,17 @@ export default function DriverHomeScreen() {
 
   useEffect(() => {
     if (driver?.id) {
-      setOnlineStatusMutation.mutate({ driverId: driver.id, isOnline });
-      console.log('[Driver] Online status synced:', isOnline);
+      setOnlineStatusMutation.mutate(
+        { driverId: driver.id, isOnline },
+        {
+          onSuccess: () => {
+            console.log('[Driver] Online status synced:', isOnline);
+          },
+          onError: (error: unknown) => {
+            console.log('[Driver] Online status sync error:', error);
+          },
+        }
+      );
     }
     if (isOnline) {
       setVoiceEnabled(true);
@@ -383,13 +453,27 @@ export default function DriverHomeScreen() {
       }
 
       if (hasMoved(lat, lng)) {
-        updateLocationMutation.mutate({ driverId, latitude: lat, longitude: lng });
+        updateLocationMutation.mutate(
+          { driverId, latitude: lat, longitude: lng },
+          {
+            onError: (error: unknown) => {
+              console.log('[Driver] Location sync error:', error);
+            },
+          }
+        );
         lastSentLocationRef.current = { lat, lng, time: Date.now() };
         console.log('[Driver] Location broadcast:', lat.toFixed(5), lng.toFixed(5), 'interval:', locationSendInterval);
       } else {
         const timeSinceLast = lastSentLocationRef.current ? Date.now() - lastSentLocationRef.current.time : 999999;
         if (timeSinceLast > 30000) {
-          updateLocationMutation.mutate({ driverId, latitude: lat, longitude: lng });
+          updateLocationMutation.mutate(
+            { driverId, latitude: lat, longitude: lng },
+            {
+              onError: (error: unknown) => {
+                console.log('[Driver] Heartbeat location sync error:', error);
+              },
+            }
+          );
           lastSentLocationRef.current = { lat, lng, time: Date.now() };
           console.log('[Driver] Heartbeat location broadcast');
         }

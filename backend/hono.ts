@@ -869,6 +869,121 @@ app.post("/auth/register-business", async (c) => {
   }
 });
 
+app.post("/drivers/set-online-status", async (c) => {
+  const startTime = Date.now();
+  try {
+    const dbEp = c.req.header('x-db-endpoint');
+    const dbNs = c.req.header('x-db-namespace');
+    const dbTk = c.req.header('x-db-token');
+    await ensureDbReady(dbEp, dbNs, dbTk);
+
+    const authHeader = c.req.header('authorization') || c.req.header('Authorization') || '';
+    const sessionToken = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!sessionToken) {
+      return c.json({ success: false, error: 'Oturum bulunamadı' }, 401);
+    }
+
+    const session = db.sessions.get(sessionToken);
+    const isExpired = session ? new Date(session.expiresAt).getTime() < Date.now() : true;
+    if (!session || isExpired || session.userType !== 'driver') {
+      if (session && isExpired) {
+        db.sessions.delete(sessionToken);
+      }
+      return c.json({ success: false, error: 'Geçersiz oturum' }, 401);
+    }
+
+    const driver = db.drivers.get(session.userId);
+    if (!driver) {
+      return c.json({ success: false, error: 'Şoför hesabı bulunamadı' }, 404);
+    }
+
+    const body = await c.req.json();
+    const requestedDriverId = typeof body.driverId === 'string' ? body.driverId : session.userId;
+    if (requestedDriverId !== session.userId) {
+      return c.json({ success: false, error: 'Bu işlem için yetkiniz yok' }, 403);
+    }
+
+    const isOnline = Boolean(body.isOnline);
+    await db.drivers.setSync(session.userId, { ...driver, isOnline });
+
+    if (isOnline && driver.driverCategory === 'courier') {
+      try {
+        const { tryDispatchWaitingBusinessOrdersForCourier } = await import('./trpc/routes/business-order-dispatch');
+        const dispatchedCount = await tryDispatchWaitingBusinessOrdersForCourier(session.userId);
+        console.log('[REST] set-online-status business dispatch:', session.userId, dispatchedCount);
+      } catch (dispatchError) {
+        console.log('[REST] set-online-status dispatch error:', dispatchError);
+      }
+    }
+
+    console.log('[REST] Driver online status updated:', session.userId, isOnline, 'elapsed:', Date.now() - startTime, 'ms');
+    return c.json({ success: true, error: null });
+  } catch (err: unknown) {
+    console.log('[REST] set-online-status error:', err instanceof Error ? err.message : err, 'elapsed:', Date.now() - startTime, 'ms');
+    return c.json({ success: false, error: 'Şoför durumu güncellenemedi' }, 500);
+  }
+});
+
+app.post("/drivers/update-location", async (c) => {
+  const startTime = Date.now();
+  try {
+    const dbEp = c.req.header('x-db-endpoint');
+    const dbNs = c.req.header('x-db-namespace');
+    const dbTk = c.req.header('x-db-token');
+    await ensureDbReady(dbEp, dbNs, dbTk);
+
+    const authHeader = c.req.header('authorization') || c.req.header('Authorization') || '';
+    const sessionToken = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!sessionToken) {
+      return c.json({ success: false, error: 'Oturum bulunamadı' }, 401);
+    }
+
+    const session = db.sessions.get(sessionToken);
+    const isExpired = session ? new Date(session.expiresAt).getTime() < Date.now() : true;
+    if (!session || isExpired || session.userType !== 'driver') {
+      if (session && isExpired) {
+        db.sessions.delete(sessionToken);
+      }
+      return c.json({ success: false, error: 'Geçersiz oturum' }, 401);
+    }
+
+    const driver = db.drivers.get(session.userId);
+    if (!driver) {
+      return c.json({ success: false, error: 'Şoför hesabı bulunamadı' }, 404);
+    }
+
+    const body = await c.req.json();
+    const requestedDriverId = typeof body.driverId === 'string' ? body.driverId : session.userId;
+    if (requestedDriverId !== session.userId) {
+      return c.json({ success: false, error: 'Bu işlem için yetkiniz yok' }, 403);
+    }
+
+    const latitude = typeof body.latitude === 'number' ? body.latitude : Number.NaN;
+    const longitude = typeof body.longitude === 'number' ? body.longitude : Number.NaN;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return c.json({ success: false, error: 'Geçersiz konum bilgisi' }, 400);
+    }
+
+    db.driverLocations.set(session.userId, { latitude, longitude });
+
+    if (driver.isOnline && driver.driverCategory === 'courier') {
+      try {
+        const { tryDispatchWaitingBusinessOrdersForCourier } = await import('./trpc/routes/business-order-dispatch');
+        const dispatchedCount = await tryDispatchWaitingBusinessOrdersForCourier(session.userId);
+        console.log('[REST] update-location business dispatch:', session.userId, dispatchedCount);
+      } catch (dispatchError) {
+        console.log('[REST] update-location dispatch error:', dispatchError);
+      }
+    }
+
+    console.log('[REST] Driver location updated:', session.userId, latitude, longitude, 'elapsed:', Date.now() - startTime, 'ms');
+    return c.json({ success: true, error: null });
+  } catch (err: unknown) {
+    console.log('[REST] update-location error:', err instanceof Error ? err.message : err, 'elapsed:', Date.now() - startTime, 'ms');
+    return c.json({ success: false, error: 'Şoför konumu güncellenemedi' }, 500);
+  }
+});
+
 app.post("/auth/logout", async (c) => {
   try {
     const body = await c.req.json();
