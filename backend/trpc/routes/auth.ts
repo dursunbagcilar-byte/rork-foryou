@@ -111,6 +111,57 @@ function getProfileUpdateErrorPayload(message: string) {
   return { success: false, error: message, user: null };
 }
 
+const updateCustomerProfileInputSchema = z.object({
+  userId: z.string(),
+  name: z.string().min(1).max(100).optional(),
+  phone: z.string().min(1).max(20).optional(),
+  city: z.string().min(1).max(100).optional(),
+  district: z.string().min(1).max(100).optional(),
+  avatar: z.string().max(500).optional(),
+});
+
+async function handleCustomerProfileUpdate({
+  input,
+  ctx,
+}: {
+  input: z.infer<typeof updateCustomerProfileInputSchema>;
+  ctx: {
+    userId: string | null;
+    userType: "customer" | "driver" | null;
+  };
+}) {
+  if (ctx.userType !== 'customer' || ctx.userId !== input.userId) {
+    return getProfileUpdateErrorPayload('Bu işlem için yetkiniz yok');
+  }
+
+  const user = db.users.get(input.userId);
+  if (!user) {
+    return getProfileUpdateErrorPayload('Kullanıcı bulunamadı');
+  }
+
+  const sanitizedPhone = input.phone ? getSanitizedPhone(input.phone) : undefined;
+  if (input.phone && !sanitizedPhone) {
+    return getProfileUpdateErrorPayload('Telefon numarası gerekli');
+  }
+
+  if (sanitizedPhone && isPhoneTakenByAnotherAccount(sanitizedPhone, input.userId)) {
+    return getProfileUpdateErrorPayload('Bu telefon numarası başka bir hesapta kullanılıyor');
+  }
+
+  const updated = {
+    ...user,
+    ...(input.name && { name: sanitizeInput(input.name) }),
+    ...(sanitizedPhone && { phone: sanitizedPhone }),
+    ...(input.city && { city: sanitizeInput(input.city) }),
+    ...(input.district && { district: sanitizeInput(input.district) }),
+    ...(input.avatar !== undefined && { avatar: input.avatar }),
+  };
+
+  await db.users.setSync(input.userId, updated);
+  console.log('[AUTH] Customer profile updated:', input.userId, updated.phone);
+  return { success: true, error: null, user: updated };
+}
+
 export const authRouter = createTRPCRouter({
   sendVerificationCode: publicProcedure
     .input(z.object({
@@ -829,49 +880,13 @@ export const authRouter = createTRPCRouter({
       return { success: true, error: null };
     }),
 
+  updateProfile: protectedProcedure
+    .input(updateCustomerProfileInputSchema)
+    .mutation(handleCustomerProfileUpdate),
+
   updateCustomerProfile: protectedProcedure
-    .input(
-      z.object({
-        userId: z.string(),
-        name: z.string().min(1).max(100).optional(),
-        phone: z.string().min(1).max(20).optional(),
-        city: z.string().min(1).max(100).optional(),
-        district: z.string().min(1).max(100).optional(),
-        avatar: z.string().max(500).optional(),
-      })
-    )
-    .mutation(async ({ input, ctx }) => {
-      if (ctx.userType !== 'customer' || ctx.userId !== input.userId) {
-        return getProfileUpdateErrorPayload('Bu işlem için yetkiniz yok');
-      }
-
-      const user = db.users.get(input.userId);
-      if (!user) {
-        return getProfileUpdateErrorPayload('Kullanıcı bulunamadı');
-      }
-
-      const sanitizedPhone = input.phone ? getSanitizedPhone(input.phone) : undefined;
-      if (input.phone && !sanitizedPhone) {
-        return getProfileUpdateErrorPayload('Telefon numarası gerekli');
-      }
-
-      if (sanitizedPhone && isPhoneTakenByAnotherAccount(sanitizedPhone, input.userId)) {
-        return getProfileUpdateErrorPayload('Bu telefon numarası başka bir hesapta kullanılıyor');
-      }
-
-      const updated = {
-        ...user,
-        ...(input.name && { name: sanitizeInput(input.name) }),
-        ...(sanitizedPhone && { phone: sanitizedPhone }),
-        ...(input.city && { city: sanitizeInput(input.city) }),
-        ...(input.district && { district: sanitizeInput(input.district) }),
-        ...(input.avatar !== undefined && { avatar: input.avatar }),
-      };
-
-      await db.users.setSync(input.userId, updated);
-      console.log('[AUTH] Customer profile updated:', input.userId, updated.phone);
-      return { success: true, error: null, user: updated };
-    }),
+    .input(updateCustomerProfileInputSchema)
+    .mutation(handleCustomerProfileUpdate),
 
   changePassword: publicProcedure
     .input(z.object({

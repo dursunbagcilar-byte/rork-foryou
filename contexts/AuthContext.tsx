@@ -519,10 +519,26 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
     try {
       if (user.type === 'customer') {
-        const result = await trpcClient.auth.updateCustomerProfile.mutate({
-          userId: user.id,
-          phone: cleanPhone,
-        });
+        let result: { success: boolean; error: string | null; user: User | null } | null = null;
+
+        try {
+          result = await trpcClient.auth.updateProfile.mutate({
+            userId: user.id,
+            phone: cleanPhone,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '';
+          console.log('[Auth] updateAccountPhone customer updateProfile error:', error);
+
+          if (!message.includes('No procedure found on path')) {
+            throw error;
+          }
+
+          result = await trpcClient.auth.updateCustomerProfile.mutate({
+            userId: user.id,
+            phone: cleanPhone,
+          });
+        }
 
         if (!result?.success || !result.user) {
           throw new Error(result?.error ?? 'Telefon numarası güncellenemedi');
