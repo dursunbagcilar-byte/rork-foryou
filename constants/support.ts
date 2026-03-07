@@ -19,7 +19,12 @@ export function normalizePhoneForWhatsApp(phone: string | null | undefined): str
 
 export function getWhatsAppDeliveryNote(maskedPhone?: string | null): string {
   const phoneLabel = maskedPhone ? ` ${maskedPhone}` : '';
-  return `Kod, kayıtlı${phoneLabel} numarasının bağlı olduğu WhatsApp hesabına yönlendirilir. WhatsApp veya WhatsApp Business fark etmez.`;
+  return `Kod, kayıtlı${phoneLabel} numarasının bağlı olduğu WhatsApp hesabına gönderilir. WhatsApp veya WhatsApp Business fark etmez.`;
+}
+
+export function getWhatsAppSupportDeliveryNote(maskedPhone?: string | null): string {
+  const phoneLabel = maskedPhone ? ` ${maskedPhone}` : '';
+  return `Otomatik gönderim kullanılamazsa talep destek hattına açılır ve kod, kayıtlı${phoneLabel} numarasının bağlı olduğu WhatsApp hesabı için hazırlanır.`;
 }
 
 function isEmailLike(value: string): boolean {
@@ -34,7 +39,7 @@ export function buildPasswordResetSupportMessage(identifier: string, maskedPhone
     'şifre sıfırlama kodu talep ediyorum.',
     `${identifierLabel}: ${trimmedIdentifier || 'belirtilmedi'}`,
     `Kayıtlı telefon: ${maskedPhone ?? 'sistemde kontrol ediniz'}`,
-    getWhatsAppDeliveryNote(maskedPhone),
+    getWhatsAppSupportDeliveryNote(maskedPhone),
   ];
 
   if (reason) {

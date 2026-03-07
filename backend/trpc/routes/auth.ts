@@ -13,7 +13,15 @@ import {
   validatePassword,
 } from "../../utils/security";
 import { sendEmail, generateResetCode, buildResetCodeEmail, buildVerificationCodeEmail, type SendEmailErrorCode } from "../../utils/email";
-import { SUPPORT_WHATSAPP_DISPLAY, SUPPORT_WHATSAPP_NUMBER, buildPasswordResetSupportWhatsAppUrl, getWhatsAppDeliveryNote, normalizePhoneForWhatsApp } from "../../../constants/support";
+import { getWhatsAppResetFallbackMessage, sendPasswordResetWhatsAppCode } from "../../utils/whatsapp";
+import {
+  SUPPORT_WHATSAPP_DISPLAY,
+  SUPPORT_WHATSAPP_NUMBER,
+  buildPasswordResetSupportWhatsAppUrl,
+  getWhatsAppDeliveryNote,
+  getWhatsAppSupportDeliveryNote,
+  normalizePhoneForWhatsApp,
+} from "../../../constants/support";
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../../../utils/phone";
 
 async function createSession(userId: string, userType: "customer" | "driver"): Promise<string> {
@@ -754,23 +762,66 @@ export const authRouter = createTRPCRouter({
       const rawPhone = typeof account?.phone === 'string' ? account.phone : undefined;
       const maskedPhone = maskPhoneNumber(rawPhone);
       const whatsappTargetPhone = normalizePhoneForWhatsApp(rawPhone);
-      const deliveryNote = getWhatsAppDeliveryNote(maskedPhone);
+      const directDeliveryNote = getWhatsAppDeliveryNote(maskedPhone);
+      const supportDeliveryNote = getWhatsAppSupportDeliveryNote(maskedPhone);
       const whatsappUrl = buildPasswordResetWhatsAppUrl(cleanEmail, maskedPhone, 'Şifre sıfırlama doğrulama kodu talebi');
 
       if (deliveryMethod === 'whatsapp') {
+        if (whatsappTargetPhone) {
+          const whatsappResult = await sendPasswordResetWhatsAppCode({
+            toPhone: whatsappTargetPhone,
+            code,
+          });
+
+          if (whatsappResult.success) {
+            recordLoginSuccess(`resetcode_${cleanEmail}`);
+            console.log('[AUTH] Reset code sent via WhatsApp:', cleanEmail, 'maskedPhone:', maskedPhone, 'messageId:', whatsappResult.messageId);
+            return {
+              success: true,
+              error: null,
+              emailSent: false,
+              deliveryChannel: 'whatsapp' as const,
+              whatsappDeliveryMode: 'auto' as const,
+              supportPhone: SUPPORT_WHATSAPP_NUMBER,
+              supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
+              whatsappUrl,
+              maskedPhone,
+              whatsappTargetPhone,
+              deliveryNote: directDeliveryNote,
+            };
+          }
+
+          console.log('[AUTH] WhatsApp reset delivery failed, falling back to support:', cleanEmail, whatsappResult.errorCode, whatsappResult.providerMessage);
+          recordLoginSuccess(`resetcode_${cleanEmail}`);
+          return {
+            success: true,
+            error: getWhatsAppResetFallbackMessage(whatsappResult),
+            emailSent: false,
+            deliveryChannel: 'whatsapp' as const,
+            whatsappDeliveryMode: 'support' as const,
+            supportPhone: SUPPORT_WHATSAPP_NUMBER,
+            supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
+            whatsappUrl,
+            maskedPhone,
+            whatsappTargetPhone,
+            deliveryNote: supportDeliveryNote,
+          };
+        }
+
         recordLoginSuccess(`resetcode_${cleanEmail}`);
-        console.log('[AUTH] Reset code prepared for WhatsApp support:', cleanEmail, 'maskedPhone:', maskedPhone, 'whatsappTargetPhone:', whatsappTargetPhone);
+        console.log('[AUTH] Reset code missing WhatsApp target phone, falling back to support:', cleanEmail);
         return {
           success: true,
-          error: null,
+          error: 'Kayıtlı WhatsApp numarası bulunamadı. Kod talebiniz destek hattına yönlendirildi.',
           emailSent: false,
           deliveryChannel: 'whatsapp' as const,
+          whatsappDeliveryMode: 'support' as const,
           supportPhone: SUPPORT_WHATSAPP_NUMBER,
           supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
           whatsappUrl,
           maskedPhone,
           whatsappTargetPhone,
-          deliveryNote,
+          deliveryNote: supportDeliveryNote,
         };
       }
 
@@ -796,12 +847,13 @@ export const authRouter = createTRPCRouter({
           error: getEmailSendErrorMessage(emailResult.errorCode),
           emailSent: false,
           deliveryChannel: 'whatsapp' as const,
+          whatsappDeliveryMode: 'support' as const,
           supportPhone: SUPPORT_WHATSAPP_NUMBER,
           supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
           whatsappUrl,
           maskedPhone,
           whatsappTargetPhone,
-          deliveryNote,
+          deliveryNote: supportDeliveryNote,
         };
       }
 
@@ -816,7 +868,7 @@ export const authRouter = createTRPCRouter({
         supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
         maskedPhone,
         whatsappTargetPhone,
-        deliveryNote,
+        deliveryNote: directDeliveryNote,
       };
     }),
 
