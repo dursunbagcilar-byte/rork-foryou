@@ -107,6 +107,10 @@ export default function RegisterDriverScreen() {
   const isCourierLike = driverCategory === 'courier';
   const isBusinessCategorySelected = registrationCategory === 'business';
   const shouldShowBusinessFields = isBusinessCategorySelected || enableBusinessRegistration;
+  const shouldShowCourierVehicleSection = isCourierLike && !isBusinessCategorySelected;
+  const shouldShowHelmetDocument = driverCategory === 'scooter' || shouldShowCourierVehicleSection;
+  const shouldShowCriminalRecordDocument = !isBusinessCategorySelected;
+  const shouldShowTaxCertificateDocument = driverCategory !== 'courier' || isBusinessCategorySelected;
   const { acceptAllConsents } = usePrivacy();
 
 
@@ -307,7 +311,7 @@ export default function RegisterDriverScreen() {
     const isCourier = driverCategory === 'courier';
     const needsPlate = driverCategory !== 'scooter' || scooterSubType !== 'escooter';
     if (isCourier) {
-      if (!name || !phone || !email || !password || !vehicleModel || !vehicleColor) {
+      if (!name || !phone || !email || !password || (shouldShowCourierVehicleSection && (!vehicleModel || !vehicleColor))) {
         Alert.alert('Uyarı', 'Lütfen tüm alanları doldurun');
         return false;
       }
@@ -319,7 +323,7 @@ export default function RegisterDriverScreen() {
         Alert.alert('Uyarı', 'Şifre en az 8 karakter olmalı ve büyük harf, küçük harf, rakam içermelidir');
         return false;
       }
-      if (!helmetPhoto) {
+      if (shouldShowCourierVehicleSection && !helmetPhoto) {
         Alert.alert('Uyarı', 'Lütfen kask fotoğrafınızı yükleyin');
         return false;
       }
@@ -376,7 +380,12 @@ export default function RegisterDriverScreen() {
         Alert.alert('Uyarı', 'Lütfen kimlik kartı fotoğraflarını yükleyin');
         return false;
       }
-      if (!criminalRecord) {
+      if (isBusinessCategorySelected) {
+        if (!taxCertificate) {
+          Alert.alert('Uyarı', 'Lütfen vergi levhasını görsel olarak yükleyin');
+          return false;
+        }
+      } else if (!criminalRecord) {
         Alert.alert('Uyarı', 'Lütfen sabıka kaydınızı yükleyin');
         return false;
       }
@@ -399,8 +408,10 @@ export default function RegisterDriverScreen() {
       const isCourier = isCourierLike;
       const normalizedPhone = normalizeTurkishPhone(phone);
       const licenseIssueDateStr = isCourier ? undefined : (parsedLicenseDate ? parsedLicenseDate.toISOString() : undefined);
+      const registrationVehicleModel = isBusinessCategorySelected ? 'İşletme hesabı' : vehicleModel;
+      const registrationVehicleColor = isBusinessCategorySelected ? 'Belirtilmedi' : vehicleColor;
       await acceptAllConsents();
-      await registerDriver(name, normalizedPhone, email, password, isCourier ? '' : vehiclePlate, vehicleModel, vehicleColor, partnerName, selectedCity, selectedDistrict, licenseIssueDateStr, driverCategory);
+      await registerDriver(name, normalizedPhone, email, password, isCourier ? '' : vehiclePlate, registrationVehicleModel, registrationVehicleColor, partnerName, selectedCity, selectedDistrict, licenseIssueDateStr, driverCategory);
 
       if (isCourier && shouldShowBusinessFields) {
         const businessCoordinates = await geocodeBusinessAddress(businessAddress, selectedCity, selectedDistrict);
@@ -432,8 +443,8 @@ export default function RegisterDriverScreen() {
           idCardBack,
           registrationFront,
           registrationBack,
-          criminalRecord,
-          taxCertificate,
+          criminalRecord: shouldShowCriminalRecordDocument ? criminalRecord : undefined,
+          taxCertificate: shouldShowTaxCertificateDocument ? taxCertificate : undefined,
         });
         console.log('[RegisterDriver] Documents saved successfully');
       } catch (docErr) {
@@ -761,67 +772,71 @@ export default function RegisterDriverScreen() {
               </View>
             </View>
 
-            <Text style={styles.sectionTitle}>
-              {driverCategory === 'driver' ? 'Araç Bilgileri' : driverCategory === 'scooter' ? (scooterSubType === 'escooter' ? 'E-Scooter Bilgileri' : 'Motorsiklet Bilgileri') : 'Kurye Araç Bilgileri'}
-            </Text>
-            {driverCategory === 'courier' && (
-              <Text style={styles.partnerNote}>Teslimat için kullandığınız araç bilgilerini girin</Text>
-            )}
-            <View style={styles.formSection}>
-              {driverCategory === 'courier' ? (
-                <>
-                  <InputField
-                    renderIcon={() => <Bike size={18} color={Colors.dark.textMuted} />}
-                    label="Araç Tipi / Modeli"
-                    placeholder="Motorsiklet, bisiklet veya yaya"
-                    value={vehicleModel}
-                    onChangeText={setVehicleModel}
-                  />
-                  <InputField
-                    renderIcon={() => <Palette size={18} color={Colors.dark.textMuted} />}
-                    label="Araç Rengi"
-                    placeholder="Siyah"
-                    value={vehicleColor}
-                    onChangeText={setVehicleColor}
-                  />
-                  <InputField
-                    renderIcon={() => <Hash size={18} color={Colors.dark.textMuted} />}
-                    label="Plaka (Varsa)"
-                    placeholder="Motorsiklet plakası (opsiyonel)"
-                    value={vehiclePlate}
-                    onChangeText={(t) => setVehiclePlate(t.toUpperCase())}
-                    autoCapitalize="characters"
-                  />
-                </>
-              ) : (
-                <>
-                  {(driverCategory !== 'scooter' || scooterSubType !== 'escooter') && (
-                    <InputField
-                      renderIcon={() => <Hash size={18} color={Colors.dark.textMuted} />}
-                      label="Plaka"
-                      placeholder={driverCategory === 'scooter' ? '34 AB 1234' : '34 ABC 123'}
-                      value={vehiclePlate}
-                      onChangeText={(t) => setVehiclePlate(t.toUpperCase())}
-                      autoCapitalize="characters"
-                    />
+            {(!isBusinessCategorySelected || !isCourierLike) && (
+              <>
+                <Text style={styles.sectionTitle}>
+                  {driverCategory === 'driver' ? 'Araç Bilgileri' : driverCategory === 'scooter' ? (scooterSubType === 'escooter' ? 'E-Scooter Bilgileri' : 'Motorsiklet Bilgileri') : 'Kurye Araç Bilgileri'}
+                </Text>
+                {driverCategory === 'courier' && (
+                  <Text style={styles.partnerNote}>Teslimat için kullandığınız araç bilgilerini girin</Text>
+                )}
+                <View style={styles.formSection}>
+                  {driverCategory === 'courier' ? (
+                    <>
+                      <InputField
+                        renderIcon={() => <Bike size={18} color={Colors.dark.textMuted} />}
+                        label="Araç Tipi / Modeli"
+                        placeholder="Motorsiklet, bisiklet veya yaya"
+                        value={vehicleModel}
+                        onChangeText={setVehicleModel}
+                      />
+                      <InputField
+                        renderIcon={() => <Palette size={18} color={Colors.dark.textMuted} />}
+                        label="Araç Rengi"
+                        placeholder="Siyah"
+                        value={vehicleColor}
+                        onChangeText={setVehicleColor}
+                      />
+                      <InputField
+                        renderIcon={() => <Hash size={18} color={Colors.dark.textMuted} />}
+                        label="Plaka (Varsa)"
+                        placeholder="Motorsiklet plakası (opsiyonel)"
+                        value={vehiclePlate}
+                        onChangeText={(t) => setVehiclePlate(t.toUpperCase())}
+                        autoCapitalize="characters"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      {(driverCategory !== 'scooter' || scooterSubType !== 'escooter') && (
+                        <InputField
+                          renderIcon={() => <Hash size={18} color={Colors.dark.textMuted} />}
+                          label="Plaka"
+                          placeholder={driverCategory === 'scooter' ? '34 AB 1234' : '34 ABC 123'}
+                          value={vehiclePlate}
+                          onChangeText={(t) => setVehiclePlate(t.toUpperCase())}
+                          autoCapitalize="characters"
+                        />
+                      )}
+                      <InputField
+                        renderIcon={() => driverCategory === 'scooter' ? (scooterSubType === 'escooter' ? <Zap size={18} color={Colors.dark.textMuted} /> : <Bike size={18} color={Colors.dark.textMuted} />) : <Car size={18} color={Colors.dark.textMuted} />}
+                        label={driverCategory === 'driver' ? 'Araç Modeli' : (scooterSubType === 'escooter' ? 'E-Scooter Modeli' : 'Motorsiklet Modeli')}
+                        placeholder={driverCategory === 'driver' ? 'Toyota Corolla 2022' : (scooterSubType === 'escooter' ? 'Xiaomi Mi Pro 2' : 'Honda PCX 125')}
+                        value={vehicleModel}
+                        onChangeText={setVehicleModel}
+                      />
+                      <InputField
+                        renderIcon={() => <Palette size={18} color={Colors.dark.textMuted} />}
+                        label={driverCategory === 'driver' ? 'Araç Rengi' : 'Renk'}
+                        placeholder="Beyaz"
+                        value={vehicleColor}
+                        onChangeText={setVehicleColor}
+                      />
+                    </>
                   )}
-                  <InputField
-                    renderIcon={() => driverCategory === 'scooter' ? (scooterSubType === 'escooter' ? <Zap size={18} color={Colors.dark.textMuted} /> : <Bike size={18} color={Colors.dark.textMuted} />) : <Car size={18} color={Colors.dark.textMuted} />}
-                    label={driverCategory === 'driver' ? 'Araç Modeli' : (scooterSubType === 'escooter' ? 'E-Scooter Modeli' : 'Motorsiklet Modeli')}
-                    placeholder={driverCategory === 'driver' ? 'Toyota Corolla 2022' : (scooterSubType === 'escooter' ? 'Xiaomi Mi Pro 2' : 'Honda PCX 125')}
-                    value={vehicleModel}
-                    onChangeText={setVehicleModel}
-                  />
-                  <InputField
-                    renderIcon={() => <Palette size={18} color={Colors.dark.textMuted} />}
-                    label={driverCategory === 'driver' ? 'Araç Rengi' : 'Renk'}
-                    placeholder="Beyaz"
-                    value={vehicleColor}
-                    onChangeText={setVehicleColor}
-                  />
-                </>
-              )}
-            </View>
+                </View>
+              </>
+            )}
 
             {isCourierLike && (
               <>
@@ -958,7 +973,11 @@ export default function RegisterDriverScreen() {
 
             <Text style={styles.sectionTitle}>Belgeler</Text>
             <Text style={styles.partnerNote}>
-              {driverCategory === 'courier' ? 'Kimlik ve sabıka kaydınızı yükleyin' : 'Tüm belgelerin ön ve arka yüzünü yükleyin'}
+              {isBusinessCategorySelected
+                ? 'Kimlik kartınızı ve vergi levhanızı görsel olarak yükleyin'
+                : driverCategory === 'courier'
+                  ? 'Kimlik ve sabıka kaydınızı yükleyin'
+                  : 'Tüm belgelerin ön ve arka yüzünü yükleyin'}
             </Text>
 
             {driverCategory !== 'courier' && (
@@ -993,7 +1012,7 @@ export default function RegisterDriverScreen() {
               </View>
             )}
 
-            {(driverCategory === 'scooter' || driverCategory === 'courier') && (
+            {shouldShowHelmetDocument && (
               <View style={styles.docSection}>
                 <View style={styles.docLabelRow}>
                   <Text style={styles.docLabel}>Kask Fotoğrafı</Text>
@@ -1012,15 +1031,17 @@ export default function RegisterDriverScreen() {
               </View>
             )}
 
-            <View style={styles.docSection}>
-              <Text style={styles.docLabel}>Sabıka Kaydı</Text>
-              <View style={styles.docRow}>
-                <DocUploadBox label="Sabıka Kaydı" uri={criminalRecord} onPress={() => pickImage(setCriminalRecord)} onRemove={() => setCriminalRecord('')} />
-                <View style={styles.docBox} />
+            {shouldShowCriminalRecordDocument && (
+              <View style={styles.docSection}>
+                <Text style={styles.docLabel}>Sabıka Kaydı</Text>
+                <View style={styles.docRow}>
+                  <DocUploadBox label="Sabıka Kaydı" uri={criminalRecord} onPress={() => pickImage(setCriminalRecord)} onRemove={() => setCriminalRecord('')} />
+                  <View style={styles.docBox} />
+                </View>
               </View>
-            </View>
+            )}
 
-            {driverCategory !== 'courier' && (
+            {shouldShowTaxCertificateDocument && (
               <View style={styles.docSection}>
                 <View style={styles.docLabelRow}>
                   <Text style={styles.docLabel}>Vergi Levhası</Text>
@@ -1030,10 +1051,10 @@ export default function RegisterDriverScreen() {
                   </View>
                 </View>
                 {!taxCertificate && (
-                  <Text style={styles.taxWarningText}>Vergi levhası yüklemeden kayıt oluşturamazsınız</Text>
+                  <Text style={styles.taxWarningText}>Vergi levhasını görsel olarak yüklemeden kayıt oluşturamazsınız</Text>
                 )}
                 <View style={styles.docRow}>
-                  <DocUploadBox label="Vergi Levhası" uri={taxCertificate} onPress={() => pickImage(setTaxCertificate)} onRemove={() => setTaxCertificate('')} />
+                  <DocUploadBox label={isBusinessCategorySelected ? 'Vergi Levhası Görseli' : 'Vergi Levhası'} uri={taxCertificate} onPress={() => pickImage(setTaxCertificate)} onRemove={() => setTaxCertificate('')} />
                   <View style={styles.docBox} />
                 </View>
               </View>
