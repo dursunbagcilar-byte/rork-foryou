@@ -1,14 +1,15 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, MessageCircle, Phone, Mail, FileText, ChevronRight, HelpCircle } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
+import { SUPPORT_WHATSAPP_DISPLAY } from '@/constants/support';
 
 
 const HELP_ITEMS = [
   { icon: MessageCircle, label: 'Sık Sorulan Sorular', description: 'En çok sorulan sorular ve cevapları' },
-  { icon: Phone, label: 'Bizi Arayın', description: '0551 630 06 24' },
+  { icon: Phone, label: 'Bizi Arayın', description: SUPPORT_WHATSAPP_DISPLAY },
   { icon: Mail, label: 'E-posta Gönder', description: 'destekforyou2go@gmail.com' },
   { icon: FileText, label: 'Kullanım Koşulları', description: 'Hizmet şartları ve gizlilik politikası' },
   { icon: HelpCircle, label: 'Sorun Bildir', description: 'Yaşadığınız sorunu bize iletin' },

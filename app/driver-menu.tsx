@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Platform,
   Animated,
   useWindowDimensions,
   Alert,
@@ -31,12 +30,12 @@ import {
   Star,
   Moon,
   Sun,
+  Heart,
 } from 'lucide-react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import * as Haptics from 'expo-haptics';
-import * as Clipboard from 'expo-clipboard';
-import { Landmark, Copy, Heart, Award } from 'lucide-react-native';
+import { SUPPORT_WHATSAPP_DISPLAY } from '@/constants/support';
 
 const MENU_ITEMS = [
   { icon: User, label: 'Hesabım', route: '/(driver-tabs)/profile' },
@@ -90,7 +89,7 @@ export default function DriverMenuScreen() {
         useNativeDriver: true,
       }),
     ]).start();
-  }, []);
+  }, [fadeAnim, slideAnim]);
 
   const handleClose = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -166,11 +165,11 @@ export default function DriverMenuScreen() {
                 <Heart size={20} color="#2ECC71" strokeWidth={2} />
                 <Text style={styles.miniCardSubtitle}>2GO Destek</Text>
                 <Text style={styles.miniCardTitle}>Uygulamamıza destek ol</Text>
-                <Text style={styles.miniCardPhone} selectable>0551 630 06 24</Text>
+                <Text style={styles.miniCardPhone} selectable>{SUPPORT_WHATSAPP_DISPLAY}</Text>
                 <TouchableOpacity activeOpacity={0.7} onPress={() => {
                   Alert.alert(
                     '2GO Destek',
-                    'Bağış ve destekleriniz için 0551 630 06 24 numarası ile iletişime geçin.',
+                    `Bağış ve destekleriniz için ${SUPPORT_WHATSAPP_DISPLAY} numarası ile iletişime geçin.`,
                     [{ text: 'Tamam' }]
                   );
                 }}>
@@ -184,7 +183,7 @@ export default function DriverMenuScreen() {
               <TouchableOpacity
                 style={[styles.themeToggleBtn, isDark && styles.themeToggleBtnDark]}
                 onPress={() => {
-                  toggleTheme();
+                  void toggleTheme();
                   Haptics.selectionAsync().catch(() => {});
                 }}
                 activeOpacity={0.7}

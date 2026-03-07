@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Mail, Lock, CheckCircle, KeyRound, MessageSquare } from 'lucide-react-native';
 import { getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
+import { SUPPORT_WHATSAPP_DISPLAY, buildSupportWhatsAppUrl } from '@/constants/support';
 
 function getDbHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -65,9 +66,6 @@ async function restCall<T>(path: string, input: Record<string, unknown>): Promis
     throw err;
   }
 }
-
-const SUPPORT_WHATSAPP_NUMBER = '905516300624';
-const SUPPORT_WHATSAPP_DISPLAY = '0551 630 06 24';
 
 type Step = 'email' | 'code' | 'newPassword' | 'success';
 type DeliveryChannel = 'email' | 'whatsapp';
@@ -148,7 +146,7 @@ export default function ForgotPasswordScreen() {
       `Not: ${reason}`,
     ].join('\n');
 
-    return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+    return buildSupportWhatsAppUrl(message);
   }, [email, registeredPhoneMask]);
 
   const openWhatsAppSupport = useCallback(async (reason: string, overrideUrl?: string | null) => {
@@ -435,7 +433,7 @@ export default function ForgotPasswordScreen() {
         {loading ? (
           <ActivityIndicator color="#0A0A12" size="small" />
         ) : (
-          <Text style={[styles.actionButtonText, { fontSize: isSmall ? 15 : 17 }]}>WhatsApp'tan Kod Talep Et</Text>
+          <Text style={[styles.actionButtonText, { fontSize: isSmall ? 15 : 17 }]}>WhatsApp ile Kod Talep Et</Text>
         )}
       </TouchableOpacity>
     </>

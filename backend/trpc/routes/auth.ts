@@ -13,6 +13,7 @@ import {
   validatePassword,
 } from "../../utils/security";
 import { sendEmail, generateResetCode, buildResetCodeEmail, buildVerificationCodeEmail, type SendEmailErrorCode } from "../../utils/email";
+import { SUPPORT_WHATSAPP_DISPLAY, SUPPORT_WHATSAPP_NUMBER, buildSupportWhatsAppUrl } from "../../../constants/support";
 
 async function createSession(userId: string, userType: "customer" | "driver"): Promise<string> {
   const token = generateSecureToken(64);
@@ -61,9 +62,6 @@ function getEmailSendErrorMessage(errorCode: SendEmailErrorCode | null): string 
   return 'E-posta gönderilemedi. Lütfen e-posta adresinizi kontrol edin veya daha sonra tekrar deneyin.';
 }
 
-const SUPPORT_WHATSAPP_NUMBER = '905516300624';
-const SUPPORT_WHATSAPP_DISPLAY = '0551 630 06 24';
-
 function maskPhoneNumber(phone: string | undefined): string | null {
   const digits = (phone ?? '').replace(/\D/g, '');
   if (!digits) return null;
@@ -77,7 +75,7 @@ function maskPhoneNumber(phone: string | undefined): string | null {
 }
 
 function buildPasswordResetWhatsAppUrl(email: string, maskedPhone: string | null, reason?: string): string {
-  const lines: Array<string | null> = [
+  const lines: (string | null)[] = [
     'Merhaba 2GO destek,',
     'şifre sıfırlama kodu talep ediyorum.',
     `E-posta: ${email}`,
@@ -85,7 +83,7 @@ function buildPasswordResetWhatsAppUrl(email: string, maskedPhone: string | null
     reason ? `Not: ${reason}` : null,
   ];
   const message = lines.filter((line): line is string => Boolean(line)).join('\n');
-  return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+  return buildSupportWhatsAppUrl(message);
 }
 
 export const authRouter = createTRPCRouter({

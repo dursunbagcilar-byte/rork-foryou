@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, Linking, Platform, Animated,
+  TextInput, Alert, Linking, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -12,7 +12,7 @@ import {
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
-import { useAuth } from '@/contexts/AuthContext';
+import { SUPPORT_PHONE_TEL_URL, SUPPORT_WHATSAPP_DISPLAY, SUPPORT_WHATSAPP_URL } from '@/constants/support';
 
 interface FAQItem {
   id: string;
@@ -86,10 +86,10 @@ const CONTACT_ITEMS = [
   {
     icon: Phone,
     label: 'Telefon Desteği',
-    value: '0551 630 06 24',
+    value: SUPPORT_WHATSAPP_DISPLAY,
     color: '#2ECC71',
     bg: 'rgba(46,204,113,0.1)',
-    action: 'tel:+905516300624',
+    action: SUPPORT_PHONE_TEL_URL,
   },
   {
     icon: Mail,
@@ -102,16 +102,15 @@ const CONTACT_ITEMS = [
   {
     icon: MessageSquare,
     label: 'WhatsApp Destek',
-    value: '0551 630 06 24',
+    value: SUPPORT_WHATSAPP_DISPLAY,
     color: '#25D366',
     bg: 'rgba(37,211,102,0.1)',
-    action: 'https://wa.me/905516300624',
+    action: SUPPORT_WHATSAPP_URL,
   },
 ];
 
 export default function DriverHelpScreen() {
   const router = useRouter();
-  const { user } = useAuth();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [message, setMessage] = useState<string>('');
   const [sending, setSending] = useState<boolean>(false);

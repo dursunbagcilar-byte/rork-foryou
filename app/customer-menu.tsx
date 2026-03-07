@@ -1,13 +1,13 @@
-import React, { useCallback, useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Platform,
   StatusBar,
   Animated,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -31,12 +31,12 @@ import {
   Heart,
   Award,
 } from 'lucide-react-native';
-import { Alert } from 'react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { Language, TranslationKey } from '@/contexts/LanguageContext';
 import * as Haptics from 'expo-haptics';
+import { SUPPORT_WHATSAPP_DISPLAY } from '@/constants/support';
 
 function getGreetingKey(): TranslationKey {
   const hour = new Date().getHours();
@@ -104,7 +104,7 @@ export default function CustomerMenuScreen() {
       ])
     );
     Animated.stagger(0, animations).start();
-  }, []);
+  }, [fadeAnim, menuItemAnims, menuItemSlides, slideAnim]);
 
   const handleClose = useCallback(() => {
     router.back();
@@ -134,7 +134,7 @@ export default function CustomerMenuScreen() {
   }, [logout, router]);
 
   const handleLangChange = useCallback((lang: Language) => {
-    setLanguage(lang);
+    void setLanguage(lang);
     Haptics.selectionAsync().catch(() => {});
   }, [setLanguage]);
 
@@ -142,7 +142,6 @@ export default function CustomerMenuScreen() {
   const textColor = isDark ? colors.text : '#1A1A1A';
   const textSecondary = isDark ? colors.textSecondary : '#666';
   const iconColor = isDark ? '#C9B8FF' : '#3D2C8D';
-  const menuItemBg = isDark ? colors.card : 'transparent';
   const dividerColor = isDark ? colors.divider : '#F0F0F0';
   const footerBg = isDark ? colors.background : '#FFFFFF';
   const langBtnBg = isDark ? colors.card : '#F0F0F0';
@@ -209,7 +208,7 @@ export default function CustomerMenuScreen() {
               <TouchableOpacity activeOpacity={0.7} onPress={() => {
                 Alert.alert(
                   t('support_title'),
-                  'Bağış ve destekleriniz için 05516300624 numarası ile iletişime geçin.',
+                  `Bağış ve destekleriniz için ${SUPPORT_WHATSAPP_DISPLAY} numarası ile iletişime geçin.`,
                   [{ text: 'Tamam' }]
                 );
               }}>
@@ -232,7 +231,7 @@ export default function CustomerMenuScreen() {
             <TouchableOpacity
               style={[styles.themeToggleBtn, { backgroundColor: themeBtnBg }]}
               onPress={() => {
-                toggleTheme();
+                void toggleTheme();
                 Haptics.selectionAsync().catch(() => {});
               }}
               activeOpacity={0.7}
