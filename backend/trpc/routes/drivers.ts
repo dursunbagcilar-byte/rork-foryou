@@ -331,6 +331,20 @@ export const driversRouter = createTRPCRouter({
       };
 
       await db.drivers.setSync(input.driverId, updated);
+
+      if (sanitizedPhone) {
+        const ownedBusiness = db.businesses.getByOwner(input.driverId);
+        if (ownedBusiness) {
+          const syncedBusiness = {
+            ...ownedBusiness,
+            phone: sanitizedPhone,
+            updatedAt: new Date().toISOString(),
+          };
+          await db.businesses.setSync(ownedBusiness.id, syncedBusiness);
+          console.log('[DRIVERS] Synced business phone after profile update:', ownedBusiness.id, sanitizedPhone);
+        }
+      }
+
       console.log('[DRIVERS] Updated profile:', input.driverId, updated.phone);
       return { success: true, driver: updated };
     }),

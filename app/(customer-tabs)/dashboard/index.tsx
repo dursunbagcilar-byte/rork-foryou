@@ -239,7 +239,7 @@ export default function CustomerHomeScreen() {
     }
   );
   const businessesByCityQuery = trpc.businesses.listByCity.useQuery(
-    { city: user?.city ?? '', district: user?.district ?? '' },
+    { city: user?.city ?? '' },
     {
       enabled: !!user?.city,
       refetchInterval: 30000,
@@ -1490,11 +1490,21 @@ export default function CustomerHomeScreen() {
 
   const cityBusinesses = useMemo<CourierBusiness[]>(() => {
     const backendBusinesses = businessesByCityQuery.data as CourierBusiness[] | undefined;
-    if (backendBusinesses && backendBusinesses.length > 0) {
-      return backendBusinesses;
+    const sourceBusinesses = backendBusinesses && backendBusinesses.length > 0
+      ? backendBusinesses
+      : getCourierBusinessesByCity(user?.city ?? '');
+    const normalizedDistrict = user?.district?.trim().toLocaleLowerCase('tr-TR') ?? '';
+
+    if (!normalizedDistrict) {
+      return sourceBusinesses;
     }
-    return getCourierBusinessesByCity(user?.city ?? '');
-  }, [businessesByCityQuery.data, user?.city]);
+
+    return [...sourceBusinesses].sort((firstBusiness, secondBusiness) => {
+      const firstMatchesDistrict = firstBusiness.district?.trim().toLocaleLowerCase('tr-TR') === normalizedDistrict ? 1 : 0;
+      const secondMatchesDistrict = secondBusiness.district?.trim().toLocaleLowerCase('tr-TR') === normalizedDistrict ? 1 : 0;
+      return secondMatchesDistrict - firstMatchesDistrict;
+    });
+  }, [businessesByCityQuery.data, user?.city, user?.district]);
 
   const sponsorVenueName = useMemo(() => {
     const safeVenues = cityVenues.filter(v => v.safetyLevel && v.safetyLevel >= 2);

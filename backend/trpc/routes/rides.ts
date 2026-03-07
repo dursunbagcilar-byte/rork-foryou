@@ -216,7 +216,18 @@ export const ridesRouter = createTRPCRouter({
       await db.rides.setSync(id, ride);
       console.log('[RIDES] Business order created:', id, input.businessName, 'items:', input.orderItems.length, 'city:', input.city);
 
-      const onlineCouriers = db.drivers.getOnlineCouriersByCity(input.city);
+      const districtCouriers = input.district
+        ? db.drivers.getOnlineCouriersByCityAndDistrict(input.city, input.district)
+        : [];
+      const onlineCouriers = districtCouriers.length > 0
+        ? districtCouriers
+        : db.drivers.getOnlineCouriersByCity(input.city);
+      const notifiedScope = districtCouriers.length > 0
+        ? `district:${input.district}`
+        : `city:${input.city}`;
+
+      console.log('[RIDES] Business order courier targeting:', id, notifiedScope, 'couriers:', onlineCouriers.length);
+
       for (const courier of onlineCouriers) {
         createRideNotification(
           courier.id,
@@ -239,7 +250,7 @@ export const ridesRouter = createTRPCRouter({
         { type: 'business_delivery_created', rideId: id, businessId: input.businessId }
       );
 
-      return { success: true, ride, notifiedCouriers: onlineCouriers.length };
+      return { success: true, ride, notifiedCouriers: onlineCouriers.length, notifiedScope };
     }),
 
   accept: protectedProcedure
