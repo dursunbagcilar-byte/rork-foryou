@@ -156,6 +156,7 @@ export default function RegisterDriverScreen() {
           mediaTypes: ['images'],
           quality: 0.5,
           allowsEditing: true,
+          aspect: [16, 9],
           base64: true,
         });
         if (!result.canceled && result.assets && result.assets[0]) {
@@ -186,6 +187,7 @@ export default function RegisterDriverScreen() {
                 mediaTypes: ['images'],
                 quality: 0.5,
                 allowsEditing: true,
+                aspect: [16, 9],
                 base64: true,
               });
               if (!result.canceled && result.assets && result.assets[0]) {
@@ -206,6 +208,7 @@ export default function RegisterDriverScreen() {
                 mediaTypes: ['images'],
                 quality: 0.5,
                 allowsEditing: true,
+                aspect: [16, 9],
                 base64: true,
               });
               if (!result.canceled && result.assets && result.assets[0]) {
@@ -222,6 +225,10 @@ export default function RegisterDriverScreen() {
       ]
     );
   }, [getImageDataUri]);
+
+  const handlePickBusinessImage = useCallback(async () => {
+    await pickImage(setBusinessImage);
+  }, [pickImage]);
 
   const geocodeBusinessAddress = useCallback(async (address: string, city: string, district: string): Promise<{ latitude: number; longitude: number } | null> => {
     if (!GOOGLE_API_KEY) {
@@ -850,7 +857,7 @@ export default function RegisterDriverScreen() {
                     <>
                       <InputField renderIcon={() => <Store size={18} color={Colors.dark.textMuted} />} label="İşletme Adı" placeholder="Örnek Burger House" value={businessName} onChangeText={setBusinessName} />
                       <InputField renderIcon={() => <Globe size={18} color={Colors.dark.textMuted} />} label="Web Sitesi" placeholder="www.isletmeniz.com" value={businessWebsite} onChangeText={setBusinessWebsite} />
-                      <InputField renderIcon={() => <Camera size={18} color={Colors.dark.textMuted} />} label="Kapak Görseli URL" placeholder="https://.../cover.jpg" value={businessImage} onChangeText={setBusinessImage} helpText="İnternette açık bir görsel URL'si girin" />
+                      <BusinessImageField value={businessImage} onPress={handlePickBusinessImage} onClear={() => setBusinessImage('')} />
                       <InputField renderIcon={() => <Package size={18} color={Colors.dark.textMuted} />} label="Kategori" placeholder="Yemek, market, tatlı" value={businessCategory} onChangeText={setBusinessCategory} />
                       <InputField renderIcon={() => <MapPin size={18} color={Colors.dark.textMuted} />} label="İşletme Adresi" placeholder="Mahalle, sokak, bina no" value={businessAddress} onChangeText={setBusinessAddress} helpText="Adres otomatik olarak harita konumuna çevrilmeye çalışılır" />
                       <InputField renderIcon={() => <FileText size={18} color={Colors.dark.textMuted} />} label="Kısa Açıklama" placeholder="Özel menüler ve hızlı teslimat" value={businessDescription} onChangeText={setBusinessDescription} />
@@ -1305,6 +1312,40 @@ function InputField({ renderIcon, label, placeholder, value, onChangeText, keybo
   );
 }
 
+function BusinessImageField({ value, onPress, onClear }: { value: string; onPress: () => void; onClear: () => void }) {
+  return (
+    <View style={styles.inputGroup}>
+      <View style={styles.businessFieldHeader}>
+        <Text style={styles.inputLabel}>KAPAK GÖRSELİ</Text>
+        {value ? (
+          <TouchableOpacity onPress={onClear} activeOpacity={0.7} testID="clear-business-image-button">
+            <Text style={styles.businessImageClearText}>Kaldır</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+      <TouchableOpacity style={styles.businessImagePicker} onPress={onPress} activeOpacity={0.85} testID="pick-business-image-button">
+        {value ? (
+          <>
+            <ExpoImage source={{ uri: value }} style={styles.businessImagePreview} contentFit="cover" cachePolicy="none" />
+            <View style={styles.businessImageOverlay}>
+              <Camera size={18} color="#FFF" />
+              <Text style={styles.businessImageOverlayText}>Görseli Değiştir</Text>
+            </View>
+          </>
+        ) : (
+          <View style={styles.businessImagePlaceholder}>
+            <View style={styles.businessImagePlaceholderIcon}>
+              <Camera size={22} color={Colors.dark.primary} />
+            </View>
+            <Text style={styles.businessImagePlaceholderTitle}>İşletme kapağı yükleyin</Text>
+            <Text style={styles.businessImagePlaceholderSub}>Müşteri ana sayfasında gösterilecek kapak görselini seçin</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.dark.background },
   safeArea: { flex: 1 },
@@ -1504,6 +1545,16 @@ const styles = StyleSheet.create({
   inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.dark.inputBg, borderRadius: 14, borderWidth: 1, borderColor: Colors.dark.inputBorder, paddingHorizontal: 16, gap: 12 },
   input: { flex: 1, paddingVertical: 16, fontSize: 16, color: Colors.dark.text },
   inputHelpText: { fontSize: 12, lineHeight: 18, color: Colors.dark.textMuted },
+  businessFieldHeader: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const },
+  businessImageClearText: { fontSize: 12, fontWeight: '700' as const, color: '#FF8A65' },
+  businessImagePicker: { height: 172, borderRadius: 18, overflow: 'hidden' as const, borderWidth: 1, borderColor: Colors.dark.inputBorder, backgroundColor: Colors.dark.inputBg },
+  businessImagePreview: { width: '100%', height: '100%' },
+  businessImageOverlay: { position: 'absolute' as const, left: 12, right: 12, bottom: 12, borderRadius: 14, backgroundColor: 'rgba(13,16,24,0.7)', paddingVertical: 10, paddingHorizontal: 12, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: 8 },
+  businessImageOverlayText: { fontSize: 13, fontWeight: '700' as const, color: '#FFF' },
+  businessImagePlaceholder: { flex: 1, alignItems: 'center' as const, justifyContent: 'center' as const, paddingHorizontal: 22, backgroundColor: 'rgba(255,138,101,0.08)' },
+  businessImagePlaceholderIcon: { width: 52, height: 52, borderRadius: 18, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: 'rgba(245,166,35,0.14)', marginBottom: 14 },
+  businessImagePlaceholderTitle: { fontSize: 15, fontWeight: '800' as const, color: Colors.dark.text, marginBottom: 6 },
+  businessImagePlaceholderSub: { fontSize: 12, lineHeight: 18, color: Colors.dark.textMuted, textAlign: 'center' as const },
   businessToggleCard: { backgroundColor: Colors.dark.card, borderRadius: 16, borderWidth: 1, borderColor: Colors.dark.cardBorder, padding: 16 },
   businessToggleCardActive: { borderColor: Colors.dark.primary, backgroundColor: 'rgba(245,166,35,0.08)' },
   businessToggleRow: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, gap: 12 },
