@@ -3,9 +3,10 @@ import { createTRPCRouter, protectedProcedure } from "../create-context";
 import { db, initializeStore, forceReloadStore } from "../../db/store";
 import type { Ride } from "../../db/types";
 import { sanitizeInput } from "../../utils/security";
+import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../../../utils/phone";
 
 function normalizePhoneForComparison(phone: string | undefined): string {
-  return (phone ?? '').replace(/\D/g, '');
+  return normalizeTurkishPhone(phone);
 }
 
 function isPhoneTakenByAnotherAccount(phone: string, excludedId?: string): boolean {
@@ -308,9 +309,12 @@ export const driversRouter = createTRPCRouter({
         return { success: false, error: 'Şoför bulunamadı' };
       }
 
-      const sanitizedPhone = input.phone ? sanitizeInput(input.phone) : undefined;
-      if (input.phone && !sanitizedPhone) {
-        return { success: false, error: 'Telefon numarası gerekli' };
+      const sanitizedPhone = input.phone ? normalizeTurkishPhone(sanitizeInput(input.phone)) : undefined;
+      if (input.phone) {
+        const phoneValidationError = getTurkishPhoneValidationError(sanitizedPhone);
+        if (phoneValidationError) {
+          return { success: false, error: phoneValidationError };
+        }
       }
 
       if (sanitizedPhone && isPhoneTakenByAnotherAccount(sanitizedPhone, input.driverId)) {

@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Phone, RefreshCw } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
+import { normalizeTurkishPhone } from '@/utils/phone';
 
 interface PhoneNumberEditorCardProps {
   title: string;
@@ -40,14 +41,15 @@ export function PhoneNumberEditorCard({
         <Text style={styles.label}>Yeni telefon numarası</Text>
         <TextInput
           value={value}
-          onChangeText={onChangeText}
-          placeholder="+90 5XX XXX XX XX"
+          onChangeText={(nextValue) => onChangeText(normalizeTurkishPhone(nextValue))}
+          placeholder="05XXXXXXXXX"
           placeholderTextColor={Colors.light.textMuted}
           keyboardType="phone-pad"
           autoCapitalize="none"
           autoCorrect={false}
           style={styles.input}
           editable={!isSaving}
+          maxLength={11}
           testID={inputTestID}
         />
       </View>

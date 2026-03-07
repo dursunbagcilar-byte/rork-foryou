@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { TURKISH_CITIES, getCityByName } from '@/constants/cities';
 import type { City } from '@/constants/cities';
 import { usePrivacy } from '@/contexts/PrivacyContext';
+import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 
 function extractErrorMessage(e: unknown): string {
   const errObj = e as any;
@@ -98,6 +99,12 @@ export default function RegisterCustomerScreen() {
       Alert.alert('Uyarı', 'Lütfen tüm alanları doldurun');
       return;
     }
+    const normalizedPhone = normalizeTurkishPhone(phone);
+    const phoneValidationError = getTurkishPhoneValidationError(normalizedPhone);
+    if (phoneValidationError) {
+      Alert.alert('Uyarı', phoneValidationError);
+      return;
+    }
     if (!isValidEmail(email)) {
       Alert.alert('Uyarı', 'Lütfen geçerli bir e-posta adresi girin (örn: ornek@email.com)');
       return;
@@ -126,7 +133,7 @@ export default function RegisterCustomerScreen() {
     try {
       await acceptAllConsents();
       console.log('[RegisterCustomer] Starting registration for:', email);
-      await registerCustomer(name, phone, email, password, gender as 'male' | 'female', selectedCity, selectedDistrict, vehiclePlate || undefined, referralCode || undefined);
+      await registerCustomer(name, normalizedPhone, email, password, gender as 'male' | 'female', selectedCity, selectedDistrict, vehiclePlate || undefined, referralCode || undefined);
       console.log('[RegisterCustomer] Registration successful');
       router.replace('/(customer-tabs)/dashboard');
     } catch (e: unknown) {
@@ -157,7 +164,7 @@ export default function RegisterCustomerScreen() {
             <Text style={[styles.subtitle, { fontSize: isSmall ? 13 : 15 }]}>Güvenli yolculuk için kayıt olun</Text>
             <View style={styles.formSection}>
               <InputField renderIcon={() => <User size={18} color={Colors.dark.textMuted} />} label="Ad Soyad" placeholder="Adınızı girin" value={name} onChangeText={setName} />
-              <InputField renderIcon={() => <Phone size={18} color={Colors.dark.textMuted} />} label="Telefon" placeholder="+90 5XX XXX XXXX" value={phone} onChangeText={setPhone} keyboardType="phone-pad" helpText="Şifre sıfırlama kodları bu numaranın bağlı olduğu WhatsApp hesabına yönlendirilir. WhatsApp Business kullanıyorsanız aynı numara yeterlidir." />
+              <InputField renderIcon={() => <Phone size={18} color={Colors.dark.textMuted} />} label="Telefon" placeholder="05XXXXXXXXX" value={phone} onChangeText={(value) => setPhone(normalizeTurkishPhone(value))} keyboardType="phone-pad" helpText="Telefon numarası 11 haneli olmalı ve 0 ile başlamalı. Şifre sıfırlama kodları bu numaranın bağlı olduğu WhatsApp hesabına yönlendirilir." />
               <InputField renderIcon={() => <Mail size={18} color={Colors.dark.textMuted} />} label="E-posta" placeholder="ornek@email.com" value={email} onChangeText={setEmail} keyboardType="email-address" />
               <InputField renderIcon={() => <Lock size={18} color={Colors.dark.textMuted} />} label="Şifre" placeholder="En az 8 karakter, büyük/küçük harf, rakam" value={password} onChangeText={setPassword} secure />
               <InputField renderIcon={() => <Hash size={18} color={Colors.dark.textMuted} />} label="Araç Plakası" placeholder="34 ABC 123" value={vehiclePlate} onChangeText={(t) => setVehiclePlate(t.toUpperCase())} autoCapitalize="characters" />

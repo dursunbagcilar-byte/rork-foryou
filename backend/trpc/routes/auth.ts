@@ -14,6 +14,7 @@ import {
 } from "../../utils/security";
 import { sendEmail, generateResetCode, buildResetCodeEmail, buildVerificationCodeEmail, type SendEmailErrorCode } from "../../utils/email";
 import { SUPPORT_WHATSAPP_DISPLAY, SUPPORT_WHATSAPP_NUMBER, buildPasswordResetSupportWhatsAppUrl, getWhatsAppDeliveryNote, normalizePhoneForWhatsApp } from "../../../constants/support";
+import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../../../utils/phone";
 
 async function createSession(userId: string, userType: "customer" | "driver"): Promise<string> {
   const token = generateSecureToken(64);
@@ -79,7 +80,7 @@ function buildPasswordResetWhatsAppUrl(email: string, maskedPhone: string | null
 }
 
 function normalizePhoneForComparison(phone: string | undefined): string {
-  return (phone ?? '').replace(/\D/g, '');
+  return normalizeTurkishPhone(phone);
 }
 
 function isPhoneTakenByAnotherAccount(phone: string, excludedId?: string): boolean {
@@ -104,7 +105,7 @@ function isPhoneTakenByAnotherAccount(phone: string, excludedId?: string): boole
 }
 
 function getSanitizedPhone(phone: string | undefined): string {
-  return sanitizeInput(phone ?? '');
+  return normalizeTurkishPhone(sanitizeInput(phone ?? ''));
 }
 
 function getProfileUpdateErrorPayload(message: string) {
@@ -140,8 +141,11 @@ async function handleCustomerProfileUpdate({
   }
 
   const sanitizedPhone = input.phone ? getSanitizedPhone(input.phone) : undefined;
-  if (input.phone && !sanitizedPhone) {
-    return getProfileUpdateErrorPayload('Telefon numarası gerekli');
+  if (input.phone) {
+    const phoneValidationError = getTurkishPhoneValidationError(sanitizedPhone);
+    if (phoneValidationError) {
+      return getProfileUpdateErrorPayload(phoneValidationError);
+    }
   }
 
   if (sanitizedPhone && isPhoneTakenByAnotherAccount(sanitizedPhone, input.userId)) {
@@ -266,7 +270,7 @@ export const authRouter = createTRPCRouter({
     )
     .mutation(async ({ input }) => {
       const cleanName = sanitizeInput(input.name);
-      const cleanPhone = sanitizeInput(input.phone);
+      const cleanPhone = getSanitizedPhone(input.phone);
       const cleanEmail = input.email.toLowerCase().trim();
 
       if (!validateEmail(cleanEmail)) {
@@ -278,6 +282,11 @@ export const authRouter = createTRPCRouter({
         return { success: false, error: pwdValidation.reason, user: null, token: null };
       }
 
+      const phoneValidationError = getTurkishPhoneValidationError(cleanPhone);
+      if (phoneValidationError) {
+        return { success: false, error: phoneValidationError, user: null, token: null };
+      }
+
       const existing = db.users.getByEmail(cleanEmail);
       if (existing) {
         return { success: false, error: "Bu e-posta zaten kayıtlı", user: null, token: null };
@@ -286,6 +295,10 @@ export const authRouter = createTRPCRouter({
       const existingDriver = db.drivers.getByEmail(cleanEmail);
       if (existingDriver) {
         return { success: false, error: "Bu e-posta zaten kayıtlı", user: null, token: null };
+      }
+
+      if (isPhoneTakenByAnotherAccount(cleanPhone)) {
+        return { success: false, error: "Bu telefon numarası başka bir hesapta kullanılıyor", user: null, token: null };
       }
 
       let referrerUserId: string | undefined;
@@ -372,6 +385,7 @@ export const authRouter = createTRPCRouter({
     .mutation(async ({ input }) => {
       const cleanName = sanitizeInput(input.name);
       const cleanEmail = input.email.toLowerCase().trim();
+      const cleanPhone = getSanitizedPhone(input.phone);
 
       if (!validateEmail(cleanEmail)) {
         return { success: false, error: "Geçersiz e-posta adresi", driver: null, token: null };
@@ -380,6 +394,11 @@ export const authRouter = createTRPCRouter({
       const pwdValidation = validatePassword(input.password);
       if (!pwdValidation.valid) {
         return { success: false, error: pwdValidation.reason, driver: null, token: null };
+      }
+
+      const phoneValidationError = getTurkishPhoneValidationError(cleanPhone);
+      if (phoneValidationError) {
+        return { success: false, error: phoneValidationError, driver: null, token: null };
       }
 
       const existing = db.drivers.getByEmail(cleanEmail);
@@ -392,11 +411,15 @@ export const authRouter = createTRPCRouter({
         return { success: false, error: "Bu e-posta zaten kayıtlı", driver: null, token: null };
       }
 
+      if (isPhoneTakenByAnotherAccount(cleanPhone)) {
+        return { success: false, error: "Bu telefon numarası başka bir hesapta kullanılıyor", driver: null, token: null };
+      }
+
       const id = "d_" + Date.now() + "_" + Math.random().toString(36).substring(2, 8);
       const driver = {
         id,
         name: cleanName,
-        phone: sanitizeInput(input.phone),
+        phone: cleanPhone,
         email: cleanEmail,
         type: "driver" as const,
         driverCategory: input.driverCategory ?? "driver",

@@ -6,6 +6,7 @@ import { Phone, Mail, MapPin, LogOut, ChevronRight, ArrowLeft } from 'lucide-rea
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { PhoneNumberEditorCard } from '@/components/PhoneNumberEditorCard';
+import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 
 export default function CustomerProfileScreen() {
   const { user, logout, updateAccountPhone } = useAuth();
@@ -18,20 +19,21 @@ export default function CustomerProfileScreen() {
   }, [user?.phone]);
 
   const handlePhoneSave = useCallback(async () => {
-    const trimmedPhone = phoneDraft.trim();
-    if (!trimmedPhone) {
-      Alert.alert('Uyarı', 'Lütfen telefon numaranızı girin.');
+    const normalizedPhone = normalizeTurkishPhone(phoneDraft);
+    const phoneValidationError = getTurkishPhoneValidationError(normalizedPhone);
+    if (phoneValidationError) {
+      Alert.alert('Uyarı', phoneValidationError);
       return;
     }
 
-    if (trimmedPhone === (user?.phone ?? '').trim()) {
+    if (normalizedPhone === normalizeTurkishPhone(user?.phone ?? '')) {
       Alert.alert('Bilgi', 'Telefon numaranız zaten güncel.');
       return;
     }
 
     try {
       setIsUpdatingPhone(true);
-      await updateAccountPhone(trimmedPhone);
+      await updateAccountPhone(normalizedPhone);
       Alert.alert('Başarılı', 'Telefon numaranız tüm sistemde güncellendi.');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Telefon numarası güncellenemedi.';

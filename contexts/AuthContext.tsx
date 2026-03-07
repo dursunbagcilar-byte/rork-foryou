@@ -5,6 +5,7 @@ import createContextHook from '@nkzw/create-context-hook';
 import type { User, Driver, Ride, DriverDocuments } from '@/constants/mockData';
 import { PRICING } from '@/constants/pricing';
 import { setSessionToken, getSessionToken, getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl, trpcClient } from '@/lib/trpc';
+import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 
 type UserType = 'customer' | 'driver' | null;
 
@@ -510,9 +511,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       throw new Error('Aktif oturum bulunamadı');
     }
 
-    const cleanPhone = phone.trim();
-    if (!cleanPhone) {
-      throw new Error('Telefon numarası gerekli');
+    const cleanPhone = normalizeTurkishPhone(phone);
+    const phoneValidationError = getTurkishPhoneValidationError(cleanPhone);
+    if (phoneValidationError) {
+      throw new Error(phoneValidationError);
     }
 
     console.log('[Auth] updateAccountPhone start:', user.id, user.type, cleanPhone);
@@ -846,7 +848,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, [directFetch, handleLoginSuccess, shouldTryLocalAuthFallback, tryLocalLogin]);
 
   const registerCustomer = useCallback(async (name: string, phone: string, email: string, password: string, gender: 'male' | 'female', city: string, district: string, vehiclePlate?: string, referralCode?: string) => {
-    const payload = { name, phone, email, password, gender, city, district, referralCode: referralCode || undefined };
+    const normalizedPhone = normalizeTurkishPhone(phone);
+    const phoneValidationError = getTurkishPhoneValidationError(normalizedPhone);
+    if (phoneValidationError) {
+      throw new Error(phoneValidationError);
+    }
+
+    const payload = { name, phone: normalizedPhone, email, password, gender, city, district, referralCode: referralCode || undefined };
 
     const handleSuccess = async (result: any, source: string) => {
       console.log(`[Auth] registerCustomer (${source}) result:`, JSON.stringify({ success: result.success, error: result.error, hasUser: !!result.user, hasToken: !!result.token }));
@@ -872,7 +880,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         setIsAuthenticated(true);
         await AsyncStorage.setItem('auth_user', JSON.stringify(customer));
         await AsyncStorage.setItem('auth_credentials', JSON.stringify({
-          type: 'customer', name, phone, email, gender, city, district, vehiclePlate,
+          type: 'customer', name, phone: normalizedPhone, email, gender, city, district, vehiclePlate,
         }));
         await persistLocalAuthBackup(customer, password);
         console.log('[Auth] Registered customer:', customer.id);
@@ -911,9 +919,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     licenseIssueDate?: string,
     driverCategory?: 'driver' | 'scooter' | 'courier',
   ) => {
+    const normalizedPhone = normalizeTurkishPhone(phone);
+    const phoneValidationError = getTurkishPhoneValidationError(normalizedPhone);
+    if (phoneValidationError) {
+      throw new Error(phoneValidationError);
+    }
+
     const payload = {
       name,
-      phone,
+      phone: normalizedPhone,
       email,
       password,
       vehiclePlate: vehiclePlate || undefined,
@@ -960,7 +974,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         setIsAuthenticated(true);
         await AsyncStorage.setItem('auth_user', JSON.stringify(driver));
         await AsyncStorage.setItem('auth_credentials', JSON.stringify({
-          type: 'driver', name, phone, email,
+          type: 'driver', name, phone: normalizedPhone, email,
           vehiclePlate, vehicleModel, vehicleColor,
           partnerDriverName: partnerName, licenseIssueDate, driverCategory, city, district,
         }));
