@@ -488,14 +488,15 @@ export const authRouter = createTRPCRouter({
       console.log('[AUTH] loginByEmail - initial lookup for:', cleanEmail, 'hasHash:', !!storedHash, 'user:', !!user, 'driver:', !!driver);
 
       if (!storedHash || (!user && !driver)) {
-        console.log('[AUTH] loginByEmail - data missing, doing single store reload for:', cleanEmail);
+        console.log('[AUTH] loginByEmail - data missing, doing store reload for:', cleanEmail);
         try {
-          const { initializeStore } = await import('../../db/store');
+          const { initializeStore, forceReloadStore } = await import('../../db/store');
           await initializeStore();
+          await forceReloadStore();
           storedHash = db.passwords.get(cleanEmail);
           user = db.users.getByEmail(cleanEmail);
           driver = db.drivers.getByEmail(cleanEmail);
-          console.log('[AUTH] loginByEmail - after initializeStore: hasHash:', !!storedHash, 'user:', !!user, 'driver:', !!driver);
+          console.log('[AUTH] loginByEmail - after initializeStore+forceReload: hasHash:', !!storedHash, 'user:', !!user, 'driver:', !!driver);
         } catch (initErr) {
           console.log('[AUTH] loginByEmail - initializeStore error:', initErr);
         }

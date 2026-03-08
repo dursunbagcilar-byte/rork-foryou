@@ -628,11 +628,13 @@ app.post("/auth/login", async (c) => {
 
     if (!storedHash || (!user && !driver)) {
       try {
-        const { initializeStore } = await import('./db/store');
+        const { initializeStore, forceReloadStore } = await import('./db/store');
         await initializeStore();
+        await forceReloadStore();
         storedHash = db.passwords.get(cleanEmail);
         user = db.users.getByEmail(cleanEmail);
         driver = db.drivers.getByEmail(cleanEmail);
+        console.log('[REST] login after initializeStore+forceReload:', cleanEmail, 'hasHash:', !!storedHash, 'user:', !!user, 'driver:', !!driver);
       } catch (e) { console.log('[REST] init err:', e); }
     }
 
@@ -656,6 +658,7 @@ app.post("/auth/login", async (c) => {
 
     if (!storedHash) {
       recordLoginFailure(cleanEmail);
+      console.log('[REST] login missing password hash after all recovery attempts for:', cleanEmail, 'user:', !!user, 'driver:', !!driver, 'dbReady:', _dbReady);
       return c.json({ success: false, error: "Kullanıcı bulunamadı. 'Şifremi Unuttum' ile yeni şifre oluşturun.", user: null, token: null });
     }
 
