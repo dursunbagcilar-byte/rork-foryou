@@ -7,7 +7,8 @@ import { createContext } from "./trpc/create-context";
 import { db, initializeStore, bootstrapDbConfig, reinitializeStore } from "./db/store";
 import { setDbConfig, isDbConfigured } from "./db/rork-db";
 import type { User, Driver, Business, BusinessMenuItem } from "./db/types";
-import { checkRateLimit, getClientIP, isIPBlocked, trackSuspiciousActivity } from "./utils/security";
+import { checkRateLimit, getClientIP, isIPBlocked, trackSuspiciousActivity, sanitizeInput } from "./utils/security";
+import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../utils/phone";
 import {
   SUPPORT_WHATSAPP_DISPLAY,
   SUPPORT_WHATSAPP_NUMBER,
@@ -61,6 +62,17 @@ function normalizePhoneForLookup(phone: string | undefined): string | null {
   const digits = (phone ?? '').replace(/\D/g, '');
   if (!digits) return null;
   return normalizePhoneForWhatsApp(phone) ?? digits;
+}
+
+function normalizePhoneForComparison(phone: string | undefined): string {
+  return normalizeTurkishPhone(phone);
+}
+
+function isPhoneTakenByAnotherAccount(phone: string, excludedId?: string): boolean {
+  const normalizedPhone = normalizePhoneForComparison(phone);
+  return [...db.users.getAll(), ...db.drivers.getAll()].some((item) => {
+    return item.id !== excludedId && normalizePhoneForComparison(item.phone) === normalizedPhone;
+  });
 }
 
 function findStoredAccountByPhone(phone: string): { account: User | Driver | null; emailKey: string | null } {
@@ -924,6 +936,90 @@ app.post("/auth/register-business", async (c) => {
   } catch (err: unknown) {
     console.log('[REST] register-business error:', err instanceof Error ? err.message : err, 'elapsed:', Date.now() - startTime, 'ms');
     return c.json({ success: false, error: 'İşletme kaydı oluşturulamadı. Lütfen tekrar deneyin.', business: null }, 500);
+  }
+});
+
+app.post("/auth/update-phone", async (c) => {
+  const startTime = Date.now();
+  try {
+    const dbEp = c.req.header('x-db-endpoint');
+    const dbNs = c.req.header('x-db-namespace');
+    const dbTk = c.req.header('x-db-token');
+    await ensureDbReady(dbEp, dbNs, dbTk);
+
+    const authHeader = c.req.header('authorization') || c.req.header('Authorization') || '';
+    const sessionToken = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!sessionToken) {
+      return c.json({ success: false, error: 'Oturum bulunamadı', user: null, driver: null }, 401);
+    }
+
+    const session = db.sessions.get(sessionToken);
+    const isExpired = session ? new Date(session.expiresAt).getTime() < Date.now() : true;
+    if (!session || isExpired) {
+      if (session && isExpired) {
+        db.sessions.delete(sessionToken);
+      }
+      return c.json({ success: false, error: 'Geçersiz oturum', user: null, driver: null }, 401);
+    }
+
+    const body = await c.req.json();
+    const requestedUserId = typeof body.userId === 'string' ? body.userId : session.userId;
+    if (requestedUserId !== session.userId) {
+      return c.json({ success: false, error: 'Bu işlem için yetkiniz yok', user: null, driver: null }, 403);
+    }
+
+    const cleanPhone = normalizeTurkishPhone(sanitizeInput(typeof body.phone === 'string' ? body.phone : ''));
+    const phoneValidationError = getTurkishPhoneValidationError(cleanPhone);
+    if (phoneValidationError) {
+      return c.json({ success: false, error: phoneValidationError, user: null, driver: null }, 400);
+    }
+
+    if (isPhoneTakenByAnotherAccount(cleanPhone, session.userId)) {
+      return c.json({ success: false, error: 'Bu telefon numarası başka bir hesapta kullanılıyor', user: null, driver: null }, 400);
+    }
+
+    if (session.userType === 'customer') {
+      const existingUser = db.users.get(session.userId);
+      if (!existingUser) {
+        return c.json({ success: false, error: 'Kullanıcı bulunamadı', user: null, driver: null }, 404);
+      }
+
+      const updatedUser: User = {
+        ...existingUser,
+        phone: cleanPhone,
+      };
+      await db.users.setSync(session.userId, updatedUser);
+      console.log('[REST] Customer phone updated:', session.userId, cleanPhone, 'elapsed:', Date.now() - startTime, 'ms');
+      return c.json({ success: true, error: null, user: updatedUser, driver: null });
+    }
+
+    const existingDriver = db.drivers.get(session.userId);
+    if (!existingDriver) {
+      return c.json({ success: false, error: 'Şoför hesabı bulunamadı', user: null, driver: null }, 404);
+    }
+
+    const updatedDriver: Driver = {
+      ...existingDriver,
+      phone: cleanPhone,
+    };
+    await db.drivers.setSync(session.userId, updatedDriver);
+
+    const ownedBusiness = db.businesses.getByOwner(session.userId);
+    if (ownedBusiness) {
+      const syncedBusiness: Business = {
+        ...ownedBusiness,
+        phone: cleanPhone,
+        updatedAt: new Date().toISOString(),
+      };
+      await db.businesses.setSync(ownedBusiness.id, syncedBusiness);
+      console.log('[REST] Business phone synced after driver update:', ownedBusiness.id, cleanPhone);
+    }
+
+    console.log('[REST] Driver phone updated:', session.userId, cleanPhone, 'elapsed:', Date.now() - startTime, 'ms');
+    return c.json({ success: true, error: null, user: null, driver: updatedDriver });
+  } catch (err: unknown) {
+    console.log('[REST] update-phone error:', err instanceof Error ? err.message : err, 'elapsed:', Date.now() - startTime, 'ms');
+    return c.json({ success: false, error: 'Telefon numarası güncellenemedi', user: null, driver: null }, 500);
   }
 });
 

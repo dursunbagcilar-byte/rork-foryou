@@ -119,6 +119,14 @@ function isNetworkError(msg: string): boolean {
     lower.includes('load failed');
 }
 
+function isSessionAuthError(msg: string): boolean {
+  const lower = (msg || '').toLowerCase();
+  return lower.includes('unauthorized') ||
+    lower.includes('geçersiz oturum') ||
+    lower.includes('oturum bulunamadı') ||
+    lower.includes('oturum süresi') ||
+    lower.includes('trpc auth');
+}
 
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [user, setUser] = useState<User | Driver | null>(null);
@@ -152,7 +160,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     return headers;
   }, []);
 
-  const directFetch = useCallback(async (path: string, body: Record<string, any>, retryCount = 0): Promise<any> => {
+  const directFetch = useCallback(async (
+    path: string,
+    body: Record<string, any>,
+    retryCount = 0,
+    extraHeaders?: Record<string, string>
+  ): Promise<any> => {
     const MAX_RETRIES = 2;
     let apiBase = getApiBase();
     if (!apiBase) {
@@ -183,7 +196,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         const delay = 1000;
         console.log(`[Auth] directFetch: No URL, retrying in ${delay}ms...`);
         await new Promise(r => setTimeout(r, delay));
-        return directFetch(path, body, retryCount + 1);
+        return directFetch(path, body, retryCount + 1, extraHeaders);
       }
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
@@ -201,7 +214,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     try {
       const res = await fetch(url, {
         method: 'POST',
-        headers: getDbHeaders(),
+        headers: {
+          ...getDbHeaders(),
+          ...(extraHeaders ?? {}),
+        },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -213,9 +229,48 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           const delay = 1500;
           console.log(`[Auth] 404 - retrying in ${delay}ms...`);
           await new Promise(r => setTimeout(r, delay));
-          return directFetch(path, body, retryCount + 1);
+          return directFetch(path, body, retryCount + 1, extraHeaders);
         }
         throw new Error('Sunucu şu an erişilemiyor. Lütfen uygulamayı kapatıp tekrar açın.');
+      }
+
+      if (res.status === 401) {
+        let authError = 'Oturumunuzun süresi dolmuş. Lütfen tekrar giriş yapın.';
+        try {
+          const errData = await res.json();
+          if (typeof errData?.error === 'string' && errData.error.trim()) {
+            authError = errData.error;
+          }
+        } catch (parseError) {
+          console.log('[Auth] directFetch 401 parse error:', parseError);
+        }
+        throw new Error(authError);
+      }
+
+      if (res.status === 403) {
+        let forbiddenError = 'Bu işlem için yetkiniz yok';
+        try {
+          const errData = await res.json();
+          if (typeof errData?.error === 'string' && errData.error.trim()) {
+            forbiddenError = errData.error;
+          }
+        } catch (parseError) {
+          console.log('[Auth] directFetch 403 parse error:', parseError);
+        }
+        throw new Error(forbiddenError);
+      }
+
+      if (res.status === 400) {
+        let badRequestError = 'İstek işlenemedi';
+        try {
+          const errData = await res.json();
+          if (typeof errData?.error === 'string' && errData.error.trim()) {
+            badRequestError = errData.error;
+          }
+        } catch (parseError) {
+          console.log('[Auth] directFetch 400 parse error:', parseError);
+        }
+        throw new Error(badRequestError);
       }
 
       if (res.status === 429) {
@@ -226,7 +281,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         if (retryCount < MAX_RETRIES) {
           const delay = 1500;
           await new Promise(r => setTimeout(r, delay));
-          return directFetch(path, body, retryCount + 1);
+          return directFetch(path, body, retryCount + 1, extraHeaders);
         }
         throw new Error('Sunucu geçici olarak kullanılamıyor. Lütfen tekrar deneyin.');
       }
@@ -245,7 +300,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         if (retryCount < MAX_RETRIES) {
           const delay = 1500;
           await new Promise(r => setTimeout(r, delay));
-          return directFetch(path, body, retryCount + 1);
+          return directFetch(path, body, retryCount + 1, extraHeaders);
         }
         throw new Error(serverMsg || 'Sunucu geçici bir hata yaşıyor. Lütfen tekrar deneyin.');
       }
@@ -256,7 +311,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (!contentType.includes('application/json') && responseText.includes('<!DOCTYPE html>')) {
         if (retryCount < MAX_RETRIES) {
           await new Promise(r => setTimeout(r, 1500));
-          return directFetch(path, body, retryCount + 1);
+          return directFetch(path, body, retryCount + 1, extraHeaders);
         }
         throw new Error('Sunucu geçici olarak kullanılamıyor. Lütfen tekrar deneyin.');
       }
@@ -276,20 +331,31 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err?.name === 'AbortError') {
         if (retryCount < MAX_RETRIES) {
           await new Promise(r => setTimeout(r, 1000));
-          return directFetch(path, body, retryCount + 1);
+          return directFetch(path, body, retryCount + 1, extraHeaders);
         }
         throw new Error('Sunucu yanıt vermedi (zaman aşımı). Lütfen tekrar deneyin.');
       }
       if (isNetworkError(err?.message || '')) {
         if (retryCount < MAX_RETRIES) {
           await new Promise(r => setTimeout(r, 1000));
-          return directFetch(path, body, retryCount + 1);
+          return directFetch(path, body, retryCount + 1, extraHeaders);
         }
       }
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
   }, [getApiBase, getDbHeaders]);
+
+  const directAuthorizedFetch = useCallback(async (path: string, body: Record<string, any>): Promise<any> => {
+    const token = await getSessionToken();
+    if (!token) {
+      throw new Error('Oturumunuzun süresi dolmuş. Lütfen tekrar giriş yapın.');
+    }
+
+    return directFetch(path, body, 0, {
+      authorization: `Bearer ${token}`,
+    });
+  }, [directFetch]);
 
   const setAuthenticatedLocalUser = useCallback(async (localUser: User | Driver, source: string): Promise<UserType> => {
     await setSessionToken(null);
@@ -520,63 +586,110 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     console.log('[Auth] updateAccountPhone start:', user.id, user.type, cleanPhone);
 
     try {
+      const restResult = await directAuthorizedFetch('/auth/update-phone', {
+        userId: user.id,
+        phone: cleanPhone,
+      });
+
       if (user.type === 'customer') {
-        let result: { success: boolean; error: string | null; user: User | null } | null = null;
-
-        try {
-          result = await trpcClient.auth.updateProfile.mutate({
-            userId: user.id,
-            phone: cleanPhone,
-          });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : '';
-          console.log('[Auth] updateAccountPhone customer updateProfile error:', error);
-
-          if (!message.includes('No procedure found on path')) {
-            throw error;
-          }
-
-          result = await trpcClient.auth.updateCustomerProfile.mutate({
-            userId: user.id,
-            phone: cleanPhone,
-          });
-        }
-
-        if (!result?.success || !result.user) {
-          throw new Error(result?.error ?? 'Telefon numarası güncellenemedi');
+        if (!restResult?.success || !restResult.user) {
+          throw new Error(restResult?.error ?? 'Telefon numarası güncellenemedi');
         }
 
         const updatedUser: User = {
-          ...result.user,
+          ...restResult.user,
           type: 'customer',
         };
         await syncStoredAccount(updatedUser);
         return updatedUser;
       }
 
-      const result = await trpcClient.drivers.updateProfile.mutate({
-        driverId: user.id,
-        phone: cleanPhone,
-      });
-
-      if (!result?.success || !result.driver) {
-        throw new Error(result?.error ?? 'Telefon numarası güncellenemedi');
+      if (!restResult?.success || !restResult.driver) {
+        throw new Error(restResult?.error ?? 'Telefon numarası güncellenemedi');
       }
 
       const updatedDriver: Driver = {
-        ...result.driver,
+        ...restResult.driver,
         type: 'driver',
       };
       await syncStoredAccount(updatedDriver);
       return updatedDriver;
-    } catch (error) {
-      console.log('[Auth] updateAccountPhone error:', error);
-      if (error instanceof Error) {
-        throw error;
+    } catch (restError) {
+      console.log('[Auth] updateAccountPhone REST error:', restError);
+
+      const restMessage = restError instanceof Error ? restError.message : '';
+      if (isSessionAuthError(restMessage)) {
+        throw new Error('Oturumunuzun süresi dolmuş olabilir. Lütfen çıkış yapıp tekrar giriş yapın.');
       }
-      throw new Error('Telefon numarası güncellenemedi. Lütfen tekrar deneyin.');
+
+      try {
+        if (user.type === 'customer') {
+          let trpcResult: { success: boolean; error: string | null; user: User | null } | null = null;
+
+          try {
+            trpcResult = await trpcClient.auth.updateProfile.mutate({
+              userId: user.id,
+              phone: cleanPhone,
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : '';
+            console.log('[Auth] updateAccountPhone customer updateProfile error:', error);
+
+            if (!message.includes('No procedure found on path')) {
+              throw error;
+            }
+
+            trpcResult = await trpcClient.auth.updateCustomerProfile.mutate({
+              userId: user.id,
+              phone: cleanPhone,
+            });
+          }
+
+          if (!trpcResult?.success || !trpcResult.user) {
+            throw new Error(trpcResult?.error ?? 'Telefon numarası güncellenemedi');
+          }
+
+          const updatedUser: User = {
+            ...trpcResult.user,
+            type: 'customer',
+          };
+          await syncStoredAccount(updatedUser);
+          return updatedUser;
+        }
+
+        const trpcResult = await trpcClient.drivers.updateProfile.mutate({
+          driverId: user.id,
+          phone: cleanPhone,
+        });
+
+        if (!trpcResult?.success || !trpcResult.driver) {
+          throw new Error(trpcResult?.error ?? 'Telefon numarası güncellenemedi');
+        }
+
+        const updatedDriver: Driver = {
+          ...trpcResult.driver,
+          type: 'driver',
+        };
+        await syncStoredAccount(updatedDriver);
+        return updatedDriver;
+      } catch (trpcError) {
+        console.log('[Auth] updateAccountPhone tRPC error:', trpcError);
+
+        const trpcMessage = trpcError instanceof Error ? trpcError.message : '';
+        if (isSessionAuthError(trpcMessage)) {
+          throw new Error('Oturumunuzun süresi dolmuş olabilir. Lütfen çıkış yapıp tekrar giriş yapın.');
+        }
+
+        if (restError instanceof Error) {
+          throw restError;
+        }
+        if (trpcError instanceof Error) {
+          throw trpcError;
+        }
+        throw new Error('Telefon numarası güncellenemedi. Lütfen tekrar deneyin.');
+      }
     }
-  }, [syncStoredAccount, user]);
+  }, [directAuthorizedFetch, syncStoredAccount, user]);
 
   const recoverLocalPassword = useCallback(async (email: string, newPassword: string): Promise<boolean> => {
     const normalizedEmail = normalizeAuthEmail(email);
