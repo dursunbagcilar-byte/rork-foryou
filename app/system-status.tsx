@@ -109,6 +109,30 @@ const StatusRow = memo(function StatusRow({
   );
 });
 
+async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 2): Promise<Response> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (response.ok || attempt === maxRetries) return response;
+      if (response.status >= 500) {
+        console.log(`[SystemStatus] Retry ${attempt + 1}/${maxRetries} for ${url} - status ${response.status}`);
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        continue;
+      }
+      return response;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (attempt === maxRetries) throw err;
+      console.log(`[SystemStatus] Retry ${attempt + 1}/${maxRetries} for ${url}:`, err instanceof Error ? err.message : err);
+      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+    }
+  }
+  throw new Error('Tüm denemeler başarısız');
+}
+
 async function fetchSystemStatus(): Promise<SystemStatusResult> {
   const baseUrl = getBaseUrl();
   const sessionToken = await getSessionToken().catch((error: unknown) => {
@@ -120,62 +144,135 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
   const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
   const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
   const mapsConfigured = Boolean(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim());
+  const dbEnvConfigured = Boolean(dbEndpoint && dbNamespace && dbToken);
 
   let backendLive = false;
   let databaseLive = false;
   let users = 0;
   let drivers = 0;
-  let backendMessage = baseUrl ? 'API adresi çözüldü, canlı kontrol yapılıyor.' : 'API adresi çözülemedi.';
+  let backendMessage = baseUrl ? 'API adresi çözüldü, canlı kontrol yapılıyor...' : 'API adresi çözülemedi.';
   let dbMessage = 'Veritabanı kontrolü yapılamadı.';
 
-  if (baseUrl && dbEndpoint && dbNamespace && dbToken) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+  if (baseUrl) {
+    const dbHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (dbEndpoint) dbHeaders['x-db-endpoint'] = dbEndpoint;
+    if (dbNamespace) dbHeaders['x-db-namespace'] = dbNamespace;
+    if (dbToken) dbHeaders['x-db-token'] = dbToken;
 
     try {
-      const response = await fetch(`${baseUrl}/api/bootstrap-db`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-db-endpoint': dbEndpoint,
-          'x-db-namespace': dbNamespace,
-          'x-db-token': dbToken,
-        },
-        body: JSON.stringify({
-          endpoint: dbEndpoint,
-          namespace: dbNamespace,
-          token: dbToken,
-        }),
-        signal: controller.signal,
+      const healthResponse = await fetchWithRetry(`${baseUrl}/api/health`, {
+        method: 'GET',
+        headers: dbHeaders,
       });
 
-      clearTimeout(timeoutId);
-
-      const payload = await response.json().catch(() => null) as {
-        success?: boolean;
-        error?: string;
-        users?: number;
+      const healthPayload = await healthResponse.json().catch(() => null) as {
+        status?: string;
+        dbConfigured?: boolean;
+        dbReady?: boolean;
         drivers?: number;
+        users?: number;
       } | null;
 
-      backendLive = response.ok;
-      databaseLive = Boolean(payload?.success);
-      users = typeof payload?.users === 'number' ? payload.users : 0;
-      drivers = typeof payload?.drivers === 'number' ? payload.drivers : 0;
-      backendMessage = response.ok
-        ? 'Backend yanıt veriyor ve istek kabul ediyor.'
-        : `Backend hatası: ${payload?.error ?? `HTTP ${response.status}`}`;
-      dbMessage = payload?.success
-        ? `Veritabanı bağlı. ${users} müşteri, ${drivers} şoför kaydı bulundu.`
-        : payload?.error ?? 'Veritabanı yanıt vermedi.';
-    } catch (error: unknown) {
-      clearTimeout(timeoutId);
-      const message = error instanceof Error ? error.message : 'Bilinmeyen hata';
-      backendMessage = `Canlı bağlantı kurulamadı: ${message}`;
-      dbMessage = `Veritabanı kontrolü başarısız: ${message}`;
-      console.log('[SystemStatus] Live check error:', error);
+      backendLive = healthResponse.ok && healthPayload?.status === 'ok';
+      backendMessage = backendLive
+        ? 'Backend aktif ve yanıt veriyor.'
+        : `Backend yanıtı: ${healthPayload?.status ?? `HTTP ${healthResponse.status}`}`;
+
+      if (backendLive && healthPayload) {
+        databaseLive = Boolean(healthPayload.dbReady || healthPayload.dbConfigured);
+        users = typeof healthPayload.users === 'number' ? healthPayload.users : 0;
+        drivers = typeof healthPayload.drivers === 'number' ? healthPayload.drivers : 0;
+        dbMessage = databaseLive
+          ? `Veritabanı bağlı ve çalışıyor. ${users} müşteri, ${drivers} şoför kaydı.`
+          : 'Veritabanı henüz yapılandırılmamış.';
+      }
+
+      console.log('[SystemStatus] Health check:', { backendLive, databaseLive, users, drivers });
+    } catch (healthErr) {
+      console.log('[SystemStatus] Health check error:', healthErr instanceof Error ? healthErr.message : healthErr);
+      backendMessage = 'Backend bağlantısı kurulamadı. Sunucu uyanıyor olabilir.';
+    }
+
+    if (backendLive && !databaseLive && dbEnvConfigured) {
+      try {
+        const bootstrapResponse = await fetchWithRetry(`${baseUrl}/api/bootstrap-db`, {
+          method: 'POST',
+          headers: dbHeaders,
+          body: JSON.stringify({
+            endpoint: dbEndpoint,
+            namespace: dbNamespace,
+            token: dbToken,
+          }),
+        }, 1);
+
+        const bootstrapPayload = await bootstrapResponse.json().catch(() => null) as {
+          success?: boolean;
+          error?: string;
+          users?: number;
+          drivers?: number;
+        } | null;
+
+        if (bootstrapResponse.ok && bootstrapPayload?.success) {
+          databaseLive = true;
+          users = typeof bootstrapPayload.users === 'number' ? bootstrapPayload.users : users;
+          drivers = typeof bootstrapPayload.drivers === 'number' ? bootstrapPayload.drivers : drivers;
+          dbMessage = `Veritabanı bağlı. ${users} müşteri, ${drivers} şoför kaydı bulundu.`;
+        } else if (bootstrapPayload?.error) {
+          dbMessage = `Veritabanı hatası: ${bootstrapPayload.error}`;
+        }
+        console.log('[SystemStatus] Bootstrap check:', { databaseLive, users, drivers });
+      } catch (bootstrapErr) {
+        console.log('[SystemStatus] Bootstrap check error:', bootstrapErr instanceof Error ? bootstrapErr.message : bootstrapErr);
+        dbMessage = 'Veritabanı bağlantısı zaman aşımına uğradı. Tekrar deneyin.';
+      }
+    }
+
+    if (!backendLive && dbEnvConfigured) {
+      try {
+        const bootstrapResponse = await fetchWithRetry(`${baseUrl}/api/bootstrap-db`, {
+          method: 'POST',
+          headers: dbHeaders,
+          body: JSON.stringify({
+            endpoint: dbEndpoint,
+            namespace: dbNamespace,
+            token: dbToken,
+          }),
+        }, 1);
+
+        const bootstrapPayload = await bootstrapResponse.json().catch(() => null) as {
+          success?: boolean;
+          error?: string;
+          users?: number;
+          drivers?: number;
+        } | null;
+
+        if (bootstrapResponse.ok) {
+          backendLive = true;
+          backendMessage = 'Backend aktif ve yanıt veriyor.';
+          databaseLive = Boolean(bootstrapPayload?.success);
+          users = typeof bootstrapPayload?.users === 'number' ? bootstrapPayload.users : 0;
+          drivers = typeof bootstrapPayload?.drivers === 'number' ? bootstrapPayload.drivers : 0;
+          dbMessage = databaseLive
+            ? `Veritabanı bağlı. ${users} müşteri, ${drivers} şoför kaydı bulundu.`
+            : bootstrapPayload?.error ?? 'Veritabanı yanıt vermedi.';
+        }
+      } catch (fallbackErr) {
+        console.log('[SystemStatus] Fallback bootstrap error:', fallbackErr instanceof Error ? fallbackErr.message : fallbackErr);
+      }
     }
   }
+
+  const sessionDescription = sessionToken
+    ? 'Aktif oturum bulundu. Giriş sistemi gerçek çalışıyor.'
+    : backendLive
+      ? 'Oturum altyapısı hazır. Giriş yapıldığında oturum oluşturulacak.'
+      : 'Oturum altyapısı backend ile birlikte çalışır.';
+
+  const sessionStatus: StatusItem['status'] = sessionToken
+    ? 'live'
+    : backendLive
+      ? 'live'
+      : 'offline';
 
   const items: StatusItem[] = [
     {
@@ -189,16 +286,14 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
       id: 'database',
       title: 'Veritabanı',
       description: dbMessage,
-      status: databaseLive ? 'live' : baseUrl ? 'partial' : 'offline',
+      status: databaseLive ? 'live' : dbEnvConfigured ? 'partial' : 'offline',
       icon: Database,
     },
     {
       id: 'session',
       title: 'Oturum sistemi',
-      description: sessionToken
-        ? 'Cihazda aktif bir oturum tokenı bulundu. Giriş sistemi gerçek çalışıyor.'
-        : 'Oturum altyapısı mevcut. Şu an cihazda aktif token yok.',
-      status: sessionToken ? 'live' : 'partial',
+      description: sessionDescription,
+      status: sessionStatus,
       icon: ShieldCheck,
     },
     {
@@ -213,35 +308,35 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
     {
       id: 'routing',
       title: 'Kayıt / giriş uçları',
-      description: baseUrl
-        ? 'tRPC ve auth rotaları projede bağlı. Kayıt, giriş ve profil güncelleme akışı gerçek backend kullanıyor.'
-        : 'Auth uçlarına gidilecek API adresi şu an çözülemiyor.',
-      status: baseUrl ? 'live' : 'offline',
+      description: backendLive
+        ? 'tRPC ve auth rotaları aktif. Kayıt, giriş ve profil güncelleme gerçek backend kullanıyor.'
+        : baseUrl
+          ? 'API adresi mevcut, backend henüz yanıt vermiyor.'
+          : 'API adresi çözülemedi.',
+      status: backendLive ? 'live' : baseUrl ? 'partial' : 'offline',
       icon: KeyRound,
     },
   ];
 
-  const overallStatus = databaseLive
+  const liveCount = items.filter((i) => i.status === 'live').length;
+  const overallStatus: SystemStatusResult['overallStatus'] = liveCount === items.length
     ? 'live'
-    : items.some((item) => item.status === 'live')
+    : liveCount > 0
       ? 'partial'
       : 'offline';
 
   const summary = overallStatus === 'live'
-    ? 'Uygulamada gerçek çalışan servisler var.'
+    ? 'Tüm servisler aktif ve çalışıyor.'
     : overallStatus === 'partial'
-      ? 'Bazı gerçek servisler hazır, bazıları eksik veya anlık erişilemiyor.'
-      : 'Canlı servis doğrulanamadı.';
+      ? `${liveCount}/${items.length} servis aktif.`
+      : 'Hiçbir servise şu an ulaşılamıyor.';
 
   return {
     checkedAt: new Date().toISOString(),
     baseUrl,
     overallStatus,
     summary,
-    stats: {
-      users,
-      drivers,
-    },
+    stats: { users, drivers },
     items,
   };
 }
