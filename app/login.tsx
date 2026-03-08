@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   KeyboardAvoidingView, Platform, ScrollView, Animated, Alert,
@@ -12,7 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { loginAsCustomer, loginAsDriver } = useAuth();
+  const { loginAsCustomer, loginAsDriver, getRememberedLogin } = useAuth();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<'customer' | 'driver'>('customer');
@@ -30,6 +30,72 @@ export default function LoginScreen() {
     }).start();
     setMode(newMode);
   };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const restoreLastUsedMode = async () => {
+      try {
+        const customerRemembered = await getRememberedLogin('customer');
+        const driverRemembered = await getRememberedLogin('driver');
+        if (!isMounted) {
+          return;
+        }
+
+        const customerUpdatedAt = customerRemembered ? new Date(customerRemembered.updatedAt).getTime() : 0;
+        const driverUpdatedAt = driverRemembered ? new Date(driverRemembered.updatedAt).getTime() : 0;
+
+        if (!customerUpdatedAt && !driverUpdatedAt) {
+          return;
+        }
+
+        const nextMode: 'customer' | 'driver' = driverUpdatedAt > customerUpdatedAt ? 'driver' : 'customer';
+        setMode(nextMode);
+        slideAnim.setValue(nextMode === 'customer' ? 0 : 1);
+        console.log('[Login] Last used mode restored:', nextMode);
+      } catch (error) {
+        console.log('[Login] restoreLastUsedMode error:', error);
+      }
+    };
+
+    void restoreLastUsedMode();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [getRememberedLogin, slideAnim]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadRememberedLogin = async () => {
+      try {
+        const remembered = await getRememberedLogin(mode);
+        if (!isMounted) {
+          return;
+        }
+
+        if (remembered) {
+          setEmail(remembered.email);
+          setPassword(remembered.password);
+          console.log('[Login] Remembered login restored for type:', remembered.type);
+          return;
+        }
+
+        setEmail('');
+        setPassword('');
+        console.log('[Login] No remembered login found for type:', mode);
+      } catch (error) {
+        console.log('[Login] loadRememberedLogin error:', error);
+      }
+    };
+
+    void loadRememberedLogin();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [getRememberedLogin, mode]);
 
   const loginMutation = useMutation({
     mutationFn: async (): Promise<string> => {

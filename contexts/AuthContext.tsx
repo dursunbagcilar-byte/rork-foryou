@@ -40,7 +40,15 @@ interface LocalAuthLegacyCredentials {
   driverCategory?: 'driver' | 'scooter' | 'courier';
 }
 
+interface RememberedLoginCredentials {
+  email: string;
+  password: string;
+  type: Exclude<UserType, null>;
+  updatedAt: string;
+}
+
 const LOCAL_AUTH_PREFIX = 'localauthbackup';
+const REMEMBERED_LOGIN_PREFIX = 'remembered_login_credentials';
 
 function normalizeAuthEmail(email: string): string {
   return email.toLowerCase().trim();
@@ -60,6 +68,27 @@ function buildLocalAuthStorageId(email: string): string {
 
 function buildLocalAuthKey(email: string): string {
   return `${LOCAL_AUTH_PREFIX}${buildLocalAuthStorageId(email)}`;
+}
+
+function buildRememberedLoginKey(type: Exclude<UserType, null>): string {
+  return `${REMEMBERED_LOGIN_PREFIX}_${type}`;
+}
+
+function parseRememberedLogin(raw: string): RememberedLoginCredentials | null {
+  try {
+    const parsed = JSON.parse(raw) as RememberedLoginCredentials;
+    if (!parsed?.email || !parsed?.password || !parsed?.type) {
+      return null;
+    }
+
+    return {
+      ...parsed,
+      email: normalizeAuthEmail(parsed.email),
+    };
+  } catch (error) {
+    console.log('[Auth] parseRememberedLogin error:', error);
+    return null;
+  }
 }
 
 function parseLocalAuthBackup(raw: string): LocalAuthBackup | null {
@@ -389,6 +418,54 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       return parsed;
     } catch (error) {
       console.log('[Auth] getLocalAuthBackup error:', error, 'email:', normalizedEmail);
+      return null;
+    }
+  }, []);
+
+  const saveRememberedLogin = useCallback(async (
+    email: string,
+    password: string,
+    type: Exclude<UserType, null>
+  ): Promise<void> => {
+    const normalizedEmail = normalizeAuthEmail(email);
+    const trimmedPassword = password.trim();
+
+    if (!normalizedEmail || !trimmedPassword) {
+      return;
+    }
+
+    try {
+      const payload: RememberedLoginCredentials = {
+        email: normalizedEmail,
+        password: trimmedPassword,
+        type,
+        updatedAt: new Date().toISOString(),
+      };
+      await SecureStore.setItemAsync(buildRememberedLoginKey(type), JSON.stringify(payload));
+      console.log('[Auth] Remembered login saved for:', normalizedEmail, 'type:', type);
+    } catch (error) {
+      console.log('[Auth] saveRememberedLogin error:', error, 'email:', normalizedEmail);
+    }
+  }, []);
+
+  const getRememberedLogin = useCallback(async (
+    type: Exclude<UserType, null>
+  ): Promise<RememberedLoginCredentials | null> => {
+    try {
+      const raw = await SecureStore.getItemAsync(buildRememberedLoginKey(type));
+      if (!raw) {
+        return null;
+      }
+
+      const parsed = parseRememberedLogin(raw);
+      if (!parsed) {
+        console.log('[Auth] getRememberedLogin invalid payload for:', type);
+        return null;
+      }
+
+      return parsed;
+    } catch (error) {
+      console.log('[Auth] getRememberedLogin error:', error, 'type:', type);
       return null;
     }
   }, []);
@@ -750,11 +827,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       throw new Error('Bu e-posta ile kayıtlı şoför hesabı bulunamadı');
     }
 
+    await saveRememberedLogin(normalizedEmail, password, backup.type);
+
     return setAuthenticatedLocalUser({
       ...backup.user,
       email: normalizedEmail,
     } as User | Driver, 'secure-backup');
-  }, [getLocalAuthBackup, setAuthenticatedLocalUser]);
+  }, [getLocalAuthBackup, saveRememberedLogin, setAuthenticatedLocalUser]);
 
   const handleSessionInvalid = useCallback(async () => {
     console.log('[Auth] Session invalid, logging out...');
@@ -891,7 +970,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, user?.type]);
 
-  const handleLoginSuccess = useCallback(async (result: any, email: string, source: string): Promise<UserType> => {
+  const handleLoginSuccess = useCallback(async (result: any, email: string, password: string, source: string): Promise<UserType> => {
     console.log(`[Auth] handleLoginSuccess (${source}) result:`, JSON.stringify({ success: result.success, error: result.error, hasUser: !!result.user, hasToken: !!result.token }));
     if (result.success && result.user) {
       const returnedUser = { ...result.user } as any;
@@ -917,11 +996,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       setUserType(actualType);
       setIsAuthenticated(true);
       await AsyncStorage.setItem('auth_user', JSON.stringify(returnedUser));
+      await saveRememberedLogin(email, password, actualType);
       console.log('[Auth] Logged in as', actualType, ':', returnedUser.id, returnedUser.name);
       return actualType;
     }
     throw new Error(result.error ?? 'Mail adresiniz veya şifreniz hatalı');
-  }, []);
+  }, [saveRememberedLogin]);
 
   const loginAsCustomer = useCallback(async (email?: string, password?: string) => {
     if (!email || !password) {
@@ -934,7 +1014,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (result && result.success === false && result.error) {
         throw new Error(result.error);
       }
-      return await handleLoginSuccess(result, email, 'REST');
+      return await handleLoginSuccess(result, email, password, 'REST');
     } catch (err: any) {
       console.log('[Auth] loginAsCustomer error:', err?.message);
       const errorMessage = err instanceof Error ? err.message : '';
@@ -957,7 +1037,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (result && result.success === false && result.error) {
         throw new Error(result.error);
       }
-      return await handleLoginSuccess(result, email, 'REST');
+      return await handleLoginSuccess(result, email, password, 'REST');
     } catch (err: any) {
       console.log('[Auth] loginAsDriver error:', err?.message);
       const errorMessage = err instanceof Error ? err.message : '';
@@ -1005,6 +1085,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           type: 'customer', name, phone: normalizedPhone, email, gender, city, district, vehiclePlate,
         }));
         await persistLocalAuthBackup(customer, password);
+        await saveRememberedLogin(email, password, 'customer');
         console.log('[Auth] Registered customer:', customer.id);
         return;
       }
@@ -1025,7 +1106,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen tekrar deneyin.');
     }
-  }, [directFetch, persistLocalAuthBackup]);
+  }, [directFetch, persistLocalAuthBackup, saveRememberedLogin]);
 
   const registerDriver = useCallback(async (
     name: string,
@@ -1101,6 +1182,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           partnerDriverName: partnerName, licenseIssueDate, driverCategory, city, district,
         }));
         await persistLocalAuthBackup(driver, password);
+        await saveRememberedLogin(email, password, 'driver');
         console.log('[Auth] Registered driver:', driver.id);
         return;
       }
@@ -1120,7 +1202,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen tekrar deneyin.');
     }
-  }, [directFetch, persistLocalAuthBackup]);
+  }, [directFetch, persistLocalAuthBackup, saveRememberedLogin]);
 
   const applyPromoCode = useCallback(async (code: string): Promise<boolean> => {
     if (code.toUpperCase() === PRICING.promoCode && !promoApplied) {
@@ -1393,6 +1475,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     driverApproved,
     hasLocalRecoveryAccount,
     recoverLocalPassword,
+    getRememberedLogin,
     updateAccountPhone,
     logout,
   }), [
@@ -1428,6 +1511,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     driverApproved,
     hasLocalRecoveryAccount,
     recoverLocalPassword,
+    getRememberedLogin,
     updateAccountPhone,
     logout,
   ]);
