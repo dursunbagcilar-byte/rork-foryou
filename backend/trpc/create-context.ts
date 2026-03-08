@@ -1,7 +1,36 @@
 import { initTRPC } from "@trpc/server";
 import { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
 import superjson from "superjson";
-import { db } from "../db/store";
+import { db, forceReloadStore, initializeStore } from "../db/store";
+
+async function resolveValidSession(token: string) {
+  let session = db.sessions.get(token);
+
+  if (!session) {
+    console.log('[CONTEXT] Session not found in memory, attempting store reload');
+    try {
+      await initializeStore();
+      await forceReloadStore();
+      session = db.sessions.get(token);
+      console.log('[CONTEXT] Session reload result:', !!session);
+    } catch (error) {
+      console.log('[CONTEXT] Session reload error:', error);
+    }
+  }
+
+  if (!session) {
+    return null;
+  }
+
+  const isExpired = new Date(session.expiresAt).getTime() < Date.now();
+  if (isExpired) {
+    db.sessions.delete(token);
+    console.log('[CONTEXT] Session expired for token, cleaned up');
+    return null;
+  }
+
+  return session;
+}
 
 export const createContext = async (opts: FetchCreateContextFnOptions) => {
   const authHeader = opts.req.headers.get("authorization");
@@ -12,22 +41,16 @@ export const createContext = async (opts: FetchCreateContextFnOptions) => {
   let isAdmin = false;
 
   if (token && token.length > 4) {
-    const session = db.sessions.get(token);
+    const session = await resolveValidSession(token);
     if (session) {
-      const isExpired = new Date(session.expiresAt).getTime() < Date.now();
-      if (!isExpired) {
-        userId = session.userId;
-        userType = session.userType;
-        if (session.userType === 'driver') {
-          const driver = db.drivers.get(session.userId);
-          if (driver && driver.email) {
-            const adminEmail = process.env.ADMIN_EMAIL || 'admin@2go.app';
-            isAdmin = driver.email.toLowerCase() === adminEmail.toLowerCase();
-          }
+      userId = session.userId;
+      userType = session.userType;
+      if (session.userType === 'driver') {
+        const driver = db.drivers.get(session.userId);
+        if (driver && driver.email) {
+          const adminEmail = process.env.ADMIN_EMAIL || 'admin@2go.app';
+          isAdmin = driver.email.toLowerCase() === adminEmail.toLowerCase();
         }
-      } else {
-        db.sessions.delete(token);
-        console.log('[CONTEXT] Session expired for token, cleaned up');
       }
     }
   }

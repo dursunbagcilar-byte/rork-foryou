@@ -4,9 +4,9 @@ import { cors } from "hono/cors";
 
 import { appRouter } from "./trpc/app-router";
 import { createContext } from "./trpc/create-context";
-import { db, initializeStore, bootstrapDbConfig, reinitializeStore } from "./db/store";
+import { db, initializeStore, bootstrapDbConfig, reinitializeStore, forceReloadStore } from "./db/store";
 import { setDbConfig, isDbConfigured } from "./db/rork-db";
-import type { User, Driver, Business, BusinessMenuItem } from "./db/types";
+import type { User, Driver, Business, BusinessMenuItem, Session } from "./db/types";
 import { checkRateLimit, getClientIP, isIPBlocked, trackSuspiciousActivity, sanitizeInput } from "./utils/security";
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../utils/phone";
 import {
@@ -217,6 +217,35 @@ async function ensureDbReady(dbEp?: string, dbNs?: string, dbTk?: string): Promi
     }
   }
   return _dbReady;
+}
+
+async function resolveValidSession(sessionToken: string): Promise<Session | null> {
+  let session = db.sessions.get(sessionToken);
+
+  if (!session) {
+    console.log('[SERVER] Session not found in memory, attempting reload for token');
+    try {
+      await initializeStore();
+      await forceReloadStore();
+      session = db.sessions.get(sessionToken);
+      console.log('[SERVER] Session reload result:', !!session);
+    } catch (error) {
+      console.log('[SERVER] Session reload error:', error);
+    }
+  }
+
+  if (!session) {
+    return null;
+  }
+
+  const isExpired = new Date(session.expiresAt).getTime() < Date.now();
+  if (isExpired) {
+    db.sessions.delete(sessionToken);
+    console.log('[SERVER] Session expired during lookup for:', session.userId);
+    return null;
+  }
+
+  return session;
 }
 
 app.use("*", cors({
@@ -953,12 +982,8 @@ app.post("/auth/update-phone", async (c) => {
       return c.json({ success: false, error: 'Oturum bulunamadı', user: null, driver: null }, 401);
     }
 
-    const session = db.sessions.get(sessionToken);
-    const isExpired = session ? new Date(session.expiresAt).getTime() < Date.now() : true;
-    if (!session || isExpired) {
-      if (session && isExpired) {
-        db.sessions.delete(sessionToken);
-      }
+    const session = await resolveValidSession(sessionToken);
+    if (!session) {
       return c.json({ success: false, error: 'Geçersiz oturum', user: null, driver: null }, 401);
     }
 

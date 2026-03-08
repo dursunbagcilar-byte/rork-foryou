@@ -8,17 +8,27 @@ import type { AppRouter } from "@/backend/trpc/app-router";
 export const trpc = createTRPCReact<AppRouter>();
 
 const SESSION_TOKEN_KEY = "session_token";
+let _sessionTokenCache: string | null | undefined = undefined;
 
 export async function getSessionToken(): Promise<string | null> {
+  if (_sessionTokenCache !== undefined) {
+    return _sessionTokenCache;
+  }
+
   try {
-    return await SecureStore.getItemAsync(SESSION_TOKEN_KEY);
+    const storedToken = await SecureStore.getItemAsync(SESSION_TOKEN_KEY);
+    _sessionTokenCache = storedToken ?? null;
+    return _sessionTokenCache;
   } catch (e) {
     console.log("[TRPC] Error reading session token:", e);
+    _sessionTokenCache = null;
     return null;
   }
 }
 
 export async function setSessionToken(token: string | null): Promise<void> {
+  _sessionTokenCache = token ?? null;
+
   try {
     if (token) {
       await SecureStore.setItemAsync(SESSION_TOKEN_KEY, token);
