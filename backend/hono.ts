@@ -317,6 +317,23 @@ function resolveDbHeaders(c: Context): { ep: string; ns: string; tk: string } {
   return { ep, ns, tk };
 }
 
+function normalizeOptionalString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function resolveBootstrapDbConfig(c: Context, body: unknown): { ep: string; ns: string; tk: string } {
+  const headerConfig = resolveDbHeaders(c);
+  const bodyRecord = typeof body === 'object' && body !== null
+    ? body as Record<string, unknown>
+    : null;
+
+  const ep = normalizeOptionalString(bodyRecord?.endpoint) || headerConfig.ep;
+  const ns = normalizeOptionalString(bodyRecord?.namespace) || headerConfig.ns;
+  const tk = normalizeOptionalString(bodyRecord?.token) || headerConfig.tk;
+
+  return { ep, ns, tk };
+}
+
 app.use("*", async (c, next) => {
   const { ep, ns, tk } = resolveDbHeaders(c);
   if (ep && ns && tk) {
@@ -364,12 +381,14 @@ app.get("/health", async (c) => {
 
   const configured = isDbConfigured();
   const ready = _dbReady || configured;
-  console.log('[SERVER] Health response: configured:', configured, 'ready:', ready, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
+  const storageMode = ready ? 'database' : 'memory';
+  console.log('[SERVER] Health response: configured:', configured, 'ready:', ready, 'storageMode:', storageMode, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
   return c.json({
     status: "ok",
     version: "66",
     dbConfigured: configured,
     dbReady: ready,
+    storageMode,
     dbMissing: (!ep || !ns || !tk) ? { endpoint: !ep, namespace: !ns, token: !tk } : undefined,
     drivers: db.drivers.getAll().length,
     users: db.users.getAll().length,
@@ -1367,16 +1386,41 @@ app.post("/iyzico/callback", async (c) => {
 
 app.post("/bootstrap-db", async (c) => {
   try {
-    const body = await c.req.json();
-    if (!body.endpoint || !body.namespace || !body.token) return c.json({ success: false, error: "Missing config" }, 400);
-    setDbConfig(body.endpoint, body.namespace, body.token);
-    const result = await bootstrapDbConfig(body.endpoint, body.namespace, body.token);
+    const body = await c.req.json().catch(() => null);
+    const { ep, ns, tk } = resolveBootstrapDbConfig(c, body);
+
+    if (!ep || !ns || !tk) {
+      console.log('[SERVER] bootstrap-db skipped - DB config unavailable from body, headers, env, or cache');
+      return c.json({
+        success: false,
+        configured: isDbConfigured(),
+        storageMode: (_dbReady || isDbConfigured()) ? 'database' : 'memory',
+        error: 'Database config unavailable',
+        drivers: db.drivers.getAll().length,
+        users: db.users.getAll().length,
+      }, 200);
+    }
+
+    setDbConfig(ep, ns, tk);
+    const result = await bootstrapDbConfig(ep, ns, tk);
     if (result || isDbConfigured()) {
       _dbReady = true;
     }
-    return c.json({ success: true, configured: result || isDbConfigured(), drivers: db.drivers.getAll().length, users: db.users.getAll().length });
+    return c.json({
+      success: result || isDbConfigured(),
+      configured: result || isDbConfigured(),
+      storageMode: (_dbReady || isDbConfigured()) ? 'database' : 'memory',
+      drivers: db.drivers.getAll().length,
+      users: db.users.getAll().length,
+    });
   } catch (err) {
-    return c.json({ success: false, error: String(err) }, 500);
+    console.log('[SERVER] bootstrap-db error:', err);
+    return c.json({
+      success: false,
+      configured: isDbConfigured(),
+      storageMode: (_dbReady || isDbConfigured()) ? 'database' : 'memory',
+      error: String(err),
+    }, 500);
   }
 });
 
