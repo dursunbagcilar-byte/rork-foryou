@@ -282,7 +282,22 @@ app.use("*", async (c, next) => {
 });
 
 app.get("/", (c) => c.json({ status: "ok", version: "62", dbConfigured: isDbConfigured(), dbReady: _dbReady }));
-app.get("/health", (c) => c.json({ status: "ok", version: "62", dbConfigured: isDbConfigured(), dbReady: _dbReady, drivers: db.drivers.getAll().length, users: db.users.getAll().length }));
+app.get("/health", async (c) => {
+  const dbEp = c.req.header('x-db-endpoint');
+  const dbNs = c.req.header('x-db-namespace');
+  const dbTk = c.req.header('x-db-token');
+  if (dbEp && dbNs && dbTk) {
+    await ensureDbReady(dbEp, dbNs, dbTk);
+  }
+  return c.json({
+    status: "ok",
+    version: "63",
+    dbConfigured: isDbConfigured(),
+    dbReady: _dbReady || isDbConfigured(),
+    drivers: db.drivers.getAll().length,
+    users: db.users.getAll().length,
+  });
+});
 
 app.post("/auth/register-customer", async (c) => {
   const startTime = Date.now();
