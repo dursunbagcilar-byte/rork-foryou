@@ -17,6 +17,7 @@ import { Colors } from '@/constants/colors';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/contexts/AuthContext';
+import { useRideForOthers, type RideForOtherPaymentMode, type RideRecipient } from '@/contexts/RideForOthersContext';
 import { useLocation } from '@/hooks/useLocation';
 import { buildApiUrl, trpc } from '@/lib/trpc';
 import { ISTANBUL_REGION, findBestAlternativeVehicle, getVehicleTypeLabel } from '@/constants/mockData';
@@ -85,6 +86,7 @@ export default function CustomerHomeScreen() {
   const { height: SCREEN_HEIGHT } = useWindowDimensions();
   const MAP_BOTTOM_PADDING = Math.round(SCREEN_HEIGHT * 0.37);
   const { user, promoApplied, isFreeRide, remainingFreeRides, applyPromoCode, incrementCompletedRides, addRideToHistory, customVehicleImage } = useAuth();
+  const { draft: rideForOtherDraft, resetRideForOtherDraft } = useRideForOthers();
 
   const { location: gpsLocation } = useLocation(true, 8000);
 
@@ -972,6 +974,12 @@ export default function CustomerHomeScreen() {
   const createRatingMutation = trpc.ratings.create.useMutation();
   const sendMessageMutation = trpc.messages.send.useMutation();
   const [currentBackendRideId, setCurrentBackendRideId] = useState<string | null>(null);
+  const [activeRideRecipient, setActiveRideRecipient] = useState<RideRecipient | null>(null);
+  const [activeRideForOther, setActiveRideForOther] = useState<boolean>(false);
+  const [activeRidePaymentMode, setActiveRidePaymentMode] = useState<RideForOtherPaymentMode>('customer_app');
+  const [activeRideShareBySms, setActiveRideShareBySms] = useState<boolean>(true);
+  const [activeRideShareByWhatsApp, setActiveRideShareByWhatsApp] = useState<boolean>(true);
+  const [activeRideLiveTracking, setActiveRideLiveTracking] = useState<boolean>(true);
   const rideMessagesQuery = trpc.messages.getByRide.useQuery(
     { rideId: currentBackendRideId ?? '' },
     { enabled: !!currentBackendRideId && showChatModal, refetchInterval: 8000, staleTime: 6000 }
@@ -992,6 +1000,15 @@ export default function CustomerHomeScreen() {
     }
     const free = isFreeRide();
     setCurrentRideFree(free);
+
+    const rideForOtherEnabled = Boolean(rideForOtherDraft.enabled && rideForOtherDraft.recipient);
+    const selectedRideRecipient = rideForOtherEnabled ? rideForOtherDraft.recipient : null;
+    setActiveRideForOther(rideForOtherEnabled);
+    setActiveRideRecipient(selectedRideRecipient);
+    setActiveRidePaymentMode(rideForOtherDraft.paymentMode);
+    setActiveRideShareBySms(rideForOtherDraft.shareBySms);
+    setActiveRideShareByWhatsApp(rideForOtherDraft.shareByWhatsApp);
+    setActiveRideLiveTracking(rideForOtherDraft.liveTrackingEnabled);
 
     if (paymentMethod === 'card' && !free && ridePrice > 0) {
       setPaymentLoading(true);
@@ -1050,6 +1067,12 @@ export default function CustomerHomeScreen() {
         isFreeRide: free,
         city: user?.city ?? '',
         paymentMethod: paymentMethod,
+        rideForOther: rideForOtherEnabled,
+        recipientName: selectedRideRecipient?.name,
+        recipientPhone: selectedRideRecipient?.phone,
+        recipientRelation: selectedRideRecipient?.relation,
+        guestPaymentMode: rideForOtherDraft.paymentMode,
+        guestTrackingEnabled: rideForOtherDraft.liveTrackingEnabled,
       });
       if (result.success && result.ride) {
         setCurrentBackendRideId(result.ride.id);
@@ -1059,8 +1082,8 @@ export default function CustomerHomeScreen() {
       console.log('[Customer] Backend ride creation error (continuing):', err);
     }
 
-    console.log(`Ride requested: ${destination}, Free: ${free}, Payment: ${paymentMethod}, Price: ₺${free ? 0 : ridePrice}`);
-  }, [destination, selectedDest, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, mapRegion.latitude, mapRegion.longitude]);
+    console.log(`Ride requested: ${destination}, Free: ${free}, Payment: ${paymentMethod}, Price: ₺${free ? 0 : ridePrice}, ForOther: ${rideForOtherEnabled}`);
+  }, [destination, selectedDest, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, mapRegion.latitude, mapRegion.longitude, rideForOtherDraft]);
 
   const handleCompleteRide = useCallback(async () => {
     await incrementCompletedRides();
@@ -1090,6 +1113,12 @@ export default function CustomerHomeScreen() {
         driverRating: currentDriver?.rating ?? 4.5,
         paymentMethod: paymentMethod as 'cash' | 'card',
         isFreeRide: currentRideFree,
+        rideForOther: activeRideForOther,
+        recipientName: activeRideRecipient?.name,
+        recipientPhone: activeRideRecipient?.phone,
+        recipientRelation: activeRideRecipient?.relation,
+        guestPaymentMode: activeRidePaymentMode,
+        guestTrackingEnabled: activeRideLiveTracking,
       };
       await addRideToHistory(ride);
       console.log('Ride saved to history:', ride.id);
@@ -1097,7 +1126,7 @@ export default function CustomerHomeScreen() {
 
     setShowReceiptModal(true);
     console.log('Showing receipt modal');
-  }, [incrementCompletedRides, selectedDest, user, currentRideFree, ridePrice, rideDistance, rideDuration, addRideToHistory, currentBackendRideId, currentDriver, paymentMethod]);
+  }, [incrementCompletedRides, selectedDest, user, currentRideFree, ridePrice, rideDistance, rideDuration, addRideToHistory, currentBackendRideId, currentDriver, paymentMethod, activeRideForOther, activeRideRecipient, activeRidePaymentMode, activeRideLiveTracking]);
 
   const handleCloseReceipt = useCallback(() => {
     setShowReceiptModal(false);
@@ -1202,10 +1231,18 @@ export default function CustomerHomeScreen() {
       tripPathIndexRef.current = 0;
       setCurrentDriver(null);
       setPreviousDriverIds([]);
+      setCurrentBackendRideId(null);
+      setActiveRideRecipient(null);
+      setActiveRideForOther(false);
+      setActiveRidePaymentMode('customer_app');
+      setActiveRideShareBySms(true);
+      setActiveRideShareByWhatsApp(true);
+      setActiveRideLiveTracking(true);
+      resetRideForOtherDraft();
       if (driverCancelTimerRef.current) { clearTimeout(driverCancelTimerRef.current); driverCancelTimerRef.current = null; }
       Alert.alert('Yolculuk Tamamlandı', 'İyi yolculuklar! 2GO ile güvenle ulaştınız.');
     });
-  }, [ratingScaleAnim]);
+  }, [ratingScaleAnim, resetRideForOtherDraft]);
 
   const CUSTOMER_CANCEL_REASONS = [
     { key: 'driver_not_coming', label: 'Şoför gelmiyor' },
@@ -1247,8 +1284,16 @@ export default function CustomerHomeScreen() {
     }
     setCurrentDriver(null);
     setPreviousDriverIds([]);
+    setCurrentBackendRideId(null);
+    setActiveRideRecipient(null);
+    setActiveRideForOther(false);
+    setActiveRidePaymentMode('customer_app');
+    setActiveRideShareBySms(true);
+    setActiveRideShareByWhatsApp(true);
+    setActiveRideLiveTracking(true);
+    resetRideForOtherDraft();
     if (driverCancelTimerRef.current) { clearTimeout(driverCancelTimerRef.current); driverCancelTimerRef.current = null; }
-  }, []);
+  }, [resetRideForOtherDraft]);
 
   const handleCancelRide = useCallback(() => {
     if (customerConfirmedArrival) {
@@ -1752,8 +1797,12 @@ export default function CustomerHomeScreen() {
   const searchParams = useLocalSearchParams<{ vehiclePackage?: string; openSearch?: string }>();
 
   useEffect(() => {
-    if (searchParams.openSearch === '1' && searchParams.vehiclePackage) {
-      const pkg = searchParams.vehiclePackage;
+    if (searchParams.openSearch !== '1') {
+      return;
+    }
+
+    const pkg = searchParams.vehiclePackage;
+    if (pkg) {
       if (isRainy && (pkg === 'scooter' || pkg === 'motorcycle')) {
         console.log('[Vehicle] Weather restricted, forcing car:', pkg);
         setSelectedVehiclePackage('car');
@@ -1765,10 +1814,11 @@ export default function CustomerHomeScreen() {
         setSelectedVehiclePackage(pkg);
       }
       console.log('[Vehicle] Returned with package:', pkg);
-      setTimeout(() => {
-        toggleSearch(true);
-      }, 300);
     }
+
+    setTimeout(() => {
+      toggleSearch(true);
+    }, 300);
   }, [searchParams.openSearch, searchParams.vehiclePackage, isRainy, toggleSearch]);
 
   const handleInlineVehicleChange = useCallback((pkg: string) => {
@@ -1793,6 +1843,12 @@ export default function CustomerHomeScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     console.log('[Vehicle] Navigating to vehicle select');
     router.push('/(customer-tabs)/dashboard/vehicle-select' as any);
+  }, [router]);
+
+  const handleOpenRideForOther = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    console.log('[RideForOther] Navigating to ride-for-someone');
+    router.push('/(customer-tabs)/dashboard/ride-for-someone' as any);
   }, [router]);
 
   return (
@@ -2079,6 +2135,28 @@ export default function CustomerHomeScreen() {
                     </Text>
                   </View>
                 )}
+                <TouchableOpacity
+                  style={[
+                    styles.rideForOtherEntry,
+                    rideForOtherDraft.enabled && rideForOtherDraft.recipient && styles.rideForOtherEntryActive,
+                  ]}
+                  onPress={handleOpenRideForOther}
+                  activeOpacity={0.85}
+                  testID="ride-for-other-entry"
+                >
+                  <View style={styles.rideForOtherEntryIcon}>
+                    <Share2 size={16} color={rideForOtherDraft.enabled && rideForOtherDraft.recipient ? '#FFF' : Colors.dark.primary} />
+                  </View>
+                  <View style={styles.rideForOtherEntryContent}>
+                    <Text style={[styles.rideForOtherEntryTitle, rideForOtherDraft.enabled && rideForOtherDraft.recipient && styles.rideForOtherEntryTitleActive]}>Başkasına çağır</Text>
+                    <Text style={[styles.rideForOtherEntrySubtitle, rideForOtherDraft.enabled && rideForOtherDraft.recipient && styles.rideForOtherEntrySubtitleActive]} numberOfLines={1}>
+                      {rideForOtherDraft.enabled && rideForOtherDraft.recipient
+                        ? `${rideForOtherDraft.recipient.name} • ${rideForOtherDraft.recipient.phone}`
+                        : 'Bir yakınınız için yolculuk oluşturun'}
+                    </Text>
+                  </View>
+                  <ChevronRight size={18} color={rideForOtherDraft.enabled && rideForOtherDraft.recipient ? '#FFF' : '#7A7A93'} />
+                </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.searchBarNew}
                   onPress={() => toggleSearch(true)}
@@ -2394,6 +2472,16 @@ export default function CustomerHomeScreen() {
                   <X size={22} color="#8A8A9A" />
                 </TouchableOpacity>
               </View>
+              {rideForOtherDraft.enabled && rideForOtherDraft.recipient && (
+                <TouchableOpacity style={styles.rideForOtherSummaryCard} onPress={handleOpenRideForOther} activeOpacity={0.85}>
+                  <View style={styles.rideForOtherSummaryHeader}>
+                    <Text style={styles.rideForOtherSummaryTitle}>Misafir yolculuğu aktif</Text>
+                    <Text style={styles.rideForOtherSummaryAction}>Düzenle</Text>
+                  </View>
+                  <Text style={styles.rideForOtherSummaryName}>{rideForOtherDraft.recipient.name}</Text>
+                  <Text style={styles.rideForOtherSummaryPhone}>{rideForOtherDraft.recipient.phone}</Text>
+                </TouchableOpacity>
+              )}
               <View style={styles.searchInputRow}>
                 <View style={styles.searchDots}>
                   <View style={styles.dotGreen} />
@@ -2757,6 +2845,17 @@ export default function CustomerHomeScreen() {
                 {currentRideFree ? 'Promosyon ile ücretsiz sürüş' : paymentMethod === 'card' ? 'Kart ile ödeme' : 'Nakit / IBAN ile ödeme'}
               </Text>
             </View>
+            {activeRideForOther && activeRideRecipient && (
+              <View style={styles.activeRideGuestCard}>
+                <Text style={styles.activeRideGuestTitle}>Bu yolculuk {activeRideRecipient.name} için oluşturuldu</Text>
+                <Text style={styles.activeRideGuestSubtitle}>{activeRideRecipient.phone} • {activeRidePaymentMode === 'customer_app' ? 'Ücreti sen ödersin' : 'Misafir araçta öder'}</Text>
+                <View style={styles.activeRideGuestTags}>
+                  {activeRideShareBySms && <Text style={styles.activeRideGuestTag}>SMS</Text>}
+                  {activeRideShareByWhatsApp && <Text style={styles.activeRideGuestTag}>WhatsApp</Text>}
+                  {activeRideLiveTracking && <Text style={styles.activeRideGuestTag}>Canlı takip</Text>}
+                </View>
+              </View>
+            )}
             <View style={styles.driverActionRow}>
               {!customerConfirmedArrival && (
                 <TouchableOpacity style={styles.cancelBtnNew} onPress={handleCancelRide} activeOpacity={0.8}>
@@ -2839,6 +2938,17 @@ export default function CustomerHomeScreen() {
               </View>
             </View>
 
+            {activeRideForOther && activeRideRecipient && (
+              <View style={styles.activeRideGuestCard}>
+                <Text style={styles.activeRideGuestTitle}>Yolculuk misafir adına takip ediliyor</Text>
+                <Text style={styles.activeRideGuestSubtitle}>{activeRideRecipient.name} • {activeRideRecipient.phone}</Text>
+                <View style={styles.activeRideGuestTags}>
+                  {activeRideShareBySms && <Text style={styles.activeRideGuestTag}>SMS</Text>}
+                  {activeRideShareByWhatsApp && <Text style={styles.activeRideGuestTag}>WhatsApp</Text>}
+                  {activeRideLiveTracking && <Text style={styles.activeRideGuestTag}>Canlı takip</Text>}
+                </View>
+              </View>
+            )}
             <View style={styles.tripInfo}>
               <View style={styles.tripInfoItem}>
                 <Text style={styles.tripInfoLabel}>Mesafe</Text>
@@ -2925,6 +3035,12 @@ export default function CustomerHomeScreen() {
               <Text style={styles.receiptLabel}>Ödeme</Text>
               <Text style={styles.receiptValue}>{currentRideFree ? 'Ücretsiz (Promo)' : paymentMethod === 'card' ? 'Kredi/Banka Kartı' : 'Nakit'}</Text>
             </View>
+            {activeRideForOther && activeRideRecipient && (
+              <View style={styles.receiptRow}>
+                <Text style={styles.receiptLabel}>Misafir</Text>
+                <Text style={styles.receiptValue}>{activeRideRecipient.name} • {activeRideRecipient.phone}</Text>
+              </View>
+            )}
             <View style={styles.receiptDivider} />
             <View style={styles.receiptTotalRow}>
               <Text style={styles.receiptTotalLabel}>Toplam</Text>
@@ -5445,6 +5561,121 @@ const styles = StyleSheet.create({
   sheetContent: {
     paddingHorizontal: 20,
     paddingBottom: 0,
+  },
+  rideForOtherEntry: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E9EAF1',
+  },
+  rideForOtherEntryActive: {
+    backgroundColor: '#1E1671',
+    borderColor: '#1E1671',
+  },
+  rideForOtherEntryIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  rideForOtherEntryContent: {
+    flex: 1,
+  },
+  rideForOtherEntryTitle: {
+    fontSize: 15,
+    fontWeight: '800' as const,
+    color: '#1A1A2E',
+  },
+  rideForOtherEntryTitleActive: {
+    color: '#FFFFFF',
+  },
+  rideForOtherEntrySubtitle: {
+    marginTop: 3,
+    fontSize: 12,
+    color: '#7A7A93',
+  },
+  rideForOtherEntrySubtitleActive: {
+    color: 'rgba(255,255,255,0.82)',
+  },
+  rideForOtherSummaryCard: {
+    backgroundColor: '#F5F0FF',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E1D7FF',
+  },
+  rideForOtherSummaryHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    marginBottom: 6,
+  },
+  rideForOtherSummaryTitle: {
+    fontSize: 13,
+    fontWeight: '800' as const,
+    color: '#1E1671',
+  },
+  rideForOtherSummaryAction: {
+    fontSize: 12,
+    fontWeight: '700' as const,
+    color: '#6B5CE7',
+  },
+  rideForOtherSummaryName: {
+    fontSize: 15,
+    fontWeight: '700' as const,
+    color: '#1A1A2E',
+  },
+  rideForOtherSummaryPhone: {
+    marginTop: 2,
+    fontSize: 13,
+    color: '#666A7B',
+  },
+  activeRideGuestCard: {
+    width: '100%' as unknown as number,
+    backgroundColor: 'rgba(30,22,113,0.06)',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(30,22,113,0.12)',
+  },
+  activeRideGuestTitle: {
+    fontSize: 14,
+    fontWeight: '800' as const,
+    color: '#1E1671',
+  },
+  activeRideGuestSubtitle: {
+    marginTop: 4,
+    fontSize: 13,
+    color: '#646B81',
+  },
+  activeRideGuestTags: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: 8,
+    marginTop: 10,
+  },
+  activeRideGuestTag: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+    color: '#1E1671',
+    backgroundColor: '#ECE7FF',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    overflow: 'hidden' as const,
   },
   searchBarNew: {
     flexDirection: 'row' as const,

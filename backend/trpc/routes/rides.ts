@@ -69,6 +69,12 @@ export const ridesRouter = createTRPCRouter({
         isFreeRide: z.boolean(),
         city: z.string(),
         paymentMethod: z.enum(["cash", "card"]).optional(),
+        rideForOther: z.boolean().optional(),
+        recipientName: z.string().optional(),
+        recipientPhone: z.string().optional(),
+        recipientRelation: z.string().optional(),
+        guestPaymentMode: z.enum(["customer_app", "guest_in_car"]).optional(),
+        guestTrackingEnabled: z.boolean().optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -94,10 +100,16 @@ export const ridesRouter = createTRPCRouter({
         paymentMethod: input.paymentMethod ?? ("cash" as const),
         isFreeRide: input.isFreeRide,
         city: input.city,
+        rideForOther: input.rideForOther,
+        recipientName: input.recipientName,
+        recipientPhone: input.recipientPhone,
+        recipientRelation: input.recipientRelation,
+        guestPaymentMode: input.guestPaymentMode,
+        guestTrackingEnabled: input.guestTrackingEnabled,
       };
 
       await db.rides.setSync(id, ride);
-      console.log("[RIDES] Created ride:", id, "city:", input.city, "payment:", ride.paymentMethod);
+      console.log("[RIDES] Created ride:", id, "city:", input.city, "payment:", ride.paymentMethod, "forOther:", input.rideForOther ?? false);
 
       setTimeout(() => {
         const currentRide = db.rides.get(id);

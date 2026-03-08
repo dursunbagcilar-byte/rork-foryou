@@ -108,6 +108,12 @@ export interface Ride {
   paymentStatus?: "pending" | "paid" | "failed";
   isFreeRide: boolean;
   city: string;
+  rideForOther?: boolean;
+  recipientName?: string;
+  recipientPhone?: string;
+  recipientRelation?: string;
+  guestPaymentMode?: "customer_app" | "guest_in_car";
+  guestTrackingEnabled?: boolean;
   orderType?: "ride" | "business_delivery" | "custom_delivery";
   businessId?: string;
   businessName?: string;

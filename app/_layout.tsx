@@ -10,6 +10,7 @@ import { LanguageProvider } from "@/contexts/LanguageContext";
 import { NotificationProvider, useNotificationContext } from "@/contexts/NotificationContext";
 import { SecurityProvider } from "@/contexts/SecurityContext";
 import { PrivacyProvider } from "@/contexts/PrivacyContext";
+import { RideForOthersProvider } from "@/contexts/RideForOthersContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import InAppNotification from "@/components/InAppNotification";
 import { Colors } from "@/constants/colors";
@@ -140,12 +141,14 @@ function AppProviders({ queryClient }: { queryClient: QueryClient }) {
               <PrivacyProvider>
                 <SecurityProvider>
                   <AuthProvider>
-                    <LanguageProvider>
-                      <NotificationProvider>
-                        <NotificationOverlay />
-                        <RootLayoutNav />
-                      </NotificationProvider>
-                    </LanguageProvider>
+                    <RideForOthersProvider>
+                      <LanguageProvider>
+                        <NotificationProvider>
+                          <NotificationOverlay />
+                          <RootLayoutNav />
+                        </NotificationProvider>
+                      </LanguageProvider>
+                    </RideForOthersProvider>
                   </AuthProvider>
                 </SecurityProvider>
               </PrivacyProvider>

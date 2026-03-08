@@ -62,6 +62,12 @@ export interface Ride {
   paymentStatus?: 'pending' | 'paid' | 'failed';
   isFreeRide: boolean;
   city?: string;
+  rideForOther?: boolean;
+  recipientName?: string;
+  recipientPhone?: string;
+  recipientRelation?: string;
+  guestPaymentMode?: 'customer_app' | 'guest_in_car';
+  guestTrackingEnabled?: boolean;
 }
 
 export interface HeatPoint {
