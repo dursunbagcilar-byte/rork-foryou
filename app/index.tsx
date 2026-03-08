@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated, StatusBar, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Car, Wine, ArrowRight } from 'lucide-react-native';
+import { Car, Wine, ArrowRight, ShieldCheck } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
@@ -140,6 +140,15 @@ export default function WelcomeScreen() {
               <Text style={[styles.registerButtonText, { fontSize: isSmall ? 13 : 15 }]}>Şoför Kaydı</Text>
             </TouchableOpacity>
           </View>
+          <TouchableOpacity
+            style={styles.statusButton}
+            onPress={() => router.push('/system-status')}
+            activeOpacity={0.75}
+            testID="system-status-button"
+          >
+            <ShieldCheck size={16} color={Colors.dark.primary} />
+            <Text style={styles.statusButtonText}>Canlı Durumu Gör</Text>
+          </TouchableOpacity>
         </Animated.View>
       </SafeAreaView>
     </View>
@@ -228,6 +237,23 @@ const styles = StyleSheet.create({
     width: 1,
     height: 20,
     backgroundColor: Colors.dark.cardBorder,
+  },
+  statusButton: {
+    alignSelf: 'center' as const,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.dark.cardBorder,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  statusButtonText: {
+    color: Colors.dark.primary,
+    fontSize: 13,
+    fontWeight: '700' as const,
   },
 
 });

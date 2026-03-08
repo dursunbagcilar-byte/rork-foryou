@@ -80,6 +80,7 @@ function RootLayoutNav() {
       <Stack.Screen name="scheduled-ride" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       <Stack.Screen name="cancellation-policy" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       <Stack.Screen name="forgot-password" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+      <Stack.Screen name="system-status" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
       <Stack.Screen name="privacy-policy" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
       <Stack.Screen name="terms-of-service" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
