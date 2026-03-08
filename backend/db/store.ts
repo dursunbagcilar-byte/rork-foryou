@@ -26,6 +26,42 @@ let _initPromise: Promise<void> | null = null;
 let _dbWasConfigured = false;
 let _lastDbCheckTime = 0;
 
+type ResetCodeEntry = { code: string; expiresAt: number; attempts: number };
+type DriverLocationEntry = { latitude: number; longitude: number; updatedAt: number };
+
+interface StoreSnapshot {
+  version: number;
+  savedAt: string;
+  users: User[];
+  drivers: Driver[];
+  rides: Ride[];
+  ratings: Rating[];
+  driverLocations: Array<{ driverId: string } & DriverLocationEntry>;
+  passwords: Array<{ email: string; hash: string }>;
+  messages: Array<{ rideId: string; messages: Message[] }>;
+  payments: Payment[];
+  sessions: Session[];
+  pushTokens: PushToken[];
+  notifications: Notification[];
+  driverDocuments: DriverDocuments[];
+  resetCodes: Array<{ key: string; value: ResetCodeEntry }>;
+  messageReadStatus: Array<{ key: string; value: string }>;
+  scheduledRides: Array<{ id: string; ride: any }>;
+  referrals: Referral[];
+  businesses: Business[];
+  meta: {
+    driverEmailIndex: Array<{ email: string; id: string }>;
+    referralCodeIndex: Array<{ code: string; userId: string }>;
+  };
+}
+
+const SNAPSHOT_VERSION = 1;
+let _snapshotAvailable = false;
+let _snapshotLastSavedAt: string | null = null;
+let _snapshotFilePath: string | null = null;
+let _snapshotPersistTimer: ReturnType<typeof setTimeout> | null = null;
+let _snapshotPersistInFlight: Promise<void> | null = null;
+
 function cleanSurrealId(raw: any, fallbackField?: string): string {
   if (!raw) return '';
   
@@ -89,6 +125,319 @@ function stripSurrealPrefix(str: string): string {
   let cleaned = str.split(':').slice(1).join(':');
   cleaned = cleaned.replace(/^[`⟨\u27E8\u2329<]|[`⟩\u27E9\u232A>]$/g, '');
   return cleaned || str;
+}
+
+function resetInMemoryState(): void {
+  users.clear();
+  drivers.clear();
+  rides.clear();
+  ratings.clear();
+  driverLocations.clear();
+  passwords.clear();
+  messages.clear();
+  payments.clear();
+  sessions.clear();
+  pushTokens.clear();
+  notifications.clear();
+  driverDocuments.clear();
+  driverEmailIndex.clear();
+  resetCodes.clear();
+  messageReadStatus.clear();
+  scheduledRides.clear();
+  referrals.clear();
+  referralCodeIndex.clear();
+  businesses.clear();
+}
+
+function resolveSnapshotProjectId(): string {
+  try {
+    const projectId = process.env.EXPO_PUBLIC_PROJECT_ID;
+    if (typeof projectId === 'string' && projectId.trim()) {
+      return projectId.trim();
+    }
+  } catch {}
+  return 'default';
+}
+
+function getSnapshotCandidatePaths(): string[] {
+  const safeProjectId = resolveSnapshotProjectId().replace(/[^a-zA-Z0-9_-]/g, '_');
+  return [
+    `backend/db/.store-snapshot-${safeProjectId}.json`,
+    `/tmp/rork-store-${safeProjectId}.json`,
+  ];
+}
+
+async function readPortableTextFile(path: string): Promise<string | null> {
+  try {
+    const d = (globalThis as any).Deno;
+    if (d?.readTextFile) {
+      const text = await d.readTextFile(path);
+      return typeof text === 'string' ? text : null;
+    }
+  } catch {}
+  return null;
+}
+
+async function writePortableTextFile(path: string, text: string): Promise<boolean> {
+  try {
+    const d = (globalThis as any).Deno;
+    if (d?.writeTextFile) {
+      await d.writeTextFile(path, text);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+async function readStoreSnapshot(): Promise<{ path: string; text: string } | null> {
+  const candidates = _snapshotFilePath
+    ? [_snapshotFilePath, ...getSnapshotCandidatePaths().filter((path) => path !== _snapshotFilePath)]
+    : getSnapshotCandidatePaths();
+
+  for (const path of candidates) {
+    const text = await readPortableTextFile(path);
+    if (typeof text === 'string') {
+      _snapshotFilePath = path;
+      return { path, text };
+    }
+  }
+
+  return null;
+}
+
+async function writeStoreSnapshot(text: string): Promise<boolean> {
+  const candidates = _snapshotFilePath
+    ? [_snapshotFilePath, ...getSnapshotCandidatePaths().filter((path) => path !== _snapshotFilePath)]
+    : getSnapshotCandidatePaths();
+
+  for (const path of candidates) {
+    const ok = await writePortableTextFile(path, text);
+    if (ok) {
+      _snapshotFilePath = path;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hydrateSnapshot(snapshot: StoreSnapshot): void {
+  resetInMemoryState();
+
+  for (const user of snapshot.users) {
+    users.set(user.id, user);
+    if (user.referralCode) {
+      referralCodeIndex.set(user.referralCode.toUpperCase(), user.id);
+    }
+  }
+
+  for (const driver of snapshot.drivers) {
+    drivers.set(driver.id, driver);
+    if (driver.email) {
+      driverEmailIndex.set(driver.email.toLowerCase(), driver.id);
+    }
+  }
+
+  for (const ride of snapshot.rides) {
+    rides.set(ride.id, ride);
+  }
+
+  for (const rating of snapshot.ratings) {
+    ratings.set(rating.id, rating);
+  }
+
+  for (const location of snapshot.driverLocations) {
+    driverLocations.set(location.driverId, {
+      latitude: location.latitude,
+      longitude: location.longitude,
+      updatedAt: location.updatedAt,
+    });
+  }
+
+  for (const passwordEntry of snapshot.passwords) {
+    passwords.set(passwordEntry.email, passwordEntry.hash);
+  }
+
+  for (const messageEntry of snapshot.messages) {
+    messages.set(messageEntry.rideId, messageEntry.messages ?? []);
+  }
+
+  for (const payment of snapshot.payments) {
+    payments.set(payment.token, payment);
+  }
+
+  for (const session of snapshot.sessions) {
+    sessions.set(session.token, session);
+  }
+
+  for (const pushToken of snapshot.pushTokens) {
+    pushTokens.set(pushToken.userId, pushToken);
+  }
+
+  for (const notification of snapshot.notifications) {
+    notifications.set(notification.id, notification);
+  }
+
+  for (const docs of snapshot.driverDocuments) {
+    if (docs.driverId) {
+      driverDocuments.set(docs.driverId, docs);
+    }
+  }
+
+  for (const resetCodeEntry of snapshot.resetCodes) {
+    resetCodes.set(resetCodeEntry.key, resetCodeEntry.value);
+  }
+
+  for (const readStatusEntry of snapshot.messageReadStatus) {
+    messageReadStatus.set(readStatusEntry.key, readStatusEntry.value);
+  }
+
+  for (const scheduledRideEntry of snapshot.scheduledRides) {
+    scheduledRides.set(scheduledRideEntry.id, scheduledRideEntry.ride);
+  }
+
+  for (const referral of snapshot.referrals) {
+    referrals.set(referral.id, referral);
+  }
+
+  for (const business of snapshot.businesses) {
+    businesses.set(business.id, business);
+  }
+
+  for (const driverEmailEntry of snapshot.meta.driverEmailIndex) {
+    driverEmailIndex.set(driverEmailEntry.email.toLowerCase(), driverEmailEntry.id);
+  }
+
+  for (const referralCodeEntry of snapshot.meta.referralCodeIndex) {
+    referralCodeIndex.set(referralCodeEntry.code.toUpperCase(), referralCodeEntry.userId);
+  }
+}
+
+function buildStoreSnapshot(): StoreSnapshot {
+  return {
+    version: SNAPSHOT_VERSION,
+    savedAt: new Date().toISOString(),
+    users: Array.from(users.values()),
+    drivers: Array.from(drivers.values()),
+    rides: Array.from(rides.values()),
+    ratings: Array.from(ratings.values()),
+    driverLocations: Array.from(driverLocations.entries()).map(([driverId, value]) => ({
+      driverId,
+      latitude: value.latitude,
+      longitude: value.longitude,
+      updatedAt: value.updatedAt,
+    })),
+    passwords: Array.from(passwords.entries()).map(([email, hash]) => ({ email, hash })),
+    messages: Array.from(messages.entries()).map(([rideId, rideMessages]) => ({ rideId, messages: rideMessages })),
+    payments: Array.from(payments.values()),
+    sessions: Array.from(sessions.values()),
+    pushTokens: Array.from(pushTokens.values()),
+    notifications: Array.from(notifications.values()),
+    driverDocuments: Array.from(driverDocuments.values()),
+    resetCodes: Array.from(resetCodes.entries()).map(([key, value]) => ({ key, value })),
+    messageReadStatus: Array.from(messageReadStatus.entries()).map(([key, value]) => ({ key, value })),
+    scheduledRides: Array.from(scheduledRides.entries()).map(([id, ride]) => ({ id, ride })),
+    referrals: Array.from(referrals.values()),
+    businesses: Array.from(businesses.values()),
+    meta: {
+      driverEmailIndex: Array.from(driverEmailIndex.entries()).map(([email, id]) => ({ email, id })),
+      referralCodeIndex: Array.from(referralCodeIndex.entries()).map(([code, userId]) => ({ code, userId })),
+    },
+  };
+}
+
+async function persistSnapshotNow(reason: string): Promise<void> {
+  const snapshot = buildStoreSnapshot();
+  const ok = await writeStoreSnapshot(JSON.stringify(snapshot));
+
+  if (ok) {
+    _snapshotAvailable = true;
+    _snapshotLastSavedAt = snapshot.savedAt;
+    console.log('[STORE] Snapshot persisted:', reason, 'path:', _snapshotFilePath ?? 'UNKNOWN', 'users:', snapshot.users.length, 'drivers:', snapshot.drivers.length, 'rides:', snapshot.rides.length);
+    return;
+  }
+
+  console.log('[STORE] Snapshot persist skipped - writable file path not available for reason:', reason);
+}
+
+function scheduleSnapshotPersist(reason: string): void {
+  if (_snapshotPersistTimer) {
+    clearTimeout(_snapshotPersistTimer);
+  }
+
+  _snapshotPersistTimer = setTimeout(() => {
+    _snapshotPersistTimer = null;
+
+    if (_snapshotPersistInFlight) {
+      void _snapshotPersistInFlight.finally(() => {
+        scheduleSnapshotPersist(`${reason}:after-flight`);
+      });
+      return;
+    }
+
+    _snapshotPersistInFlight = persistSnapshotNow(reason).finally(() => {
+      _snapshotPersistInFlight = null;
+    });
+  }, 150);
+}
+
+async function loadFromSnapshot(): Promise<boolean> {
+  const snapshotFile = await readStoreSnapshot();
+  if (!snapshotFile) {
+    console.log('[STORE] No local snapshot found during startup');
+    return false;
+  }
+
+  try {
+    const parsed = JSON.parse(snapshotFile.text) as Partial<StoreSnapshot>;
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.users) || !Array.isArray(parsed.drivers)) {
+      console.log('[STORE] Snapshot file invalid, ignoring:', snapshotFile.path);
+      return false;
+    }
+
+    const snapshot: StoreSnapshot = {
+      version: typeof parsed.version === 'number' ? parsed.version : SNAPSHOT_VERSION,
+      savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : new Date(0).toISOString(),
+      users: Array.isArray(parsed.users) ? parsed.users as User[] : [],
+      drivers: Array.isArray(parsed.drivers) ? parsed.drivers as Driver[] : [],
+      rides: Array.isArray(parsed.rides) ? parsed.rides as Ride[] : [],
+      ratings: Array.isArray(parsed.ratings) ? parsed.ratings as Rating[] : [],
+      driverLocations: Array.isArray(parsed.driverLocations) ? parsed.driverLocations as Array<{ driverId: string } & DriverLocationEntry> : [],
+      passwords: Array.isArray(parsed.passwords) ? parsed.passwords as Array<{ email: string; hash: string }> : [],
+      messages: Array.isArray(parsed.messages) ? parsed.messages as Array<{ rideId: string; messages: Message[] }> : [],
+      payments: Array.isArray(parsed.payments) ? parsed.payments as Payment[] : [],
+      sessions: Array.isArray(parsed.sessions) ? parsed.sessions as Session[] : [],
+      pushTokens: Array.isArray(parsed.pushTokens) ? parsed.pushTokens as PushToken[] : [],
+      notifications: Array.isArray(parsed.notifications) ? parsed.notifications as Notification[] : [],
+      driverDocuments: Array.isArray(parsed.driverDocuments) ? parsed.driverDocuments as DriverDocuments[] : [],
+      resetCodes: Array.isArray(parsed.resetCodes) ? parsed.resetCodes as Array<{ key: string; value: ResetCodeEntry }> : [],
+      messageReadStatus: Array.isArray(parsed.messageReadStatus) ? parsed.messageReadStatus as Array<{ key: string; value: string }> : [],
+      scheduledRides: Array.isArray(parsed.scheduledRides) ? parsed.scheduledRides as Array<{ id: string; ride: any }> : [],
+      referrals: Array.isArray(parsed.referrals) ? parsed.referrals as Referral[] : [],
+      businesses: Array.isArray(parsed.businesses) ? parsed.businesses as Business[] : [],
+      meta: {
+        driverEmailIndex: Array.isArray(parsed.meta?.driverEmailIndex) ? parsed.meta.driverEmailIndex as Array<{ email: string; id: string }> : [],
+        referralCodeIndex: Array.isArray(parsed.meta?.referralCodeIndex) ? parsed.meta.referralCodeIndex as Array<{ code: string; userId: string }> : [],
+      },
+    };
+
+    hydrateSnapshot(snapshot);
+    _snapshotAvailable = true;
+    _snapshotLastSavedAt = snapshot.savedAt;
+    console.log('[STORE] Snapshot restored from', snapshotFile.path, 'users:', users.size, 'drivers:', drivers.size, 'rides:', rides.size);
+    return true;
+  } catch (err) {
+    console.log('[STORE] Snapshot parse error:', err);
+    return false;
+  }
+}
+
+export function getPersistentStoreStatus(): { available: boolean; lastSavedAt: string | null; filePath: string | null } {
+  return {
+    available: _snapshotAvailable,
+    lastSavedAt: _snapshotLastSavedAt,
+    filePath: _snapshotFilePath ?? getSnapshotCandidatePaths()[0] ?? null,
+  };
 }
 
 async function loadFromDb(): Promise<void> {
@@ -378,6 +727,10 @@ export async function initializeStore(): Promise<void> {
   _initPromise = (async () => {
     try {
       tryRecoverDbConfig();
+      const snapshotLoaded = await loadFromSnapshot();
+      if (snapshotLoaded) {
+        console.log('[STORE] Startup restored from local snapshot before DB sync');
+      }
       await loadFromDb();
       _dbWasConfigured = isDbConfigured();
       await seedAdminAccount();
@@ -390,12 +743,14 @@ export async function initializeStore(): Promise<void> {
           await flushPendingOps();
         }
       }
-      console.log('[STORE] Initialization complete, dbConfigured:', _dbWasConfigured, 'drivers:', drivers.size, 'users:', users.size);
+      await persistSnapshotNow('initialize-store');
+      console.log('[STORE] Initialization complete, dbConfigured:', _dbWasConfigured, 'snapshotAvailable:', _snapshotAvailable, 'drivers:', drivers.size, 'users:', users.size);
     } catch (err) {
       await seedAdminAccount();
       _initialized = true;
       _lastDbCheckTime = Date.now();
-      console.log('[STORE] Initialization failed, using in-memory:', err);
+      await persistSnapshotNow('initialize-store-fallback');
+      console.log('[STORE] Initialization failed, using in-memory snapshot fallback:', err);
     }
   })();
 
@@ -412,9 +767,12 @@ export async function bootstrapDbConfig(endpoint: string, namespace: string, tok
     _dbWasConfigured = true;
     await loadFromDb();
     await seedAdminAccount();
+    await persistSnapshotNow('bootstrap-db-config');
     console.log('[STORE] Bootstrap load complete - users:', users.size, 'drivers:', drivers.size);
     return true;
   }
+
+  await persistSnapshotNow('bootstrap-db-config-existing');
   return result;
 }
 
@@ -651,6 +1009,7 @@ export async function forceReloadStore(): Promise<void> {
     }
     
     await seedAdminAccount();
+    await persistSnapshotNow('force-reload-success');
     console.log('[STORE] Force reload complete - users:', users.size, 'drivers:', drivers.size, 'sessions:', sessions.size, 'passwords:', passwords.size);
   } catch (err) {
     console.log('[STORE] Force reload error, restoring ALL memory data:', err);
@@ -660,42 +1019,48 @@ export async function forceReloadStore(): Promise<void> {
     for (const [t, s] of memSessions) if (!sessions.has(t)) sessions.set(t, s);
     for (const [id, docs] of memDriverDocs) if (!driverDocuments.has(id)) driverDocuments.set(id, docs);
     await seedAdminAccount();
+    await persistSnapshotNow('force-reload-fallback');
   }
 }
 
 function persistInBackground(fn: () => Promise<void>): void {
+  scheduleSnapshotPersist('background-persist');
   fn().catch(err => {
     console.log('[STORE] Background persist error:', err);
   });
 }
 
 async function persistSync(fn: () => Promise<void>): Promise<void> {
-  const maxRetries = 3;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      if (!isDbConfigured()) {
-        tryRecoverDbConfig();
+  try {
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
         if (!isDbConfigured()) {
-          if (attempt < maxRetries) {
-            console.log(`[STORE] persistSync: DB not configured, waiting before retry ${attempt}/${maxRetries}...`);
-            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
-            continue;
+          tryRecoverDbConfig();
+          if (!isDbConfigured()) {
+            if (attempt < maxRetries) {
+              console.log(`[STORE] persistSync: DB not configured, waiting before retry ${attempt}/${maxRetries}...`);
+              await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+              continue;
+            }
+            console.log(`[STORE] persistSync: DB not configured after ${maxRetries} attempts, data is in memory only`);
+            return;
           }
-          console.log(`[STORE] persistSync: DB not configured after ${maxRetries} attempts, data is in memory only`);
-          return;
+        }
+        await fn();
+        if (attempt > 1) console.log(`[STORE] Sync persist succeeded on attempt ${attempt}`);
+        return;
+      } catch (err) {
+        console.log(`[STORE] Sync persist error attempt ${attempt}/${maxRetries}:`, err);
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 300 * attempt));
+        } else {
+          console.log('[STORE] Sync persist failed, data is in memory only');
         }
       }
-      await fn();
-      if (attempt > 1) console.log(`[STORE] Sync persist succeeded on attempt ${attempt}`);
-      return;
-    } catch (err) {
-      console.log(`[STORE] Sync persist error attempt ${attempt}/${maxRetries}:`, err);
-      if (attempt < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, 300 * attempt));
-      } else {
-        console.log('[STORE] Sync persist failed, data is in memory only');
-      }
     }
+  } finally {
+    await persistSnapshotNow('sync-persist');
   }
 }
 
@@ -1044,6 +1409,7 @@ export const db = {
     get: (key: string) => messageReadStatus.get(key) ?? null,
     set: (key: string, timestamp: string) => {
       messageReadStatus.set(key, timestamp);
+      scheduleSnapshotPersist('message-read-status');
     },
   },
   scheduledRides: {
@@ -1082,6 +1448,7 @@ export const db = {
     get: (code: string) => referralCodeIndex.get(code.toUpperCase()),
     set: (code: string, userId: string) => {
       referralCodeIndex.set(code.toUpperCase(), userId);
+      scheduleSnapshotPersist('referral-code-index');
     },
   },
 };

@@ -33,6 +33,8 @@ interface StatusItem {
   icon: LucideIcon;
 }
 
+type StorageMode = 'database' | 'snapshot' | 'memory';
+
 interface SystemStatusResult {
   checkedAt: string;
   baseUrl: string;
@@ -43,6 +45,30 @@ interface SystemStatusResult {
     drivers: number;
   };
   items: StatusItem[];
+}
+
+function isPersistentStorageMode(mode: StorageMode): boolean {
+  return mode === 'database' || mode === 'snapshot';
+}
+
+function getDatabaseDescription(mode: StorageMode, users: number, drivers: number, clientDbEnvConfigured: boolean, explicitError?: string): string {
+  if (mode === 'database') {
+    return `Bulut veritabanı bağlı ve çalışıyor. ${users} müşteri, ${drivers} şoför kaydı.`;
+  }
+
+  if (mode === 'snapshot') {
+    return `Kalıcı sunucu depolaması aktif. ${users} müşteri, ${drivers} şoför kaydı korunuyor.`;
+  }
+
+  if (explicitError) {
+    return `Veritabanı hatası: ${explicitError}`;
+  }
+
+  if (clientDbEnvConfigured) {
+    return 'Veritabanı bilgileri mevcut ancak bağlantı henüz kurulamadı. Yeniden deneniyor...';
+  }
+
+  return 'Kalıcı veritabanı bağlı değil. Backend şu anda geçici bellek modunda çalışıyor.';
 }
 
 function getStatusColors(status: StatusItem['status'], isDark: boolean) {
@@ -151,7 +177,8 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
   let backendLive = false;
   let databaseLive = false;
   let backendDbConfigured = false;
-  let backendStorageMode: 'database' | 'memory' = 'memory';
+  let backendPersistenceReady = false;
+  let backendStorageMode: StorageMode = 'memory';
   let users = 0;
   let drivers = 0;
   let backendMessage = baseUrl ? 'API adresi çözüldü, canlı kontrol yapılıyor...' : 'API adresi çözülemedi.';
@@ -174,7 +201,9 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
         status?: string;
         dbConfigured?: boolean;
         dbReady?: boolean;
-        storageMode?: 'database' | 'memory';
+        storageMode?: StorageMode;
+        persistentStoreAvailable?: boolean;
+        persistentStoreLastSavedAt?: string | null;
         dbMissing?: {
           endpoint?: boolean;
           namespace?: boolean;
@@ -190,20 +219,15 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
         : `Backend yanıtı: ${healthPayload?.status ?? `HTTP ${healthResponse.status}`}`;
 
       if (backendLive && healthPayload) {
-        backendDbConfigured = Boolean(healthPayload.dbConfigured || healthPayload.dbReady);
-        backendStorageMode = healthPayload.storageMode === 'database' ? 'database' : 'memory';
-        databaseLive = backendDbConfigured;
+        backendDbConfigured = Boolean(healthPayload.dbConfigured);
+        backendPersistenceReady = Boolean(healthPayload.dbReady || healthPayload.persistentStoreAvailable);
+        backendStorageMode = healthPayload.storageMode === 'database' || healthPayload.storageMode === 'snapshot'
+          ? healthPayload.storageMode
+          : 'memory';
+        databaseLive = backendPersistenceReady || isPersistentStorageMode(backendStorageMode);
         users = typeof healthPayload.users === 'number' ? healthPayload.users : 0;
         drivers = typeof healthPayload.drivers === 'number' ? healthPayload.drivers : 0;
-        if (databaseLive) {
-          dbMessage = `Veritabanı bağlı ve çalışıyor. ${users} müşteri, ${drivers} şoför kaydı.`;
-        } else if (clientDbEnvConfigured) {
-          dbMessage = 'Veritabanı bilgileri mevcut ancak bağlantı henüz kurulamadı. Yeniden deneniyor...';
-        } else if (backendStorageMode === 'memory') {
-          dbMessage = 'Kalıcı veritabanı bağlı değil. Backend şu anda geçici bellek modunda çalışıyor.';
-        } else {
-          dbMessage = 'Veritabanı henüz hazır değil.';
-        }
+        dbMessage = getDatabaseDescription(backendStorageMode, users, drivers, clientDbEnvConfigured);
       }
 
       console.log('[SystemStatus] Health check:', { backendLive, databaseLive, users, drivers });
@@ -229,30 +253,30 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
         const bootstrapPayload = await bootstrapResponse.json().catch(() => null) as {
           success?: boolean;
           configured?: boolean;
-          storageMode?: 'database' | 'memory';
+          storageMode?: StorageMode;
+          persistentStoreAvailable?: boolean;
           error?: string;
           users?: number;
           drivers?: number;
         } | null;
 
-        backendStorageMode = bootstrapPayload?.storageMode === 'database' ? 'database' : backendStorageMode;
+        backendStorageMode = bootstrapPayload?.storageMode === 'database' || bootstrapPayload?.storageMode === 'snapshot'
+          ? bootstrapPayload.storageMode
+          : backendStorageMode;
+        backendPersistenceReady = Boolean(bootstrapPayload?.success || bootstrapPayload?.configured || bootstrapPayload?.persistentStoreAvailable || isPersistentStorageMode(backendStorageMode));
 
-        if (bootstrapResponse.ok && (bootstrapPayload?.success || bootstrapPayload?.configured)) {
-          databaseLive = true;
-          users = typeof bootstrapPayload.users === 'number' ? bootstrapPayload.users : users;
-          drivers = typeof bootstrapPayload.drivers === 'number' ? bootstrapPayload.drivers : drivers;
-          dbMessage = `Veritabanı bağlı. ${users} müşteri, ${drivers} şoför kaydı bulundu.`;
-        } else if ((bootstrapPayload?.storageMode === 'memory' || backendStorageMode === 'memory') && !clientDbEnvConfigured) {
-          dbMessage = 'Kalıcı veritabanı bağlı değil. Backend şu anda geçici bellek modunda çalışıyor.';
-        } else if (bootstrapPayload?.error) {
-          dbMessage = `Veritabanı hatası: ${bootstrapPayload.error}`;
+        if (bootstrapResponse.ok) {
+          databaseLive = backendPersistenceReady;
+          users = typeof bootstrapPayload?.users === 'number' ? bootstrapPayload.users : users;
+          drivers = typeof bootstrapPayload?.drivers === 'number' ? bootstrapPayload.drivers : drivers;
+          dbMessage = getDatabaseDescription(backendStorageMode, users, drivers, clientDbEnvConfigured, bootstrapPayload?.error);
         }
         console.log('[SystemStatus] Bootstrap check:', { databaseLive, users, drivers, backendStorageMode });
       } catch (bootstrapErr) {
         console.log('[SystemStatus] Bootstrap check error:', bootstrapErr instanceof Error ? bootstrapErr.message : bootstrapErr);
         dbMessage = clientDbEnvConfigured
           ? 'Veritabanı bağlantısı zaman aşımına uğradı. Tekrar deneyin.'
-          : 'Kalıcı veritabanı bağlı değil. Backend şu anda geçici bellek modunda çalışıyor.';
+          : getDatabaseDescription(backendStorageMode, users, drivers, clientDbEnvConfigured);
       }
     }
 
@@ -271,7 +295,8 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
         const bootstrapPayload = await bootstrapResponse.json().catch(() => null) as {
           success?: boolean;
           configured?: boolean;
-          storageMode?: 'database' | 'memory';
+          storageMode?: StorageMode;
+          persistentStoreAvailable?: boolean;
           error?: string;
           users?: number;
           drivers?: number;
@@ -280,15 +305,14 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
         if (bootstrapResponse.ok) {
           backendLive = true;
           backendMessage = 'Backend aktif ve yanıt veriyor.';
-          backendStorageMode = bootstrapPayload?.storageMode === 'database' ? 'database' : 'memory';
-          databaseLive = Boolean(bootstrapPayload?.success || bootstrapPayload?.configured);
+          backendStorageMode = bootstrapPayload?.storageMode === 'database' || bootstrapPayload?.storageMode === 'snapshot'
+            ? bootstrapPayload.storageMode
+            : 'memory';
+          backendPersistenceReady = Boolean(bootstrapPayload?.success || bootstrapPayload?.configured || bootstrapPayload?.persistentStoreAvailable || isPersistentStorageMode(backendStorageMode));
+          databaseLive = backendPersistenceReady;
           users = typeof bootstrapPayload?.users === 'number' ? bootstrapPayload.users : 0;
           drivers = typeof bootstrapPayload?.drivers === 'number' ? bootstrapPayload.drivers : 0;
-          dbMessage = databaseLive
-            ? `Veritabanı bağlı. ${users} müşteri, ${drivers} şoför kaydı bulundu.`
-            : backendStorageMode === 'memory'
-              ? 'Kalıcı veritabanı bağlı değil. Backend şu anda geçici bellek modunda çalışıyor.'
-              : bootstrapPayload?.error ?? 'Veritabanı yanıt vermedi.';
+          dbMessage = getDatabaseDescription(backendStorageMode, users, drivers, clientDbEnvConfigured, bootstrapPayload?.error);
         }
       } catch (fallbackErr) {
         console.log('[SystemStatus] Fallback bootstrap error:', fallbackErr instanceof Error ? fallbackErr.message : fallbackErr);
@@ -320,7 +344,7 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
       id: 'database',
       title: 'Veritabanı',
       description: dbMessage,
-      status: databaseLive ? 'live' : (backendLive || clientDbEnvConfigured || backendDbConfigured) ? 'partial' : 'offline',
+      status: databaseLive ? 'live' : (backendLive || clientDbEnvConfigured || backendDbConfigured || backendPersistenceReady) ? 'partial' : 'offline',
       icon: Database,
     },
     {

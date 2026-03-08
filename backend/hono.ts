@@ -4,7 +4,7 @@ import { cors } from "hono/cors";
 
 import { appRouter } from "./trpc/app-router";
 import { createContext } from "./trpc/create-context";
-import { db, initializeStore, bootstrapDbConfig, reinitializeStore, forceReloadStore } from "./db/store";
+import { db, initializeStore, bootstrapDbConfig, reinitializeStore, forceReloadStore, getPersistentStoreStatus } from "./db/store";
 import { setDbConfig, isDbConfigured, getCachedDbConfig } from "./db/rork-db";
 import type { User, Driver, Business, BusinessMenuItem, Session } from "./db/types";
 import { checkRateLimit, getClientIP, isIPBlocked, trackSuspiciousActivity, sanitizeInput } from "./utils/security";
@@ -21,7 +21,7 @@ import { getWhatsAppResetFallbackMessage, sendPasswordResetWhatsAppCode } from "
 
 const app = new Hono();
 
-console.log("[SERVER] Hono v66 started - improved DB config detection");
+console.log("[SERVER] Hono v67 started - improved DB config detection + snapshot persistence");
 
 let _dbReady = false;
 let _dbInitPromise: Promise<void> | null = null;
@@ -230,6 +230,14 @@ async function ensureDbReady(dbEp?: string, dbNs?: string, dbTk?: string): Promi
   return _dbReady;
 }
 
+function getCurrentStorageMode(): 'database' | 'snapshot' | 'memory' {
+  const persistentStore = getPersistentStoreStatus();
+  if (_dbReady || isDbConfigured()) {
+    return 'database';
+  }
+  return persistentStore.available ? 'snapshot' : 'memory';
+}
+
 async function resolveValidSession(sessionToken: string): Promise<Session | null> {
   let session = db.sessions.get(sessionToken);
 
@@ -348,7 +356,19 @@ app.use("*", async (c, next) => {
   console.log(`[API] ${c.req.method} ${c.req.path} ${c.res.status} ${Date.now() - start}ms`);
 });
 
-app.get("/", (c) => c.json({ status: "ok", version: "66", dbConfigured: isDbConfigured(), dbReady: _dbReady || isDbConfigured() }));
+app.get("/", (c) => {
+  const storageMode = getCurrentStorageMode();
+  const persistentStore = getPersistentStoreStatus();
+  return c.json({
+    status: "ok",
+    version: "67",
+    dbConfigured: isDbConfigured(),
+    dbReady: storageMode !== 'memory',
+    storageMode,
+    persistentStoreAvailable: persistentStore.available,
+    persistentStoreLastSavedAt: persistentStore.lastSavedAt,
+  });
+});
 app.get("/health", async (c) => {
   const { ep, ns, tk } = resolveDbHeaders(c);
   console.log('[SERVER] Health check - ep:', ep ? ep.substring(0, 30) + '...' : 'MISSING', 'ns:', ns ? 'YES' : 'MISSING', 'tk:', tk ? 'YES' : 'MISSING');
@@ -380,15 +400,18 @@ app.get("/health", async (c) => {
   }
 
   const configured = isDbConfigured();
-  const ready = _dbReady || configured;
-  const storageMode = ready ? 'database' : 'memory';
-  console.log('[SERVER] Health response: configured:', configured, 'ready:', ready, 'storageMode:', storageMode, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
+  const persistentStore = getPersistentStoreStatus();
+  const storageMode = getCurrentStorageMode();
+  const ready = storageMode !== 'memory';
+  console.log('[SERVER] Health response: configured:', configured, 'ready:', ready, 'storageMode:', storageMode, 'snapshotAvailable:', persistentStore.available, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
   return c.json({
     status: "ok",
-    version: "66",
+    version: "67",
     dbConfigured: configured,
     dbReady: ready,
     storageMode,
+    persistentStoreAvailable: persistentStore.available,
+    persistentStoreLastSavedAt: persistentStore.lastSavedAt,
     dbMissing: (!ep || !ns || !tk) ? { endpoint: !ep, namespace: !ns, token: !tk } : undefined,
     drivers: db.drivers.getAll().length,
     users: db.users.getAll().length,
@@ -1391,10 +1414,13 @@ app.post("/bootstrap-db", async (c) => {
 
     if (!ep || !ns || !tk) {
       console.log('[SERVER] bootstrap-db skipped - DB config unavailable from body, headers, env, or cache');
+      const persistentStore = getPersistentStoreStatus();
       return c.json({
         success: false,
         configured: isDbConfigured(),
-        storageMode: (_dbReady || isDbConfigured()) ? 'database' : 'memory',
+        storageMode: getCurrentStorageMode(),
+        persistentStoreAvailable: persistentStore.available,
+        persistentStoreLastSavedAt: persistentStore.lastSavedAt,
         error: 'Database config unavailable',
         drivers: db.drivers.getAll().length,
         users: db.users.getAll().length,
@@ -1406,19 +1432,25 @@ app.post("/bootstrap-db", async (c) => {
     if (result || isDbConfigured()) {
       _dbReady = true;
     }
+    const persistentStore = getPersistentStoreStatus();
     return c.json({
       success: result || isDbConfigured(),
       configured: result || isDbConfigured(),
-      storageMode: (_dbReady || isDbConfigured()) ? 'database' : 'memory',
+      storageMode: getCurrentStorageMode(),
+      persistentStoreAvailable: persistentStore.available,
+      persistentStoreLastSavedAt: persistentStore.lastSavedAt,
       drivers: db.drivers.getAll().length,
       users: db.users.getAll().length,
     });
   } catch (err) {
     console.log('[SERVER] bootstrap-db error:', err);
+    const persistentStore = getPersistentStoreStatus();
     return c.json({
       success: false,
       configured: isDbConfigured(),
-      storageMode: (_dbReady || isDbConfigured()) ? 'database' : 'memory',
+      storageMode: getCurrentStorageMode(),
+      persistentStoreAvailable: persistentStore.available,
+      persistentStoreLastSavedAt: persistentStore.lastSavedAt,
       error: String(err),
     }, 500);
   }
