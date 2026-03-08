@@ -21,7 +21,7 @@ import { getWhatsAppResetFallbackMessage, sendPasswordResetWhatsAppCode } from "
 
 const app = new Hono();
 
-console.log("[SERVER] Hono v62 started - ensureDbReady with URL validation");
+console.log("[SERVER] Hono v64 started - improved DB init with bootstrap fallback");
 
 let _dbReady = false;
 let _dbInitPromise: Promise<void> | null = null;
@@ -203,11 +203,22 @@ async function ensureDbReady(dbEp?: string, dbNs?: string, dbTk?: string): Promi
       const initStart = Date.now();
       _dbInitPromise = (async () => {
         try {
+          setDbConfig(dbEp, dbNs, dbTk);
           await reinitializeStore();
           _dbReady = true;
           console.log('[SERVER] DB ready from headers in', Date.now() - initStart, 'ms, users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
         } catch (e) {
           console.log('[SERVER] DB init error:', e, 'elapsed:', Date.now() - initStart, 'ms');
+          setDbConfig(dbEp, dbNs, dbTk);
+          try {
+            await bootstrapDbConfig(dbEp, dbNs, dbTk);
+            _dbReady = isDbConfigured();
+            if (_dbReady) {
+              console.log('[SERVER] DB recovered via bootstrap fallback in', Date.now() - initStart, 'ms');
+            }
+          } catch (e2) {
+            console.log('[SERVER] DB bootstrap fallback also failed:', e2);
+          }
         }
       })();
       await _dbInitPromise;
@@ -281,19 +292,32 @@ app.use("*", async (c, next) => {
   console.log(`[API] ${c.req.method} ${c.req.path} ${c.res.status} ${Date.now() - start}ms`);
 });
 
-app.get("/", (c) => c.json({ status: "ok", version: "62", dbConfigured: isDbConfigured(), dbReady: _dbReady }));
+app.get("/", (c) => c.json({ status: "ok", version: "64", dbConfigured: isDbConfigured(), dbReady: _dbReady || isDbConfigured() }));
 app.get("/health", async (c) => {
   const dbEp = c.req.header('x-db-endpoint');
   const dbNs = c.req.header('x-db-namespace');
   const dbTk = c.req.header('x-db-token');
   if (dbEp && dbNs && dbTk) {
     await ensureDbReady(dbEp, dbNs, dbTk);
+    if (!_dbReady && !isDbConfigured()) {
+      try {
+        const bootstrapResult = await bootstrapDbConfig(dbEp, dbNs, dbTk);
+        if (bootstrapResult) {
+          _dbReady = true;
+          console.log('[SERVER] Health: DB bootstrapped via headers');
+        }
+      } catch (e) {
+        console.log('[SERVER] Health: bootstrap fallback failed:', e);
+      }
+    }
   }
+  const configured = isDbConfigured();
+  const ready = _dbReady || configured;
   return c.json({
     status: "ok",
-    version: "63",
-    dbConfigured: isDbConfigured(),
-    dbReady: _dbReady || isDbConfigured(),
+    version: "64",
+    dbConfigured: configured,
+    dbReady: ready,
     drivers: db.drivers.getAll().length,
     users: db.users.getAll().length,
   });
@@ -1292,8 +1316,12 @@ app.post("/bootstrap-db", async (c) => {
   try {
     const body = await c.req.json();
     if (!body.endpoint || !body.namespace || !body.token) return c.json({ success: false, error: "Missing config" }, 400);
+    setDbConfig(body.endpoint, body.namespace, body.token);
     const result = await bootstrapDbConfig(body.endpoint, body.namespace, body.token);
-    return c.json({ success: true, configured: result, drivers: db.drivers.getAll().length, users: db.users.getAll().length });
+    if (result || isDbConfigured()) {
+      _dbReady = true;
+    }
+    return c.json({ success: true, configured: result || isDbConfigured(), drivers: db.drivers.getAll().length, users: db.users.getAll().length });
   } catch (err) {
     return c.json({ success: false, error: String(err) }, 500);
   }
