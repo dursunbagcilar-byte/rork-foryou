@@ -144,14 +144,16 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
   const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE || '';
   const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN || '';
   const mapsConfigured = Boolean(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim());
-  const dbEnvConfigured = true;
+  const dbEnvConfigured = Boolean(dbEndpoint.trim() && dbNamespace.trim() && dbToken.trim());
+
+  console.log('[SystemStatus] DB env check - endpoint:', dbEndpoint ? 'YES' : 'NO', 'namespace:', dbNamespace ? 'YES' : 'NO', 'token:', dbToken ? 'YES' : 'NO', 'configured:', dbEnvConfigured);
 
   let backendLive = false;
   let databaseLive = false;
   let users = 0;
   let drivers = 0;
   let backendMessage = baseUrl ? 'API adresi çözüldü, canlı kontrol yapılıyor...' : 'API adresi çözülemedi.';
-  let dbMessage = 'Veritabanı kontrolü yapılamadı.';
+  let dbMessage = dbEnvConfigured ? 'Veritabanı kontrolü yapılıyor...' : 'Veritabanı ortam değişkenleri eksik (EXPO_PUBLIC_RORK_DB_ENDPOINT, NAMESPACE, TOKEN).';
 
   if (baseUrl) {
     const dbHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -183,9 +185,13 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
         databaseLive = Boolean(healthPayload.dbReady || healthPayload.dbConfigured);
         users = typeof healthPayload.users === 'number' ? healthPayload.users : 0;
         drivers = typeof healthPayload.drivers === 'number' ? healthPayload.drivers : 0;
-        dbMessage = databaseLive
-          ? `Veritabanı bağlı ve çalışıyor. ${users} müşteri, ${drivers} şoför kaydı.`
-          : 'Veritabanı henüz yapılandırılmamış.';
+        if (databaseLive) {
+          dbMessage = `Veritabanı bağlı ve çalışıyor. ${users} müşteri, ${drivers} şoför kaydı.`;
+        } else if (dbEnvConfigured) {
+          dbMessage = 'Veritabanı yapılandırması mevcut ancak bağlantı kurulamadı. Bootstrap deneniyor...';
+        } else {
+          dbMessage = 'Veritabanı ortam değişkenleri eksik. Lütfen EXPO_PUBLIC_RORK_DB_ENDPOINT, NAMESPACE ve TOKEN ayarlayın.';
+        }
       }
 
       console.log('[SystemStatus] Health check:', { backendLive, databaseLive, users, drivers });
@@ -287,7 +293,7 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
       id: 'database',
       title: 'Veritabanı',
       description: dbMessage,
-      status: databaseLive ? 'live' : dbEnvConfigured ? 'partial' : 'offline',
+      status: databaseLive ? 'live' : dbEnvConfigured ? 'partial' : 'offline',  
       icon: Database,
     },
     {

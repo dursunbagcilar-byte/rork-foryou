@@ -5,7 +5,7 @@ import { cors } from "hono/cors";
 import { appRouter } from "./trpc/app-router";
 import { createContext } from "./trpc/create-context";
 import { db, initializeStore, bootstrapDbConfig, reinitializeStore, forceReloadStore } from "./db/store";
-import { setDbConfig, isDbConfigured } from "./db/rork-db";
+import { setDbConfig, isDbConfigured, getCachedDbConfig } from "./db/rork-db";
 import type { User, Driver, Business, BusinessMenuItem, Session } from "./db/types";
 import { checkRateLimit, getClientIP, isIPBlocked, trackSuspiciousActivity, sanitizeInput } from "./utils/security";
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../utils/phone";
@@ -21,7 +21,7 @@ import { getWhatsAppResetFallbackMessage, sendPasswordResetWhatsAppCode } from "
 
 const app = new Hono();
 
-console.log("[SERVER] Hono v65 started - server-side DB env auto-detection");
+console.log("[SERVER] Hono v66 started - improved DB config detection");
 
 let _dbReady = false;
 let _dbInitPromise: Promise<void> | null = null;
@@ -299,11 +299,21 @@ function resolveDbHeaders(c: Context): { ep: string; ns: string; tk: string } {
   let ep = c.req.header('x-db-endpoint') || '';
   let ns = c.req.header('x-db-namespace') || '';
   let tk = c.req.header('x-db-token') || '';
+
+  if (!ep) ep = readServerEnv('EXPO_PUBLIC_RORK_DB_ENDPOINT') || readServerEnv('RORK_DB_ENDPOINT');
+  if (!ns) ns = readServerEnv('EXPO_PUBLIC_RORK_DB_NAMESPACE') || readServerEnv('RORK_DB_NAMESPACE');
+  if (!tk) tk = readServerEnv('EXPO_PUBLIC_RORK_DB_TOKEN') || readServerEnv('RORK_DB_TOKEN');
+
   if (!ep || !ns || !tk) {
-    ep = ep || readServerEnv('EXPO_PUBLIC_RORK_DB_ENDPOINT') || readServerEnv('RORK_DB_ENDPOINT');
-    ns = ns || readServerEnv('EXPO_PUBLIC_RORK_DB_NAMESPACE') || readServerEnv('RORK_DB_NAMESPACE');
-    tk = tk || readServerEnv('EXPO_PUBLIC_RORK_DB_TOKEN') || readServerEnv('RORK_DB_TOKEN');
+    const cached = getCachedDbConfig();
+    if (cached) {
+      if (!ep && cached.endpoint) ep = cached.endpoint;
+      if (!ns && cached.namespace) ns = cached.namespace;
+      if (!tk && cached.token) tk = cached.token;
+      console.log('[SERVER] resolveDbHeaders: recovered from cached config, ep:', !!ep, 'ns:', !!ns, 'tk:', !!tk);
+    }
   }
+
   return { ep, ns, tk };
 }
 
@@ -321,12 +331,17 @@ app.use("*", async (c, next) => {
   console.log(`[API] ${c.req.method} ${c.req.path} ${c.res.status} ${Date.now() - start}ms`);
 });
 
-app.get("/", (c) => c.json({ status: "ok", version: "65", dbConfigured: isDbConfigured(), dbReady: _dbReady || isDbConfigured() }));
+app.get("/", (c) => c.json({ status: "ok", version: "66", dbConfigured: isDbConfigured(), dbReady: _dbReady || isDbConfigured() }));
 app.get("/health", async (c) => {
   const { ep, ns, tk } = resolveDbHeaders(c);
+  console.log('[SERVER] Health check - ep:', ep ? ep.substring(0, 30) + '...' : 'MISSING', 'ns:', ns ? 'YES' : 'MISSING', 'tk:', tk ? 'YES' : 'MISSING');
 
   if (ep && ns && tk) {
-    await ensureDbReady(ep, ns, tk);
+    try {
+      await ensureDbReady(ep, ns, tk);
+    } catch (e) {
+      console.log('[SERVER] Health: ensureDbReady error:', e);
+    }
     if (!_dbReady && !isDbConfigured()) {
       try {
         const bootstrapResult = await bootstrapDbConfig(ep, ns, tk);
@@ -343,15 +358,19 @@ app.get("/health", async (c) => {
       _dbReady = isDbConfigured();
       console.log('[SERVER] Health: forced dbReady after setDbConfig:', _dbReady);
     }
+  } else {
+    console.log('[SERVER] Health: DB config incomplete - endpoint:', !!ep, 'namespace:', !!ns, 'token:', !!tk);
   }
+
   const configured = isDbConfigured();
   const ready = _dbReady || configured;
   console.log('[SERVER] Health response: configured:', configured, 'ready:', ready, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
   return c.json({
     status: "ok",
-    version: "65",
+    version: "66",
     dbConfigured: configured,
     dbReady: ready,
+    dbMissing: (!ep || !ns || !tk) ? { endpoint: !ep, namespace: !ns, token: !tk } : undefined,
     drivers: db.drivers.getAll().length,
     users: db.users.getAll().length,
   });

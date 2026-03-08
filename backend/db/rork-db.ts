@@ -67,7 +67,7 @@ try {
   console.log('[RORK-DB] v12 Deno env enumeration error:', e);
 }
 
-console.log('[RORK-DB] v12 init - endpoint:', STATIC_ENDPOINT ? 'YES' : 'NO', 'ns:', STATIC_NAMESPACE ? 'YES' : 'NO', 'token:', STATIC_TOKEN ? 'YES' : 'NO');
+console.log('[RORK-DB] v13 init - endpoint:', STATIC_ENDPOINT ? 'YES' : 'NO', 'ns:', STATIC_NAMESPACE ? 'YES' : 'NO', 'token:', STATIC_TOKEN ? 'YES' : 'NO');
 
 function readEnvDirect(key: string): string {
   try {
@@ -88,15 +88,22 @@ function readEnvDirect(key: string): string {
 }
 
 function getConfig() {
-  const endpoint = STATIC_ENDPOINT
+  let endpoint = STATIC_ENDPOINT
     || readEnvDirect('EXPO_PUBLIC_RORK_DB_ENDPOINT')
     || readEnvDirect('RORK_DB_ENDPOINT');
-  const namespace = STATIC_NAMESPACE
+  let namespace = STATIC_NAMESPACE
     || readEnvDirect('EXPO_PUBLIC_RORK_DB_NAMESPACE')
     || readEnvDirect('RORK_DB_NAMESPACE');
-  const token = STATIC_TOKEN
+  let token = STATIC_TOKEN
     || readEnvDirect('EXPO_PUBLIC_RORK_DB_TOKEN')
     || readEnvDirect('RORK_DB_TOKEN');
+
+  if ((!endpoint || !namespace || !token) && _cachedConfig) {
+    if (!endpoint && _cachedConfig.endpoint) endpoint = _cachedConfig.endpoint;
+    if (!namespace && _cachedConfig.namespace) namespace = _cachedConfig.namespace;
+    if (!token && _cachedConfig.token) token = _cachedConfig.token;
+  }
+
   return { endpoint, namespace, token };
 }
 
@@ -128,6 +135,9 @@ function isConfigured(): boolean {
   retryEnvVars();
   const config = getConfig();
   const ok = !!(config.endpoint && config.namespace && config.token && isValidUrl(config.endpoint));
+  if (!ok && _envRetryCount <= 3) {
+    console.log('[RORK-DB] isConfigured=false - endpoint:', config.endpoint ? 'present' : 'MISSING', 'ns:', config.namespace ? 'present' : 'MISSING', 'token:', config.token ? 'present' : 'MISSING', 'validUrl:', config.endpoint ? isValidUrl(config.endpoint) : false);
+  }
   return ok;
 }
 
