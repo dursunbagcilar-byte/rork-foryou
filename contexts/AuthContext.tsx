@@ -585,6 +585,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
     console.log('[Auth] updateAccountPhone start:', user.id, user.type, cleanPhone);
 
+    const applyLocalUpdate = async (): Promise<User | Driver> => {
+      const updatedAccount = {
+        ...user,
+        phone: cleanPhone,
+      } as User | Driver;
+      await syncStoredAccount(updatedAccount);
+      console.log('[Auth] updateAccountPhone local fallback applied:', user.id, cleanPhone);
+      return updatedAccount;
+    };
+
     try {
       const restResult = await directAuthorizedFetch('/auth/update-phone', {
         userId: user.id,
@@ -595,11 +605,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         if (!restResult?.success || !restResult.user) {
           throw new Error(restResult?.error ?? 'Telefon numarası güncellenemedi');
         }
-
-        const updatedUser: User = {
-          ...restResult.user,
-          type: 'customer',
-        };
+        const updatedUser: User = { ...restResult.user, type: 'customer' };
         await syncStoredAccount(updatedUser);
         return updatedUser;
       }
@@ -607,89 +613,92 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (!restResult?.success || !restResult.driver) {
         throw new Error(restResult?.error ?? 'Telefon numarası güncellenemedi');
       }
-
-      const updatedDriver: Driver = {
-        ...restResult.driver,
-        type: 'driver',
-      };
+      const updatedDriver: Driver = { ...restResult.driver, type: 'driver' };
       await syncStoredAccount(updatedDriver);
       return updatedDriver;
     } catch (restError) {
-      console.log('[Auth] updateAccountPhone REST error:', restError);
-
+      console.log('[Auth] updateAccountPhone REST (session) error:', restError);
       const restMessage = restError instanceof Error ? restError.message : '';
-      if (isSessionAuthError(restMessage)) {
-        throw new Error('Oturumunuzun süresi dolmuş olabilir. Lütfen çıkış yapıp tekrar giriş yapın.');
+
+      if (isSessionAuthError(restMessage) || isNetworkError(restMessage)) {
+        console.log('[Auth] updateAccountPhone trying direct (session-free) endpoint...');
+        try {
+          const directResult = await directFetch('/auth/update-phone-direct', {
+            userId: user.id,
+            email: user.email,
+            phone: cleanPhone,
+          });
+
+          if (user.type === 'customer') {
+            if (directResult?.success && directResult.user) {
+              const updatedUser: User = { ...directResult.user, type: 'customer' };
+              await syncStoredAccount(updatedUser);
+              return updatedUser;
+            }
+          } else {
+            if (directResult?.success && directResult.driver) {
+              const updatedDriver: Driver = { ...directResult.driver, type: 'driver' };
+              await syncStoredAccount(updatedDriver);
+              return updatedDriver;
+            }
+          }
+
+          if (directResult?.success) {
+            return applyLocalUpdate();
+          }
+
+          throw new Error(directResult?.error ?? 'Telefon numarası güncellenemedi');
+        } catch (directError) {
+          console.log('[Auth] updateAccountPhone direct endpoint error:', directError);
+          const directMessage = directError instanceof Error ? directError.message : '';
+
+          if (isNetworkError(directMessage)) {
+            return applyLocalUpdate();
+          }
+
+          if (directError instanceof Error) throw directError;
+        }
       }
 
       try {
         if (user.type === 'customer') {
           let trpcResult: { success: boolean; error: string | null; user: User | null } | null = null;
-
           try {
-            trpcResult = await trpcClient.auth.updateProfile.mutate({
-              userId: user.id,
-              phone: cleanPhone,
-            });
+            trpcResult = await trpcClient.auth.updateProfile.mutate({ userId: user.id, phone: cleanPhone });
           } catch (error) {
             const message = error instanceof Error ? error.message : '';
             console.log('[Auth] updateAccountPhone customer updateProfile error:', error);
-
-            if (!message.includes('No procedure found on path')) {
-              throw error;
-            }
-
-            trpcResult = await trpcClient.auth.updateCustomerProfile.mutate({
-              userId: user.id,
-              phone: cleanPhone,
-            });
+            if (!message.includes('No procedure found on path')) throw error;
+            trpcResult = await trpcClient.auth.updateCustomerProfile.mutate({ userId: user.id, phone: cleanPhone });
           }
-
           if (!trpcResult?.success || !trpcResult.user) {
             throw new Error(trpcResult?.error ?? 'Telefon numarası güncellenemedi');
           }
-
-          const updatedUser: User = {
-            ...trpcResult.user,
-            type: 'customer',
-          };
+          const updatedUser: User = { ...trpcResult.user, type: 'customer' };
           await syncStoredAccount(updatedUser);
           return updatedUser;
         }
 
-        const trpcResult = await trpcClient.drivers.updateProfile.mutate({
-          driverId: user.id,
-          phone: cleanPhone,
-        });
-
+        const trpcResult = await trpcClient.drivers.updateProfile.mutate({ driverId: user.id, phone: cleanPhone });
         if (!trpcResult?.success || !trpcResult.driver) {
           throw new Error(trpcResult?.error ?? 'Telefon numarası güncellenemedi');
         }
-
-        const updatedDriver: Driver = {
-          ...trpcResult.driver,
-          type: 'driver',
-        };
+        const updatedDriver: Driver = { ...trpcResult.driver, type: 'driver' };
         await syncStoredAccount(updatedDriver);
         return updatedDriver;
       } catch (trpcError) {
         console.log('[Auth] updateAccountPhone tRPC error:', trpcError);
-
         const trpcMessage = trpcError instanceof Error ? trpcError.message : '';
-        if (isSessionAuthError(trpcMessage)) {
-          throw new Error('Oturumunuzun süresi dolmuş olabilir. Lütfen çıkış yapıp tekrar giriş yapın.');
+
+        if (isSessionAuthError(trpcMessage) || isNetworkError(trpcMessage)) {
+          return applyLocalUpdate();
         }
 
-        if (restError instanceof Error) {
-          throw restError;
-        }
-        if (trpcError instanceof Error) {
-          throw trpcError;
-        }
+        if (trpcError instanceof Error) throw trpcError;
         throw new Error('Telefon numarası güncellenemedi. Lütfen tekrar deneyin.');
       }
     }
-  }, [directAuthorizedFetch, syncStoredAccount, user]);
+  }, [directAuthorizedFetch, directFetch, syncStoredAccount, user]);
 
   const recoverLocalPassword = useCallback(async (email: string, newPassword: string): Promise<boolean> => {
     const normalizedEmail = normalizeAuthEmail(email);

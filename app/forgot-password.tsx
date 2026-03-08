@@ -246,23 +246,26 @@ export default function ForgotPasswordScreen() {
           ? getWhatsAppDeliveryNote(result.maskedPhone ?? null)
           : getWhatsAppSupportDeliveryNote(result.maskedPhone ?? null)));
         setEmailSentInfo(result.emailSent !== false);
-        animateTransition(() => setStep('code'));
-        console.log('[ForgotPassword] Code sent, deliveryChannel:', nextDeliveryChannel, 'emailSent:', result.emailSent, 'whatsappDeliveryMode:', nextWhatsAppDeliveryMode);
+
         if (nextDeliveryChannel === 'whatsapp' && nextWhatsAppDeliveryMode === 'support') {
+          const localHandled = await tryLocalRecoveryFallback(result.error ?? 'E-posta servisi kullanılamıyor');
+          if (localHandled) return;
+          animateTransition(() => setStep('code'));
           const supportReason = result.error ?? 'Kod talebiniz WhatsApp destek hattına hazırlandı. Sohbeti açıp mesajı gönderin.';
           setDeliveryIssue(supportReason);
           promptWhatsAppSupport(supportReason, result.whatsappUrl ?? null);
           return;
         }
+
+        animateTransition(() => setStep('code'));
+        console.log('[ForgotPassword] Code sent, deliveryChannel:', nextDeliveryChannel, 'emailSent:', result.emailSent, 'whatsappDeliveryMode:', nextWhatsAppDeliveryMode);
         setDeliveryIssue(null);
         if (nextDeliveryChannel === 'whatsapp') {
           Alert.alert('Başarılı', 'Doğrulama kodu kayıtlı WhatsApp hesabınıza gönderildi.');
         }
       } else {
         const resultError = result.error ?? 'Bir hata oluştu';
-        const handledLocally = resultError.toLowerCase().includes('kayıtlı hesap bulunamadı')
-          ? await tryLocalRecoveryFallback(resultError)
-          : false;
+        const handledLocally = await tryLocalRecoveryFallback(resultError);
         if (handledLocally) {
           return;
         }
@@ -283,7 +286,10 @@ export default function ForgotPasswordScreen() {
       }
       const lowerSendErr = sendErr.toLowerCase();
       if (lowerSendErr.includes('e-posta servisi') || lowerSendErr.includes('e-posta gönderilemedi')) {
-        promptWhatsAppSupport(sendErr);
+        const handledByLocal = await tryLocalRecoveryFallback(sendErr);
+        if (!handledByLocal) {
+          promptWhatsAppSupport(sendErr);
+        }
         return;
       }
       Alert.alert('Hata', sendErr);

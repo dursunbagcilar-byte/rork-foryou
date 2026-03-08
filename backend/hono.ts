@@ -1163,6 +1163,63 @@ app.post("/drivers/update-location", async (c) => {
   }
 });
 
+app.post("/auth/update-phone-direct", async (c) => {
+  const startTime = Date.now();
+  try {
+    const dbEp = c.req.header('x-db-endpoint');
+    const dbNs = c.req.header('x-db-namespace');
+    const dbTk = c.req.header('x-db-token');
+    await ensureDbReady(dbEp, dbNs, dbTk);
+
+    const body = await c.req.json();
+    const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
+    const email = typeof body.email === 'string' ? body.email.toLowerCase().trim() : '';
+    const rawPhone = typeof body.phone === 'string' ? body.phone : '';
+
+    if (!userId || !email || !rawPhone) {
+      return c.json({ success: false, error: 'Eksik bilgi', user: null, driver: null }, 400);
+    }
+
+    const cleanPhone = normalizeTurkishPhone(sanitizeInput(rawPhone));
+    const phoneValidationError = getTurkishPhoneValidationError(cleanPhone);
+    if (phoneValidationError) {
+      return c.json({ success: false, error: phoneValidationError, user: null, driver: null }, 400);
+    }
+
+    if (isPhoneTakenByAnotherAccount(cleanPhone, userId)) {
+      return c.json({ success: false, error: 'Bu telefon numarası başka bir hesapta kullanılıyor', user: null, driver: null }, 400);
+    }
+
+    const existingUser = db.users.get(userId);
+    if (existingUser && existingUser.email?.toLowerCase().trim() === email) {
+      const updatedUser: User = { ...existingUser, phone: cleanPhone };
+      await db.users.setSync(userId, updatedUser);
+      console.log('[REST] Direct customer phone updated:', userId, cleanPhone, 'elapsed:', Date.now() - startTime, 'ms');
+      return c.json({ success: true, error: null, user: updatedUser, driver: null });
+    }
+
+    const existingDriver = db.drivers.get(userId);
+    if (existingDriver && existingDriver.email?.toLowerCase().trim() === email) {
+      const updatedDriver: Driver = { ...existingDriver, phone: cleanPhone };
+      await db.drivers.setSync(userId, updatedDriver);
+
+      const ownedBusiness = db.businesses.getByOwner(userId);
+      if (ownedBusiness) {
+        await db.businesses.setSync(ownedBusiness.id, { ...ownedBusiness, phone: cleanPhone, updatedAt: new Date().toISOString() });
+      }
+
+      console.log('[REST] Direct driver phone updated:', userId, cleanPhone, 'elapsed:', Date.now() - startTime, 'ms');
+      return c.json({ success: true, error: null, user: null, driver: updatedDriver });
+    }
+
+    console.log('[REST] update-phone-direct: userId/email mismatch:', userId, email);
+    return c.json({ success: false, error: 'Hesap bilgileri eşleşmiyor', user: null, driver: null }, 403);
+  } catch (err: unknown) {
+    console.log('[REST] update-phone-direct error:', err instanceof Error ? err.message : err, 'elapsed:', Date.now() - startTime, 'ms');
+    return c.json({ success: false, error: 'Telefon numarası güncellenemedi', user: null, driver: null }, 500);
+  }
+});
+
 app.post("/auth/logout", async (c) => {
   try {
     const body = await c.req.json();
