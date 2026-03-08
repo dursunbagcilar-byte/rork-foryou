@@ -144,16 +144,17 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
   const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE || '';
   const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN || '';
   const mapsConfigured = Boolean(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim());
-  const dbEnvConfigured = Boolean(dbEndpoint.trim() && dbNamespace.trim() && dbToken.trim());
+  const clientDbEnvConfigured = Boolean(dbEndpoint.trim() && dbNamespace.trim() && dbToken.trim());
 
-  console.log('[SystemStatus] DB env check - endpoint:', dbEndpoint ? 'YES' : 'NO', 'namespace:', dbNamespace ? 'YES' : 'NO', 'token:', dbToken ? 'YES' : 'NO', 'configured:', dbEnvConfigured);
+  console.log('[SystemStatus] Client DB env check - endpoint:', dbEndpoint ? 'YES' : 'NO', 'namespace:', dbNamespace ? 'YES' : 'NO', 'token:', dbToken ? 'YES' : 'NO', 'configured:', clientDbEnvConfigured);
 
   let backendLive = false;
   let databaseLive = false;
+  let backendDbConfigured = false;
   let users = 0;
   let drivers = 0;
   let backendMessage = baseUrl ? 'API adresi çözüldü, canlı kontrol yapılıyor...' : 'API adresi çözülemedi.';
-  let dbMessage = dbEnvConfigured ? 'Veritabanı kontrolü yapılıyor...' : 'Veritabanı ortam değişkenleri eksik (EXPO_PUBLIC_RORK_DB_ENDPOINT, NAMESPACE, TOKEN).';
+  let dbMessage = 'Veritabanı durumu kontrol ediliyor...';
 
   if (baseUrl) {
     const dbHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -172,6 +173,11 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
         status?: string;
         dbConfigured?: boolean;
         dbReady?: boolean;
+        dbMissing?: {
+          endpoint?: boolean;
+          namespace?: boolean;
+          token?: boolean;
+        };
         drivers?: number;
         users?: number;
       } | null;
@@ -182,15 +188,25 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
         : `Backend yanıtı: ${healthPayload?.status ?? `HTTP ${healthResponse.status}`}`;
 
       if (backendLive && healthPayload) {
-        databaseLive = Boolean(healthPayload.dbReady || healthPayload.dbConfigured);
+        backendDbConfigured = Boolean(healthPayload.dbConfigured || healthPayload.dbReady);
+        databaseLive = backendDbConfigured;
         users = typeof healthPayload.users === 'number' ? healthPayload.users : 0;
         drivers = typeof healthPayload.drivers === 'number' ? healthPayload.drivers : 0;
         if (databaseLive) {
           dbMessage = `Veritabanı bağlı ve çalışıyor. ${users} müşteri, ${drivers} şoför kaydı.`;
-        } else if (dbEnvConfigured) {
-          dbMessage = 'Veritabanı yapılandırması mevcut ancak bağlantı kurulamadı. Bootstrap deneniyor...';
+        } else if (clientDbEnvConfigured) {
+          dbMessage = 'Veritabanı bilgileri mevcut ancak bağlantı henüz kurulamadı. Yeniden deneniyor...';
+        } else if (healthPayload.dbMissing) {
+          const missingParts = [
+            healthPayload.dbMissing.endpoint ? 'endpoint' : null,
+            healthPayload.dbMissing.namespace ? 'namespace' : null,
+            healthPayload.dbMissing.token ? 'token' : null,
+          ].filter((value): value is string => Boolean(value));
+          dbMessage = missingParts.length > 0
+            ? `Backend veritabanı ayarları eksik: ${missingParts.join(', ')}.`
+            : 'Veritabanı henüz yapılandırılmamış görünüyor.';
         } else {
-          dbMessage = 'Veritabanı ortam değişkenleri eksik. Lütfen EXPO_PUBLIC_RORK_DB_ENDPOINT, NAMESPACE ve TOKEN ayarlayın.';
+          dbMessage = 'Veritabanı henüz hazır değil.';
         }
       }
 
@@ -200,7 +216,7 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
       backendMessage = 'Backend bağlantısı kurulamadı. Sunucu uyanıyor olabilir.';
     }
 
-    if (backendLive && !databaseLive && dbEnvConfigured) {
+    if (backendLive && !databaseLive && clientDbEnvConfigured) {
       try {
         const bootstrapResponse = await fetchWithRetry(`${baseUrl}/api/bootstrap-db`, {
           method: 'POST',
@@ -234,7 +250,7 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
       }
     }
 
-    if (!backendLive && dbEnvConfigured) {
+    if (!backendLive && clientDbEnvConfigured) {
       try {
         const bootstrapResponse = await fetchWithRetry(`${baseUrl}/api/bootstrap-db`, {
           method: 'POST',
@@ -293,7 +309,7 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
       id: 'database',
       title: 'Veritabanı',
       description: dbMessage,
-      status: databaseLive ? 'live' : dbEnvConfigured ? 'partial' : 'offline',  
+      status: databaseLive ? 'live' : (backendLive || clientDbEnvConfigured || backendDbConfigured) ? 'partial' : 'offline',
       icon: Database,
     },
     {
