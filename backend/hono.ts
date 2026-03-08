@@ -133,6 +133,152 @@ function buildResetLookupKey(identifier: string): string {
   return `resetcode_${resolved.normalizedIdentifier}`;
 }
 
+interface LoadedAuthAccount {
+  emailKey: string;
+  user: User | null;
+  driver: Driver | null;
+  passwordHash: string | null;
+  source: 'memory' | 'reload' | 'direct-db';
+}
+
+function buildPasswordRecordId(email: string): string {
+  return email.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+function buildSessionRecordId(token: string): string {
+  return token.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+async function loadAuthAccountByEmail(email: string): Promise<LoadedAuthAccount> {
+  const cleanEmail = email.toLowerCase().trim();
+  let user = db.users.getByEmail(cleanEmail) ?? null;
+  let driver = db.drivers.getByEmail(cleanEmail) ?? null;
+  let passwordHash = db.passwords.get(cleanEmail) ?? null;
+  let source: LoadedAuthAccount['source'] = 'memory';
+
+  console.log('[SERVER] loadAuthAccountByEmail initial:', cleanEmail, 'hasPassword:', !!passwordHash, 'user:', !!user, 'driver:', !!driver);
+
+  if (passwordHash && (user || driver)) {
+    return { emailKey: cleanEmail, user, driver, passwordHash, source };
+  }
+
+  try {
+    await initializeStore();
+    await forceReloadStore();
+    user = db.users.getByEmail(cleanEmail) ?? user;
+    driver = db.drivers.getByEmail(cleanEmail) ?? driver;
+    passwordHash = db.passwords.get(cleanEmail) ?? passwordHash;
+    source = 'reload';
+    console.log('[SERVER] loadAuthAccountByEmail after reload:', cleanEmail, 'hasPassword:', !!passwordHash, 'user:', !!user, 'driver:', !!driver);
+  } catch (error) {
+    console.log('[SERVER] loadAuthAccountByEmail reload error:', error);
+  }
+
+  if (passwordHash && (user || driver)) {
+    return { emailKey: cleanEmail, user, driver, passwordHash, source };
+  }
+
+  try {
+    const { dbFindByEmail, dbSearchPasswordByEmail } = await import('./db/rork-db');
+
+    if (!user && !driver) {
+      const dbUser = await dbFindByEmail<Record<string, unknown>>('users', cleanEmail);
+      if (dbUser) {
+        const userId = dbUser.rorkId || dbUser._originalId || dbUser.id;
+        if (typeof userId === 'string') {
+          const hydratedUser = { ...dbUser, id: userId } as User;
+          user = hydratedUser;
+          db.users.set(userId, hydratedUser);
+        }
+      }
+    }
+
+    if (!user && !driver) {
+      const dbDriver = await dbFindByEmail<Record<string, unknown>>('drivers', cleanEmail);
+      if (dbDriver) {
+        const driverId = dbDriver.rorkId || dbDriver._originalId || dbDriver.id;
+        if (typeof driverId === 'string') {
+          const hydratedDriver = { ...dbDriver, id: driverId } as Driver;
+          driver = hydratedDriver;
+          db.drivers.set(driverId, hydratedDriver);
+        }
+      }
+    }
+
+    if (!passwordHash) {
+      const passwordResult = await dbSearchPasswordByEmail(cleanEmail);
+      if (passwordResult?.hash) {
+        passwordHash = passwordResult.hash;
+        db.passwords.set(cleanEmail, passwordResult.hash);
+      }
+    }
+
+    source = 'direct-db';
+    console.log('[SERVER] loadAuthAccountByEmail direct-db:', cleanEmail, 'hasPassword:', !!passwordHash, 'user:', !!user, 'driver:', !!driver);
+  } catch (error) {
+    console.log('[SERVER] loadAuthAccountByEmail direct-db error:', error);
+  }
+
+  return { emailKey: cleanEmail, user, driver, passwordHash, source };
+}
+
+async function persistPasswordHashDirect(email: string, passwordHash: string): Promise<void> {
+  if (!isDbConfigured()) {
+    console.log('[SERVER] persistPasswordHashDirect skipped - db not configured for:', email);
+    return;
+  }
+
+  try {
+    const { dbDirectUpsert } = await import('./db/rork-db');
+    const ok = await dbDirectUpsert('passwords', buildPasswordRecordId(email), {
+      email,
+      hash: passwordHash,
+      _originalEmail: email,
+    });
+    console.log('[SERVER] persistPasswordHashDirect result:', email, ok);
+  } catch (error) {
+    console.log('[SERVER] persistPasswordHashDirect error:', error);
+  }
+}
+
+async function persistSessionDirect(session: Session): Promise<void> {
+  if (!isDbConfigured()) {
+    console.log('[SERVER] persistSessionDirect skipped - db not configured for:', session.userId);
+    return;
+  }
+
+  try {
+    const { dbDirectUpsert } = await import('./db/rork-db');
+    const ok = await dbDirectUpsert('sessions', buildSessionRecordId(session.token), {
+      ...session,
+      _originalToken: session.token,
+    });
+    console.log('[SERVER] persistSessionDirect result:', session.userId, ok);
+  } catch (error) {
+    console.log('[SERVER] persistSessionDirect error:', error);
+  }
+}
+
+async function persistAccountDirect(account: User | Driver, accountType: 'customer' | 'driver'): Promise<void> {
+  if (!isDbConfigured()) {
+    console.log('[SERVER] persistAccountDirect skipped - db not configured for:', account.id);
+    return;
+  }
+
+  try {
+    const { dbDirectUpsert } = await import('./db/rork-db');
+    const table = accountType === 'driver' ? 'drivers' : 'users';
+    const ok = await dbDirectUpsert(table, account.id, {
+      ...account,
+      _originalId: account.id,
+      rorkId: account.id,
+    });
+    console.log('[SERVER] persistAccountDirect result:', account.id, accountType, ok);
+  } catch (error) {
+    console.log('[SERVER] persistAccountDirect error:', error);
+  }
+}
+
 function normalizeBusinessWebsite(url: string): string {
   const trimmed = url.trim();
   if (!trimmed) return '';
@@ -431,7 +577,7 @@ app.post("/auth/register-customer", async (c) => {
     const { sanitizeInput, validateEmail, validatePassword, hashPassword, generateSecureToken } = await import('./utils/security');
 
     const cleanName = sanitizeInput(body.name || '');
-    const cleanPhone = sanitizeInput(body.phone || '');
+    const cleanPhone = normalizeTurkishPhone(body.phone || '');
     const cleanEmail = (body.email || '').toLowerCase().trim();
 
     if (!cleanName || !cleanPhone || !cleanEmail || !body.password || !body.gender || !body.city || !body.district) {
@@ -441,9 +587,17 @@ app.post("/auth/register-customer", async (c) => {
     const pwdCheck = validatePassword(body.password);
     if (!pwdCheck.valid) return c.json({ success: false, error: pwdCheck.reason, user: null, token: null });
 
+    const phoneValidationError = getTurkishPhoneValidationError(cleanPhone);
+    if (phoneValidationError) {
+      return c.json({ success: false, error: phoneValidationError, user: null, token: null });
+    }
+
     const existingUser = db.users.getByEmail(cleanEmail);
     const existingDriver = db.drivers.getByEmail(cleanEmail);
     if (existingUser || existingDriver) return c.json({ success: false, error: 'Bu e-posta zaten kayıtlı', user: null, token: null });
+    if (isPhoneTakenByAnotherAccount(cleanPhone)) {
+      return c.json({ success: false, error: 'Bu telefon numarası başka bir hesapta kullanılıyor', user: null, token: null });
+    }
 
     const id = 'c_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -492,7 +646,17 @@ app.post("/auth/register-customer", async (c) => {
     const sessionToken = generateSecureToken(64);
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    await db.sessions.setSync(sessionToken, { token: sessionToken, userId: id, userType: 'customer', createdAt: now.toISOString(), expiresAt: expiresAt.toISOString() });
+    const sessionRecord: Session = {
+      token: sessionToken,
+      userId: id,
+      userType: 'customer',
+      createdAt: now.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    };
+    await db.sessions.setSync(sessionToken, sessionRecord);
+    await persistAccountDirect(user, 'customer');
+    await persistPasswordHashDirect(cleanEmail, hashedPwd);
+    await persistSessionDirect(sessionRecord);
 
     if (isDbConfigured()) {
       try {
@@ -531,21 +695,30 @@ app.post("/auth/register-driver", async (c) => {
 
     const cleanName = sanitizeInput(body.name || '');
     const cleanEmail = (body.email || '').toLowerCase().trim();
+    const cleanPhone = normalizeTurkishPhone(body.phone || '');
 
-    if (!cleanName || !cleanEmail || !body.password || !body.vehicleModel || !body.vehicleColor || !body.city || !body.district) {
+    if (!cleanName || !cleanEmail || !cleanPhone || !body.password || !body.vehicleModel || !body.vehicleColor || !body.city || !body.district) {
       return c.json({ success: false, error: 'Tüm alanlar zorunludur', driver: null, token: null });
     }
     if (!validateEmail(cleanEmail)) return c.json({ success: false, error: 'Geçersiz e-posta adresi', driver: null, token: null });
     const pwdCheck = validatePassword(body.password);
     if (!pwdCheck.valid) return c.json({ success: false, error: pwdCheck.reason, driver: null, token: null });
 
+    const phoneValidationError = getTurkishPhoneValidationError(cleanPhone);
+    if (phoneValidationError) {
+      return c.json({ success: false, error: phoneValidationError, driver: null, token: null });
+    }
+
     const existingDriver = db.drivers.getByEmail(cleanEmail);
     const existingUser = db.users.getByEmail(cleanEmail);
     if (existingDriver || existingUser) return c.json({ success: false, error: 'Bu e-posta zaten kayıtlı', driver: null, token: null });
+    if (isPhoneTakenByAnotherAccount(cleanPhone)) {
+      return c.json({ success: false, error: 'Bu telefon numarası başka bir hesapta kullanılıyor', driver: null, token: null });
+    }
 
     const id = 'd_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
     const driver = {
-      id, name: cleanName, phone: sanitizeInput(body.phone || ''), email: cleanEmail,
+      id, name: cleanName, phone: cleanPhone, email: cleanEmail,
       type: 'driver' as const, driverCategory: body.driverCategory || 'driver',
       vehiclePlate: body.vehiclePlate ? sanitizeInput(body.vehiclePlate).toUpperCase() : '',
       vehicleModel: sanitizeInput(body.vehicleModel), vehicleColor: sanitizeInput(body.vehicleColor),
@@ -577,7 +750,17 @@ app.post("/auth/register-driver", async (c) => {
     const sessionToken = generateSecureToken(64);
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    await db.sessions.setSync(sessionToken, { token: sessionToken, userId: id, userType: 'driver', createdAt: now.toISOString(), expiresAt: expiresAt.toISOString() });
+    const sessionRecord: Session = {
+      token: sessionToken,
+      userId: id,
+      userType: 'driver',
+      createdAt: now.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    };
+    await db.sessions.setSync(sessionToken, sessionRecord);
+    await persistAccountDirect(driver, 'driver');
+    await persistPasswordHashDirect(cleanEmail, hashedPwd);
+    await persistSessionDirect(sessionRecord);
 
     if (isDbConfigured()) {
       try {
@@ -622,44 +805,18 @@ app.post("/auth/login", async (c) => {
       return c.json({ success: false, error: `Çok fazla başarısız giriş. ${mins} dk sonra deneyin.`, user: null, token: null });
     }
 
-    let storedHash = db.passwords.get(cleanEmail);
-    let user = db.users.getByEmail(cleanEmail);
-    let driver = db.drivers.getByEmail(cleanEmail);
+    const { passwordHash: storedHash, user, driver, source } = await loadAuthAccountByEmail(cleanEmail);
+    console.log('[REST] login account resolution:', cleanEmail, 'source:', source, 'hasHash:', !!storedHash, 'user:', !!user, 'driver:', !!driver);
 
-    if (!storedHash || (!user && !driver)) {
-      try {
-        const { initializeStore, forceReloadStore } = await import('./db/store');
-        await initializeStore();
-        await forceReloadStore();
-        storedHash = db.passwords.get(cleanEmail);
-        user = db.users.getByEmail(cleanEmail);
-        driver = db.drivers.getByEmail(cleanEmail);
-        console.log('[REST] login after initializeStore+forceReload:', cleanEmail, 'hasHash:', !!storedHash, 'user:', !!user, 'driver:', !!driver);
-      } catch (e) { console.log('[REST] init err:', e); }
-    }
-
-    if (!storedHash || (!user && !driver)) {
-      try {
-        const { dbSearchPasswordByEmail, dbFindByEmail } = await import('./db/rork-db');
-        if (!storedHash) {
-          const r = await dbSearchPasswordByEmail(cleanEmail);
-          if (r?.hash) { storedHash = r.hash; db.passwords.set(cleanEmail, r.hash); }
-        }
-        if (!user && !driver) {
-          const dbU = await dbFindByEmail<any>('users', cleanEmail);
-          if (dbU) { const uid = dbU.rorkId || dbU._originalId || dbU.id; if (uid) { dbU.id = uid; user = dbU; db.users.set(uid, dbU); } }
-          if (!user) {
-            const dbD = await dbFindByEmail<any>('drivers', cleanEmail);
-            if (dbD) { const did = dbD.rorkId || dbD._originalId || dbD.id; if (did) { dbD.id = did; driver = dbD; db.drivers.set(did, dbD); } }
-          }
-        }
-      } catch (e) { console.log('[REST] db lookup err:', e); }
+    if (!user && !driver) {
+      recordLoginFailure(cleanEmail);
+      return c.json({ success: false, error: 'Kullanıcı bulunamadı. Lütfen kayıt olduğunuz e-posta adresini kontrol edin.', user: null, token: null });
     }
 
     if (!storedHash) {
       recordLoginFailure(cleanEmail);
-      console.log('[REST] login missing password hash after all recovery attempts for:', cleanEmail, 'user:', !!user, 'driver:', !!driver, 'dbReady:', _dbReady);
-      return c.json({ success: false, error: "Kullanıcı bulunamadı. 'Şifremi Unuttum' ile yeni şifre oluşturun.", user: null, token: null });
+      console.log('[REST] login missing password hash for existing account:', cleanEmail, 'user:', !!user, 'driver:', !!driver, 'source:', source, 'dbReady:', _dbReady);
+      return c.json({ success: false, error: 'Hesap bulundu ancak şifre kaydı eksik. Lütfen Şifremi Unuttum ile yeni şifre oluşturun.', user: null, token: null });
     }
 
     const match = await verifyPassword(body.password, storedHash);
@@ -678,7 +835,15 @@ app.post("/auth/login", async (c) => {
     const sessionToken = generateSecureToken(64);
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    await db.sessions.setSync(sessionToken, { token: sessionToken, userId: account.id, userType: accountType, createdAt: now.toISOString(), expiresAt: expiresAt.toISOString() });
+    const sessionRecord: Session = {
+      token: sessionToken,
+      userId: account.id,
+      userType: accountType,
+      createdAt: now.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    };
+    await db.sessions.setSync(sessionToken, sessionRecord);
+    await persistSessionDirect(sessionRecord);
 
     console.log('[REST] Login OK:', account.id, accountType, 'dbConfigured:', isDbConfigured(), 'dbReady:', _dbReady);
     return c.json({ success: true, error: null, user: { ...account, type: accountType }, token: sessionToken });
@@ -771,7 +936,7 @@ app.post("/auth/send-reset-code", async (c) => {
       }
     }
 
-    if (!account || !accountEmail || !hasPassword) {
+    if (!account || !accountEmail) {
       recordLoginFailure(resetLookupKey);
       return c.json({
         success: false,
@@ -780,6 +945,8 @@ app.post("/auth/send-reset-code", async (c) => {
           : 'Bu e-posta adresiyle kayıtlı hesap bulunamadı',
       });
     }
+
+    console.log('[REST] send-reset-code final account state:', accountEmail, 'hasPassword:', !!hasPassword, 'accountType:', account.type);
 
     const accountName = account.name || accountEmail.split('@')[0];
     const code = generateResetCode();
@@ -1015,6 +1182,7 @@ app.post("/auth/reset-password", async (c) => {
 
     const hashedPwd = await hashPassword(newPassword);
     await db.passwords.setSync(accountEmail, hashedPwd);
+    await persistPasswordHashDirect(accountEmail, hashedPwd);
     db.resetCodes.delete(accountEmail);
 
     console.log('[REST] Password reset OK for:', accountEmail);
