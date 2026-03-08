@@ -21,7 +21,7 @@ import { getWhatsAppResetFallbackMessage, sendPasswordResetWhatsAppCode } from "
 
 const app = new Hono();
 
-console.log("[SERVER] Hono v64 started - improved DB init with bootstrap fallback");
+console.log("[SERVER] Hono v65 started - server-side DB env auto-detection");
 
 let _dbReady = false;
 let _dbInitPromise: Promise<void> | null = null;
@@ -278,11 +278,40 @@ app.use("*", async (c, next) => {
   await next();
 });
 
+function readServerEnv(key: string): string {
+  try {
+    const d = (globalThis as any).Deno;
+    if (d?.env?.get) {
+      const val = d.env.get(key);
+      if (val) return val;
+    }
+  } catch {}
+  try {
+    if (typeof process !== 'undefined' && process.env) {
+      const val = (process.env as Record<string, string | undefined>)[key];
+      if (val) return val;
+    }
+  } catch {}
+  return '';
+}
+
+function resolveDbHeaders(c: Context): { ep: string; ns: string; tk: string } {
+  let ep = c.req.header('x-db-endpoint') || '';
+  let ns = c.req.header('x-db-namespace') || '';
+  let tk = c.req.header('x-db-token') || '';
+  if (!ep || !ns || !tk) {
+    ep = ep || readServerEnv('EXPO_PUBLIC_RORK_DB_ENDPOINT') || readServerEnv('RORK_DB_ENDPOINT');
+    ns = ns || readServerEnv('EXPO_PUBLIC_RORK_DB_NAMESPACE') || readServerEnv('RORK_DB_NAMESPACE');
+    tk = tk || readServerEnv('EXPO_PUBLIC_RORK_DB_TOKEN') || readServerEnv('RORK_DB_TOKEN');
+  }
+  return { ep, ns, tk };
+}
+
 app.use("*", async (c, next) => {
-  const dbEp = c.req.header('x-db-endpoint');
-  const dbNs = c.req.header('x-db-namespace');
-  const dbTk = c.req.header('x-db-token');
-  await ensureDbReady(dbEp, dbNs, dbTk);
+  const { ep, ns, tk } = resolveDbHeaders(c);
+  if (ep && ns && tk) {
+    await ensureDbReady(ep, ns, tk);
+  }
   await next();
 });
 
@@ -292,30 +321,35 @@ app.use("*", async (c, next) => {
   console.log(`[API] ${c.req.method} ${c.req.path} ${c.res.status} ${Date.now() - start}ms`);
 });
 
-app.get("/", (c) => c.json({ status: "ok", version: "64", dbConfigured: isDbConfigured(), dbReady: _dbReady || isDbConfigured() }));
+app.get("/", (c) => c.json({ status: "ok", version: "65", dbConfigured: isDbConfigured(), dbReady: _dbReady || isDbConfigured() }));
 app.get("/health", async (c) => {
-  const dbEp = c.req.header('x-db-endpoint');
-  const dbNs = c.req.header('x-db-namespace');
-  const dbTk = c.req.header('x-db-token');
-  if (dbEp && dbNs && dbTk) {
-    await ensureDbReady(dbEp, dbNs, dbTk);
+  const { ep, ns, tk } = resolveDbHeaders(c);
+
+  if (ep && ns && tk) {
+    await ensureDbReady(ep, ns, tk);
     if (!_dbReady && !isDbConfigured()) {
       try {
-        const bootstrapResult = await bootstrapDbConfig(dbEp, dbNs, dbTk);
+        const bootstrapResult = await bootstrapDbConfig(ep, ns, tk);
         if (bootstrapResult) {
           _dbReady = true;
-          console.log('[SERVER] Health: DB bootstrapped via headers');
+          console.log('[SERVER] Health: DB bootstrapped');
         }
       } catch (e) {
         console.log('[SERVER] Health: bootstrap fallback failed:', e);
       }
     }
+    if (!_dbReady) {
+      setDbConfig(ep, ns, tk);
+      _dbReady = isDbConfigured();
+      console.log('[SERVER] Health: forced dbReady after setDbConfig:', _dbReady);
+    }
   }
   const configured = isDbConfigured();
   const ready = _dbReady || configured;
+  console.log('[SERVER] Health response: configured:', configured, 'ready:', ready, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
   return c.json({
     status: "ok",
-    version: "64",
+    version: "65",
     dbConfigured: configured,
     dbReady: ready,
     drivers: db.drivers.getAll().length,

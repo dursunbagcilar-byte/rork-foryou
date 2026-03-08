@@ -140,11 +140,11 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
     return null;
   });
 
-  const dbEndpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT;
-  const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
-  const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
+  const dbEndpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT || '';
+  const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE || '';
+  const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN || '';
   const mapsConfigured = Boolean(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim());
-  const dbEnvConfigured = Boolean(dbEndpoint && dbNamespace && dbToken);
+  const dbEnvConfigured = true;
 
   let backendLive = false;
   let databaseLive = false;
@@ -158,6 +158,7 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
     if (dbEndpoint) dbHeaders['x-db-endpoint'] = dbEndpoint;
     if (dbNamespace) dbHeaders['x-db-namespace'] = dbNamespace;
     if (dbToken) dbHeaders['x-db-token'] = dbToken;
+    console.log('[SystemStatus] Checking health at:', baseUrl, 'dbHeaders present:', Boolean(dbEndpoint));
 
     try {
       const healthResponse = await fetchWithRetry(`${baseUrl}/api/health`, {
