@@ -1,12 +1,134 @@
 import { initTRPC } from "@trpc/server";
 import { FetchCreateContextFnOptions } from "@trpc/server/adapters/fetch";
 import superjson from "superjson";
-import { db, forceReloadStore, initializeStore } from "../db/store";
-import { dbGet } from "../db/rork-db";
+import { bootstrapDbConfig, db, forceReloadStore, initializeStore } from "../db/store";
+import { dbGet, getCachedDbConfig, isDbConfigured, setDbConfig } from "../db/rork-db";
 import type { Driver, Session, User } from "../db/types";
 
 function buildSessionRecordId(token: string): string {
   return token.replace(/[^a-zA-Z0-9]/g, "_");
+}
+
+let _dbBootstrapPromise: Promise<void> | null = null;
+let _lastDbBootstrapAt = 0;
+
+function readServerEnv(key: string): string {
+  try {
+    if (typeof process !== "undefined" && typeof process.env?.[key] === "string") {
+      return process.env[key]?.trim() ?? "";
+    }
+  } catch (error) {
+    console.log("[CONTEXT] process.env read error:", key, error);
+  }
+
+  try {
+    const d = (globalThis as any).Deno;
+    if (d?.env?.get) {
+      const value = d.env.get(key);
+      return typeof value === "string" ? value.trim() : "";
+    }
+  } catch (error) {
+    console.log("[CONTEXT] Deno.env read error:", key, error);
+  }
+
+  return "";
+}
+
+function isValidDbUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function resolveDbConfigFromRequest(req: Request): { endpoint: string; namespace: string; token: string } | null {
+  const cachedConfig = getCachedDbConfig();
+  const endpoint = req.headers.get("x-db-endpoint")?.trim()
+    || readServerEnv("EXPO_PUBLIC_RORK_DB_ENDPOINT")
+    || readServerEnv("RORK_DB_ENDPOINT")
+    || cachedConfig?.endpoint
+    || "";
+  const namespace = req.headers.get("x-db-namespace")?.trim()
+    || readServerEnv("EXPO_PUBLIC_RORK_DB_NAMESPACE")
+    || readServerEnv("RORK_DB_NAMESPACE")
+    || cachedConfig?.namespace
+    || "";
+  const token = req.headers.get("x-db-token")?.trim()
+    || readServerEnv("EXPO_PUBLIC_RORK_DB_TOKEN")
+    || readServerEnv("RORK_DB_TOKEN")
+    || cachedConfig?.token
+    || "";
+
+  if (!endpoint || !namespace || !token) {
+    console.log("[CONTEXT] DB config missing for tRPC request", {
+      hasEndpoint: !!endpoint,
+      hasNamespace: !!namespace,
+      hasToken: !!token,
+    });
+    return null;
+  }
+
+  if (!isValidDbUrl(endpoint)) {
+    console.log("[CONTEXT] Ignoring invalid DB endpoint for tRPC request:", endpoint);
+    return null;
+  }
+
+  return { endpoint, namespace, token };
+}
+
+async function ensureDbReadyForTrpc(req: Request): Promise<void> {
+  const dbConfig = resolveDbConfigFromRequest(req);
+  if (!dbConfig) {
+    await initializeStore();
+    return;
+  }
+
+  const now = Date.now();
+  const hasLoadedAccounts = db.users.getAll().length > 0 || db.drivers.getAll().length > 0;
+
+  if (_dbBootstrapPromise) {
+    await _dbBootstrapPromise;
+    return;
+  }
+
+  if (hasLoadedAccounts && now - _lastDbBootstrapAt < 15000) {
+    return;
+  }
+
+  _dbBootstrapPromise = (async () => {
+    const hadConfig = isDbConfigured();
+
+    try {
+      setDbConfig(dbConfig.endpoint, dbConfig.namespace, dbConfig.token);
+
+      if (!hadConfig) {
+        console.log("[CONTEXT] Bootstrapping DB config for tRPC request...");
+        await bootstrapDbConfig(dbConfig.endpoint, dbConfig.namespace, dbConfig.token);
+      } else {
+        await initializeStore();
+      }
+
+      if (db.users.getAll().length === 0 && db.drivers.getAll().length === 0) {
+        console.log("[CONTEXT] No accounts loaded in memory for tRPC, forcing store reload...");
+        await forceReloadStore();
+      }
+
+      _lastDbBootstrapAt = Date.now();
+      console.log("[CONTEXT] tRPC DB ready:", {
+        users: db.users.getAll().length,
+        drivers: db.drivers.getAll().length,
+        configured: isDbConfigured(),
+      });
+    } catch (error) {
+      console.log("[CONTEXT] ensureDbReadyForTrpc error:", error);
+    } finally {
+      _dbBootstrapPromise = null;
+    }
+  })();
+
+  await _dbBootstrapPromise;
 }
 
 async function loadSessionFromDb(token: string): Promise<Session | null> {
@@ -130,6 +252,8 @@ async function resolveValidSession(token: string) {
 }
 
 export const createContext = async (opts: FetchCreateContextFnOptions) => {
+  await ensureDbReadyForTrpc(opts.req);
+
   const authHeader = opts.req.headers.get("authorization");
   const token = authHeader?.replace("Bearer ", "") || null;
 
