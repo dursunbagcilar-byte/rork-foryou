@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure, protectedProcedure } from "../create-context";
 import { db } from "../../db/store";
+import { dbDirectUpsert, isDbConfigured } from "../../db/rork-db";
+import type { Driver, Session, User } from "../../db/types";
 import {
   checkLoginAttempt,
   recordLoginFailure,
@@ -24,17 +26,81 @@ import {
 } from "../../../constants/support";
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../../../utils/phone";
 
+function buildPasswordRecordId(email: string): string {
+  return email.replace(/[^a-zA-Z0-9]/g, "_");
+}
+
+function buildSessionRecordId(token: string): string {
+  return token.replace(/[^a-zA-Z0-9]/g, "_");
+}
+
+async function persistPasswordHashDirect(email: string, passwordHash: string): Promise<void> {
+  if (!isDbConfigured()) {
+    console.log("[AUTH] persistPasswordHashDirect skipped - db not configured for:", email);
+    return;
+  }
+
+  try {
+    const ok = await dbDirectUpsert("passwords", buildPasswordRecordId(email), {
+      email,
+      hash: passwordHash,
+      _originalEmail: email,
+    });
+    console.log("[AUTH] persistPasswordHashDirect result:", email, ok);
+  } catch (error) {
+    console.log("[AUTH] persistPasswordHashDirect error:", error);
+  }
+}
+
+async function persistSessionDirect(session: Session): Promise<void> {
+  if (!isDbConfigured()) {
+    console.log("[AUTH] persistSessionDirect skipped - db not configured for:", session.userId);
+    return;
+  }
+
+  try {
+    const ok = await dbDirectUpsert("sessions", buildSessionRecordId(session.token), {
+      ...session,
+      _originalToken: session.token,
+    });
+    console.log("[AUTH] persistSessionDirect result:", session.userId, ok);
+  } catch (error) {
+    console.log("[AUTH] persistSessionDirect error:", error);
+  }
+}
+
+async function persistAccountDirect(account: User | Driver, accountType: "customer" | "driver"): Promise<void> {
+  if (!isDbConfigured()) {
+    console.log("[AUTH] persistAccountDirect skipped - db not configured for:", account.id);
+    return;
+  }
+
+  try {
+    const table = accountType === "driver" ? "drivers" : "users";
+    const ok = await dbDirectUpsert(table, account.id, {
+      ...account,
+      _originalId: account.id,
+      rorkId: account.id,
+    });
+    console.log("[AUTH] persistAccountDirect result:", account.id, accountType, ok);
+  } catch (error) {
+    console.log("[AUTH] persistAccountDirect error:", error);
+  }
+}
+
 async function createSession(userId: string, userType: "customer" | "driver"): Promise<string> {
   const token = generateSecureToken(64);
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-  await db.sessions.setSync(token, {
+  const sessionRecord: Session = {
     token,
     userId,
     userType,
     createdAt: now.toISOString(),
     expiresAt: expiresAt.toISOString(),
-  });
+  };
+  await db.sessions.setSync(token, sessionRecord);
+  await persistSessionDirect(sessionRecord);
   console.log("[AUTH] Secure session created for:", userId, "expires:", expiresAt.toISOString());
   return token;
 }
@@ -367,6 +433,8 @@ export const authRouter = createTRPCRouter({
 
       const hashedPwd = await hashPassword(input.password);
       await db.passwords.setSync(cleanEmail, hashedPwd);
+      await persistAccountDirect(user, "customer");
+      await persistPasswordHashDirect(cleanEmail, hashedPwd);
 
       const token = await createSession(id, "customer");
       console.log("[AUTH] Customer registered:", id, cleanName, "referralCode:", myReferralCode, "freeRides:", freeRides);
@@ -452,6 +520,8 @@ export const authRouter = createTRPCRouter({
       await db.drivers.setSync(id, driver);
       const hashedDriverPwd = await hashPassword(input.password);
       await db.passwords.setSync(cleanEmail, hashedDriverPwd);
+      await persistAccountDirect(driver, "driver");
+      await persistPasswordHashDirect(cleanEmail, hashedDriverPwd);
 
       const token = await createSession(id, "driver");
       console.log("[AUTH] Driver registered:", id, cleanName);
@@ -951,6 +1021,7 @@ export const authRouter = createTRPCRouter({
 
       const resetHashedPwd = await hashPassword(input.newPassword);
       await db.passwords.setSync(cleanEmail, resetHashedPwd);
+      await persistPasswordHashDirect(cleanEmail, resetHashedPwd);
       db.resetCodes.delete(cleanEmail);
       console.log("[AUTH] Password reset successfully for:", cleanEmail, 'hadPreviousHash:', !!storedHash);
       return { success: true, error: null };
@@ -997,6 +1068,7 @@ export const authRouter = createTRPCRouter({
       recordLoginSuccess(`pwd_${cleanEmail}`);
       const newHashedPwd = await hashPassword(input.newPassword);
       await db.passwords.setSync(cleanEmail, newHashedPwd);
+      await persistPasswordHashDirect(cleanEmail, newHashedPwd);
       console.log("[AUTH] Password changed for:", cleanEmail);
       return { success: true, error: null };
     }),
