@@ -1,8 +1,21 @@
 const NETGSM_API_URL = 'https://api.netgsm.com.tr/sms/send/xml';
 
+function sanitizeNetgsmEnvValue(value: string | undefined): string {
+  const trimmedValue = value?.trim() ?? '';
+  if (!trimmedValue) {
+    return '';
+  }
+
+  return trimmedValue
+    .replace(/^["'`]+/, '')
+    .replace(/["'`]+$/, '')
+    .replace(/[\r\n\t]+/g, '')
+    .trim();
+}
+
 function readNetgsmEnvValue(...keys: string[]): string {
   for (const key of keys) {
-    const value = process.env[key]?.trim();
+    const value = sanitizeNetgsmEnvValue(process.env[key]);
     if (value) {
       return value;
     }
@@ -143,7 +156,7 @@ function getNetgsmProviderMessage(rawText: string, status: number): string {
   }
 
   if (code === '40') {
-    return 'NetGSM mesaj başlığı sistemde tanımlı değil.';
+    return 'NetGSM mesaj başlığı sistemde tanımlı değil. NETGSM_MSGHEADER değeri, NetGSM panelindeki onaylı başlık ile birebir aynı olmalı. Başlık İşlemleri bölümündeki aktif başlığı kopyalayıp env alanına yapıştırın ve uygulamayı yeniden başlatın.';
   }
 
   if (code === '50') {
@@ -179,7 +192,12 @@ export function getNetgsmSendErrorMessage(result: SendNetgsmCodeSmsResult): stri
   }
 
   if (result.errorCode === 'provider_error') {
-    return result.providerMessage?.trim() || 'SMS gönderilemedi. Lütfen tekrar deneyin.';
+    const providerMessage = result.providerMessage?.trim() ?? '';
+    if (providerMessage.includes('mesaj başlığı sistemde tanımlı değil')) {
+      return providerMessage;
+    }
+
+    return providerMessage || 'SMS gönderilemedi. Lütfen tekrar deneyin.';
   }
 
   return 'SMS servisine bağlanılamadı. Lütfen tekrar deneyin.';
@@ -224,7 +242,7 @@ export async function sendNetgsmCodeSms(params: SendNetgsmCodeSmsParams): Promis
   </body>
 </mainbody>`;
 
-  console.log('[NETGSM] Sending auth SMS to:', normalizedPhone, 'purpose:', purpose, 'msgheader:', NETGSM_MSGHEADER);
+  console.log('[NETGSM] Sending auth SMS to:', normalizedPhone, 'purpose:', purpose, 'msgheader:', NETGSM_MSGHEADER, 'msgheaderLength:', NETGSM_MSGHEADER.length);
 
   try {
     const response = await fetch(NETGSM_API_URL, {
