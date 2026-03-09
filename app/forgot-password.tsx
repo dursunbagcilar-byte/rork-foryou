@@ -7,10 +7,11 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Mail, Lock, CheckCircle, KeyRound } from 'lucide-react-native';
+import { ArrowLeft, Mail, Lock, CheckCircle, KeyRound, Phone } from 'lucide-react-native';
 import { getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl } from '@/lib/trpc';
 import { useAuth } from '@/contexts/AuthContext';
 import { getDbHeaders } from '@/utils/db';
+import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 
 async function resolveApiBase(): Promise<string> {
   let base = getBaseUrl();
@@ -58,6 +59,7 @@ async function restCall<T>(path: string, input: Record<string, unknown>): Promis
 
 type Step = 'email' | 'code' | 'newPassword' | 'success';
 type DeliveryChannel = 'sms';
+type RecoveryMethod = 'email' | 'phone';
 type ResetCodeResponse = {
   success: boolean;
   error?: string | null;
@@ -72,13 +74,12 @@ function isEmailLike(value: string): boolean {
   return value.includes('@');
 }
 
-function getRecoveryContact(email: string, phone: string): string {
-  const trimmedPhone = phone.trim();
-  if (trimmedPhone) {
-    return trimmedPhone;
+function getRecoveryContact(method: RecoveryMethod, email: string, phone: string): string {
+  if (method === 'phone') {
+    return normalizeTurkishPhone(phone);
   }
 
-  return email.trim();
+  return email.trim().toLowerCase();
 }
 
 export default function ForgotPasswordScreen() {
@@ -90,8 +91,9 @@ export default function ForgotPasswordScreen() {
   const isTablet = width >= 600;
 
   const [step, setStep] = useState<Step>('email');
+  const [recoveryMethod, setRecoveryMethod] = useState<RecoveryMethod>('email');
   const [email, setEmail] = useState<string>('');
-  const [phone] = useState<string>('');
+  const [phone, setPhone] = useState<string>('');
   const [code, setCode] = useState<string>('');
   const [newPassword, setNewPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
@@ -101,9 +103,9 @@ export default function ForgotPasswordScreen() {
   const [registeredPhoneMask, setRegisteredPhoneMask] = useState<string | null>(null);
   const [deliveryNote, setDeliveryNote] = useState<string | null>(null);
 
-  const isEmailRecovery = true;
-  const trimmedEmail = email.trim();
-  const trimmedPhone = phone.trim();
+  const isEmailRecovery = recoveryMethod === 'email';
+  const trimmedEmail = email.trim().toLowerCase();
+  const trimmedPhone = normalizeTurkishPhone(phone);
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
   const animateTransition = (callback: () => void) => {
@@ -143,13 +145,23 @@ export default function ForgotPasswordScreen() {
   };
 
   const handleSendCode = async () => {
-    const recoveryContact = trimmedEmail;
-    if (isEmailRecovery && !isEmailLike(trimmedEmail)) {
-      Alert.alert('Uyarı', 'SMS kodu gönderebilmemiz için kayıtlı e-posta adresinizi girin');
-      return;
+    const recoveryContact = getRecoveryContact(recoveryMethod, email, phone);
+
+    if (isEmailRecovery) {
+      if (!isEmailLike(trimmedEmail)) {
+        Alert.alert('Uyarı', 'SMS kodu gönderebilmemiz için kayıtlı e-posta adresinizi girin');
+        return;
+      }
+    } else {
+      const phoneValidationError = getTurkishPhoneValidationError(trimmedPhone);
+      if (phoneValidationError) {
+        Alert.alert('Uyarı', phoneValidationError);
+        return;
+      }
     }
+
     if (!recoveryContact) {
-      Alert.alert('Uyarı', 'Lütfen kayıtlı e-posta adresinizi girin');
+      Alert.alert('Uyarı', isEmailRecovery ? 'Lütfen kayıtlı e-posta adresinizi girin' : 'Lütfen kayıtlı telefon numaranızı girin');
       return;
     }
 
@@ -171,12 +183,12 @@ export default function ForgotPasswordScreen() {
         setRegisteredPhoneMask(result.maskedPhone ?? null);
         setDeliveryNote(result.deliveryNote ?? null);
         animateTransition(() => setStep('code'));
-        console.log('[ForgotPassword] Code sent via SMS for:', trimmedEmail, 'maskedPhone:', result.maskedPhone ?? 'none');
+        console.log('[ForgotPassword] Code sent via SMS for:', recoveryContact, 'maskedPhone:', result.maskedPhone ?? 'none', 'method:', recoveryMethod);
         setDeliveryIssue(null);
         Alert.alert('Başarılı', 'Doğrulama kodu kayıtlı telefon numaranıza SMS olarak gönderildi.');
       } else {
         const resultError = result.error ?? 'Bir hata oluştu';
-        const handledLocally = await tryLocalRecoveryFallback(resultError);
+        const handledLocally = isEmailRecovery ? await tryLocalRecoveryFallback(resultError) : false;
         if (handledLocally) {
           return;
         }
@@ -187,7 +199,7 @@ export default function ForgotPasswordScreen() {
       const sendErr = (e instanceof Error && (e.message === 'Failed to fetch' || e.message === 'Network request failed'))
         ? 'Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edin.'
         : (e instanceof Error ? e.message : 'Bir hata oluştu. Lütfen tekrar deneyin.');
-      const handledLocally = await tryLocalRecoveryFallback(sendErr);
+      const handledLocally = isEmailRecovery ? await tryLocalRecoveryFallback(sendErr) : false;
       if (handledLocally) {
         return;
       }
@@ -203,15 +215,28 @@ export default function ForgotPasswordScreen() {
       return;
     }
 
-    const recoveryContact = getRecoveryContact(email, phone);
+    if (!isEmailRecovery) {
+      const phoneValidationError = getTurkishPhoneValidationError(trimmedPhone);
+      if (phoneValidationError) {
+        Alert.alert('Uyarı', phoneValidationError);
+        return;
+      }
+    }
+
+    const recoveryContact = getRecoveryContact(recoveryMethod, email, phone);
+    if (!recoveryContact) {
+      Alert.alert('Uyarı', isEmailRecovery ? 'Lütfen kayıtlı e-posta adresinizi girin' : 'Lütfen kayıtlı telefon numaranızı girin');
+      return;
+    }
+
     setLoading(true);
     try {
       const result = await restCall<{ success: boolean; error?: string | null }>(
         '/api/auth/verify-reset-code',
         {
           contact: recoveryContact,
-          email: email.trim(),
-          phone: phone.trim(),
+          email: trimmedEmail,
+          phone: trimmedPhone,
           code: code.trim(),
         }
       );
@@ -270,12 +295,26 @@ export default function ForgotPasswordScreen() {
         return;
       }
 
+      if (!isEmailRecovery) {
+        const phoneValidationError = getTurkishPhoneValidationError(trimmedPhone);
+        if (phoneValidationError) {
+          Alert.alert('Uyarı', phoneValidationError);
+          return;
+        }
+      }
+
+      const recoveryContact = getRecoveryContact(recoveryMethod, email, phone);
+      if (!recoveryContact) {
+        Alert.alert('Uyarı', isEmailRecovery ? 'Lütfen kayıtlı e-posta adresinizi girin' : 'Lütfen kayıtlı telefon numaranızı girin');
+        return;
+      }
+
       const result = await restCall<{ success: boolean; error?: string | null }>(
         '/api/auth/reset-password',
         {
-          contact: getRecoveryContact(email, phone),
-          email: email.trim(),
-          phone: phone.trim(),
+          contact: recoveryContact,
+          email: trimmedEmail,
+          phone: trimmedPhone,
           code: code.trim(),
           newPassword,
         }
@@ -298,9 +337,23 @@ export default function ForgotPasswordScreen() {
   };
 
   const handleResendCode = async () => {
-    const recoveryContact = trimmedEmail;
-    if (isEmailRecovery && !isEmailLike(trimmedEmail)) {
-      Alert.alert('Uyarı', 'SMS kodu gönderebilmemiz için kayıtlı e-posta adresinizi girin');
+    const recoveryContact = getRecoveryContact(recoveryMethod, email, phone);
+
+    if (isEmailRecovery) {
+      if (!isEmailLike(trimmedEmail)) {
+        Alert.alert('Uyarı', 'SMS kodu gönderebilmemiz için kayıtlı e-posta adresinizi girin');
+        return;
+      }
+    } else {
+      const phoneValidationError = getTurkishPhoneValidationError(trimmedPhone);
+      if (phoneValidationError) {
+        Alert.alert('Uyarı', phoneValidationError);
+        return;
+      }
+    }
+
+    if (!recoveryContact) {
+      Alert.alert('Uyarı', isEmailRecovery ? 'Lütfen kayıtlı e-posta adresinizi girin' : 'Lütfen kayıtlı telefon numaranızı girin');
       return;
     }
 
@@ -345,28 +398,80 @@ export default function ForgotPasswordScreen() {
     <>
       <View style={styles.stepHeader}>
         <View style={styles.stepIconWrap}>
-          <Mail size={28} color="#F5A623" />
+          {isEmailRecovery ? <Mail size={28} color="#F5A623" /> : <Phone size={28} color="#F5A623" />}
         </View>
         <Text style={[styles.stepTitle, { fontSize: isSmall ? 18 : 22 }]}>SMS ile Kurtarma</Text>
         <Text style={[styles.stepDesc, { fontSize: isSmall ? 12 : 14 }]}> 
-          Kayıtlı e-posta adresinizi yazın. 6 haneli şifre sıfırlama kodunu kayıtlı telefon numaranıza SMS olarak gönderelim.
+          {isEmailRecovery
+            ? 'Kayıtlı e-posta adresinizi yazın. 6 haneli şifre sıfırlama kodunu kayıtlı telefon numaranıza SMS olarak gönderelim.'
+            : 'Kayıtlı telefon numaranızı yazın. Şifre sıfırlama kodunu bu hatta SMS olarak gönderelim.'}
         </Text>
+      </View>
+      <View style={styles.methodSwitchRow}>
+        <TouchableOpacity
+          style={[styles.methodSwitchButton, isEmailRecovery && styles.methodSwitchButtonActive]}
+          onPress={() => {
+            setRecoveryMethod('email');
+            setDeliveryIssue(null);
+            setRegisteredPhoneMask(null);
+            setDeliveryNote(null);
+            setLocalRecoveryMode(false);
+          }}
+          activeOpacity={0.9}
+          testID="forgot-method-email-btn"
+        >
+          <Mail size={16} color={isEmailRecovery ? '#0A0A12' : 'rgba(255,255,255,0.7)'} />
+          <Text style={[styles.methodSwitchText, isEmailRecovery && styles.methodSwitchTextActive]}>E-posta</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.methodSwitchButton, !isEmailRecovery && styles.methodSwitchButtonActive]}
+          onPress={() => {
+            setRecoveryMethod('phone');
+            setDeliveryIssue(null);
+            setRegisteredPhoneMask(null);
+            setDeliveryNote(null);
+            setLocalRecoveryMode(false);
+          }}
+          activeOpacity={0.9}
+          testID="forgot-method-phone-btn"
+        >
+          <Phone size={16} color={!isEmailRecovery ? '#0A0A12' : 'rgba(255,255,255,0.7)'} />
+          <Text style={[styles.methodSwitchText, !isEmailRecovery && styles.methodSwitchTextActive]}>Telefon</Text>
+        </TouchableOpacity>
       </View>
       <View style={styles.inputGroup}>
         <View style={[styles.inputWrapper, { paddingHorizontal: isSmall ? 12 : 16, borderRadius: isSmall ? 12 : 14 }]}>
-          <Mail size={isSmall ? 16 : 18} color="rgba(255,255,255,0.35)" />
-          <TextInput
-            style={[styles.input, { paddingVertical: isSmall ? 13 : 16, fontSize: isSmall ? 14 : 16 }]}
-            placeholder="ornek@email.com"
-            placeholderTextColor="rgba(255,255,255,0.3)"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            value={email}
-            onChangeText={setEmail}
-            testID="forgot-email-input"
-          />
+          {isEmailRecovery ? <Mail size={isSmall ? 16 : 18} color="rgba(255,255,255,0.35)" /> : <Phone size={isSmall ? 16 : 18} color="rgba(255,255,255,0.35)" />}
+          {isEmailRecovery ? (
+            <TextInput
+              style={[styles.input, { paddingVertical: isSmall ? 13 : 16, fontSize: isSmall ? 14 : 16 }]}
+              placeholder="ornek@email.com"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              value={email}
+              onChangeText={setEmail}
+              testID="forgot-email-input"
+            />
+          ) : (
+            <TextInput
+              style={[styles.input, { paddingVertical: isSmall ? 13 : 16, fontSize: isSmall ? 14 : 16 }]}
+              placeholder="05XXXXXXXXX"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              keyboardType="phone-pad"
+              value={phone}
+              onChangeText={(value) => setPhone(normalizeTurkishPhone(value))}
+              maxLength={11}
+              testID="forgot-phone-input"
+            />
+          )}
         </View>
       </View>
+      <Text style={styles.supportMeta}>
+        {isEmailRecovery
+          ? 'Kod, hesabınızdaki kayıtlı telefona SMS olarak gider.'
+          : 'Telefon numarası 0 ile başlamalı ve 11 haneli olmalıdır.'}
+      </Text>
       {deliveryNote ? <Text style={styles.supportMeta}>{deliveryNote}</Text> : null}
       <TouchableOpacity
         style={[styles.actionButton, loading && styles.actionButtonDisabled, { paddingVertical: isSmall ? 15 : 18, borderRadius: isSmall ? 12 : 16 }]}
@@ -699,6 +804,35 @@ const styles = StyleSheet.create({
     textAlign: 'center' as const,
     lineHeight: 20,
     paddingHorizontal: 8,
+  },
+  methodSwitchRow: {
+    flexDirection: 'row' as const,
+    gap: 10,
+    marginBottom: 16,
+  },
+  methodSwitchButton: {
+    flex: 1,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  methodSwitchButtonActive: {
+    backgroundColor: '#F5A623',
+    borderColor: '#F5A623',
+  },
+  methodSwitchText: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 14,
+    fontWeight: '700' as const,
+  },
+  methodSwitchTextActive: {
+    color: '#0A0A12',
   },
   inputGroup: {
     marginBottom: 14,
