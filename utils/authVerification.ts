@@ -1,7 +1,7 @@
 import { getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl } from '@/lib/trpc';
 import { getDbHeaders } from '@/utils/db';
 
-export type VerificationDeliveryChannel = 'email' | 'sms';
+export type VerificationDeliveryChannel = 'sms';
 
 export interface SendRegistrationVerificationInput {
   name: string;
@@ -112,7 +112,7 @@ export async function sendRegistrationVerificationCode(
     name: input.name,
     email: input.email,
     phone: input.phone,
-    deliveryMethod: input.deliveryMethod ?? 'sms',
+    deliveryMethod: 'sms',
   });
 }
 

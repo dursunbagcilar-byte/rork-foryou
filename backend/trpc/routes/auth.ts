@@ -14,7 +14,7 @@ import {
   validateEmail,
   validatePassword,
 } from "../../utils/security";
-import { sendEmail, generateResetCode, buildResetCodeEmail, buildVerificationCodeEmail, type SendEmailErrorCode } from "../../utils/email";
+import { generateResetCode } from "../../utils/email";
 import { getNetgsmSendErrorMessage, sendPasswordResetSmsCode, sendVerificationSmsCode } from "../../utils/netgsm";
 import { getSmsDeliveryNote, normalizePhoneForSms } from "../../../constants/support";
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../../../utils/phone";
@@ -116,18 +116,6 @@ function getUniqueReferralCode(): string {
     attempts++;
   }
   return 'FY' + Date.now().toString(36).toUpperCase().slice(-5);
-}
-
-function getEmailSendErrorMessage(errorCode: SendEmailErrorCode | null): string {
-  if (errorCode === 'missing_from_email' || errorCode === 'invalid_from_email') {
-    return 'E-posta servisi henüz tamamlanmadı. Lütfen daha sonra tekrar deneyin.';
-  }
-
-  if (errorCode === 'missing_api_key') {
-    return 'E-posta servisi geçici olarak kullanılamıyor. Lütfen daha sonra tekrar deneyin.';
-  }
-
-  return 'E-posta gönderilemedi. Lütfen e-posta adresinizi kontrol edin veya daha sonra tekrar deneyin.';
 }
 
 function maskPhoneNumber(phone: string | undefined): string | null {
@@ -239,9 +227,8 @@ export const authRouter = createTRPCRouter({
     }))
     .mutation(async ({ input }) => {
       const cleanEmail = input.email.toLowerCase().trim();
-      const cleanName = sanitizeInput(input.name);
       const cleanPhone = getSanitizedPhone(input.phone);
-      const deliveryMethod = input.deliveryMethod === 'sms' ? 'sms' : 'email';
+      const deliveryMethod = 'sms';
       const phoneValidationError = input.phone?.trim() ? getTurkishPhoneValidationError(cleanPhone) : null;
 
       if (phoneValidationError) {
@@ -271,9 +258,9 @@ export const authRouter = createTRPCRouter({
           success: false,
           error: 'Bu telefon numarası zaten kayıtlı',
           emailSent: false,
-          deliveryChannel: deliveryMethod,
+          deliveryChannel: 'sms' as const,
           maskedPhone: maskPhoneNumber(cleanPhone),
-          deliveryNote: deliveryMethod === 'sms' ? getSmsDeliveryNote(maskPhoneNumber(cleanPhone)) : null,
+          deliveryNote: getSmsDeliveryNote(maskPhoneNumber(cleanPhone)),
         };
       }
 
@@ -286,40 +273,10 @@ export const authRouter = createTRPCRouter({
       const smsTargetPhone = normalizePhoneForSms(cleanPhone || undefined);
       const directDeliveryNote = getSmsDeliveryNote(maskedPhone);
 
-      if (deliveryMethod === 'sms') {
-        if (!smsTargetPhone) {
-          return {
-            success: false,
-            error: 'Geçerli bir telefon numarası gerekli.',
-            emailSent: false,
-            deliveryChannel: 'sms' as const,
-            maskedPhone,
-            deliveryNote: directDeliveryNote,
-          };
-        }
-
-        const smsResult = await sendVerificationSmsCode({
-          toPhone: smsTargetPhone,
-          code,
-        });
-
-        if (!smsResult.success) {
-          console.log('[AUTH] Verification SMS send failed for:', cleanEmail, smsResult.errorCode, smsResult.providerMessage);
-          return {
-            success: false,
-            error: getNetgsmSendErrorMessage(smsResult),
-            emailSent: false,
-            deliveryChannel: 'sms' as const,
-            maskedPhone,
-            deliveryNote: directDeliveryNote,
-          };
-        }
-
-        recordLoginSuccess(`verify_${cleanEmail}`);
-        console.log('[AUTH] Verification code sent via SMS:', cleanEmail, 'maskedPhone:', maskedPhone, 'messageId:', smsResult.messageId);
+      if (!smsTargetPhone) {
         return {
-          success: true,
-          error: null,
+          success: false,
+          error: 'Geçerli bir telefon numarası gerekli.',
           emailSent: false,
           deliveryChannel: 'sms' as const,
           maskedPhone,
@@ -327,42 +284,32 @@ export const authRouter = createTRPCRouter({
         };
       }
 
-      const emailResult = await sendEmail({
-        to: cleanEmail,
-        subject: '2GO - E-posta Doğrulama Kodu',
-        html: buildVerificationCodeEmail(code, cleanName),
+      const smsResult = await sendVerificationSmsCode({
+        toPhone: smsTargetPhone,
+        code,
       });
 
-      if (!emailResult.success) {
-        console.log(
-          "[AUTH] Verification email send failed for:",
-          cleanEmail,
-          "code:",
-          code,
-          "errorCode:",
-          emailResult.errorCode,
-          "providerMessage:",
-          emailResult.providerMessage,
-        );
+      if (!smsResult.success) {
+        console.log('[AUTH] Verification SMS send failed for:', cleanEmail, smsResult.errorCode, smsResult.providerMessage);
         return {
           success: false,
-          error: getEmailSendErrorMessage(emailResult.errorCode),
+          error: getNetgsmSendErrorMessage(smsResult),
           emailSent: false,
-          deliveryChannel: 'email' as const,
+          deliveryChannel: 'sms' as const,
           maskedPhone,
-          deliveryNote: null,
+          deliveryNote: directDeliveryNote,
         };
       }
 
       recordLoginSuccess(`verify_${cleanEmail}`);
-      console.log("[AUTH] Verification code sent to:", cleanEmail, 'code:', code, 'channel: email');
+      console.log('[AUTH] Verification code sent via SMS:', cleanEmail, 'maskedPhone:', maskedPhone, 'messageId:', smsResult.messageId);
       return {
         success: true,
         error: null,
-        emailSent: true,
-        deliveryChannel: 'email' as const,
+        emailSent: false,
+        deliveryChannel: 'sms' as const,
         maskedPhone,
-        deliveryNote: null,
+        deliveryNote: directDeliveryNote,
       };
     }),
 
@@ -815,7 +762,7 @@ export const authRouter = createTRPCRouter({
     }))
     .mutation(async ({ input }) => {
       const cleanEmail = input.email.toLowerCase().trim();
-      const deliveryMethod = input.deliveryMethod === 'email' ? 'email' : 'sms';
+      const deliveryMethod = 'sms';
 
       const loginCheck = checkLoginAttempt(`resetcode_${cleanEmail}`);
       if (!loginCheck.allowed) {
@@ -893,8 +840,6 @@ export const authRouter = createTRPCRouter({
         return { success: false, error: "Bu e-posta adresiyle kayıtlı hesap bulunamadı" };
       }
 
-      const accountName = account?.name || cleanEmail.split('@')[0];
-
       const code = generateResetCode();
       db.resetCodes.set(cleanEmail, code);
       console.log('[AUTH] sendResetCode - stored code:', code, 'for email:', cleanEmail);
@@ -907,43 +852,29 @@ export const authRouter = createTRPCRouter({
       const smsTargetPhone = normalizePhoneForSms(rawPhone);
       const directDeliveryNote = getSmsDeliveryNote(maskedPhone);
 
-      if (deliveryMethod === 'sms') {
-        if (!smsTargetPhone) {
-          console.log('[AUTH] Reset code missing SMS target phone:', cleanEmail);
-          return {
-            success: false,
-            error: 'Kayıtlı telefon numarası bulunamadı. Lütfen destek ile iletişime geçin.',
-            emailSent: false,
-            deliveryChannel: 'sms' as const,
-            maskedPhone,
-            smsTargetPhone: null,
-            deliveryNote: directDeliveryNote,
-          };
-        }
-
-        const smsResult = await sendPasswordResetSmsCode({
-          toPhone: smsTargetPhone,
-          code,
-        });
-
-        if (!smsResult.success) {
-          console.log('[AUTH] SMS reset delivery failed:', cleanEmail, smsResult.errorCode, smsResult.providerMessage);
-          return {
-            success: false,
-            error: getNetgsmSendErrorMessage(smsResult),
-            emailSent: false,
-            deliveryChannel: 'sms' as const,
-            maskedPhone,
-            smsTargetPhone,
-            deliveryNote: directDeliveryNote,
-          };
-        }
-
-        recordLoginSuccess(`resetcode_${cleanEmail}`);
-        console.log('[AUTH] Reset code sent via SMS:', cleanEmail, 'maskedPhone:', maskedPhone, 'messageId:', smsResult.messageId);
+      if (!smsTargetPhone) {
+        console.log('[AUTH] Reset code missing SMS target phone:', cleanEmail);
         return {
-          success: true,
-          error: null,
+          success: false,
+          error: 'Kayıtlı telefon numarası bulunamadı. Lütfen destek ile iletişime geçin.',
+          emailSent: false,
+          deliveryChannel: 'sms' as const,
+          maskedPhone,
+          smsTargetPhone: null,
+          deliveryNote: directDeliveryNote,
+        };
+      }
+
+      const smsResult = await sendPasswordResetSmsCode({
+        toPhone: smsTargetPhone,
+        code,
+      });
+
+      if (!smsResult.success) {
+        console.log('[AUTH] SMS reset delivery failed:', cleanEmail, smsResult.errorCode, smsResult.providerMessage);
+        return {
+          success: false,
+          error: getNetgsmSendErrorMessage(smsResult),
           emailSent: false,
           deliveryChannel: 'sms' as const,
           maskedPhone,
@@ -952,44 +883,16 @@ export const authRouter = createTRPCRouter({
         };
       }
 
-      const emailResult = await sendEmail({
-        to: cleanEmail,
-        subject: '2GO - Şifre Sıfırlama Kodu',
-        html: buildResetCodeEmail(code, accountName),
-      });
-
-      if (!emailResult.success) {
-        console.log(
-          "[AUTH] Reset email send failed for:",
-          cleanEmail,
-          "code:",
-          code,
-          "errorCode:",
-          emailResult.errorCode,
-          "providerMessage:",
-          emailResult.providerMessage,
-        );
-        return {
-          success: false,
-          error: getEmailSendErrorMessage(emailResult.errorCode),
-          emailSent: false,
-          deliveryChannel: 'email' as const,
-          maskedPhone,
-          smsTargetPhone,
-          deliveryNote: null,
-        };
-      }
-
       recordLoginSuccess(`resetcode_${cleanEmail}`);
-      console.log("[AUTH] Reset code sent to:", cleanEmail, 'code:', code, 'channel: email');
+      console.log('[AUTH] Reset code sent via SMS:', cleanEmail, 'maskedPhone:', maskedPhone, 'messageId:', smsResult.messageId);
       return {
         success: true,
         error: null,
-        emailSent: true,
-        deliveryChannel: 'email' as const,
+        emailSent: false,
+        deliveryChannel: 'sms' as const,
         maskedPhone,
         smsTargetPhone,
-        deliveryNote: null,
+        deliveryNote: directDeliveryNote,
       };
     }),
 

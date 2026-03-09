@@ -31,18 +31,6 @@ function maskPhoneNumber(phone: string | undefined): string | null {
   return `${prefix}${'•'.repeat(hiddenLength)}${suffix}`;
 }
 
-function getEmailSendErrorMessage(errorCode: string | null | undefined): string {
-  if (errorCode === 'missing_from_email' || errorCode === 'invalid_from_email') {
-    return 'E-posta servisi henüz tamamlanmadı. Lütfen daha sonra tekrar deneyin.';
-  }
-
-  if (errorCode === 'missing_api_key') {
-    return 'E-posta servisi geçici olarak kullanılamıyor. Lütfen daha sonra tekrar deneyin.';
-  }
-
-  return 'E-posta gönderilemedi. Lütfen e-posta adresinizi kontrol edin veya daha sonra tekrar deneyin.';
-}
-
 function isEmailIdentifier(value: string): boolean {
   return value.includes('@');
 }
@@ -787,11 +775,11 @@ app.post("/auth/send-verification-code", async (c) => {
 
     const body = await c.req.json();
     const { sanitizeInput, validateEmail, checkLoginAttempt, recordLoginSuccess } = await import('./utils/security');
-    const { sendEmail, generateResetCode, buildVerificationCodeEmail } = await import('./utils/email');
+    const { generateResetCode } = await import('./utils/email');
     const cleanEmail = typeof body.email === 'string' ? body.email.toLowerCase().trim() : '';
     const cleanName = sanitizeInput(typeof body.name === 'string' ? body.name : '');
     const cleanPhone = normalizeTurkishPhone(typeof body.phone === 'string' ? body.phone : '');
-    const deliveryMethod = body.deliveryMethod === 'sms' ? 'sms' : 'email';
+    const deliveryMethod = 'sms';
     const phoneValidationError = typeof body.phone === 'string' && body.phone.trim()
       ? getTurkishPhoneValidationError(cleanPhone)
       : null;
@@ -832,9 +820,9 @@ app.post("/auth/send-verification-code", async (c) => {
         success: false,
         error: 'Bu telefon numarası zaten kayıtlı',
         emailSent: false,
-        deliveryChannel: deliveryMethod,
+        deliveryChannel: 'sms',
         maskedPhone,
-        deliveryNote: deliveryMethod === 'sms' ? getSmsDeliveryNote(maskedPhone) : null,
+        deliveryNote: getSmsDeliveryNote(maskedPhone),
       });
     }
 
@@ -846,40 +834,10 @@ app.post("/auth/send-verification-code", async (c) => {
     const smsTargetPhone = normalizePhoneForSms(cleanPhone || undefined);
     const directDeliveryNote = getSmsDeliveryNote(maskedPhone);
 
-    if (deliveryMethod === 'sms') {
-      if (!smsTargetPhone) {
-        return c.json({
-          success: false,
-          error: 'Geçerli bir telefon numarası gerekli.',
-          emailSent: false,
-          deliveryChannel: 'sms',
-          maskedPhone,
-          deliveryNote: directDeliveryNote,
-        });
-      }
-
-      const smsResult = await sendVerificationSmsCode({
-        toPhone: smsTargetPhone,
-        code,
-      });
-
-      if (!smsResult.success) {
-        console.log('[REST] Verification SMS send failed:', cleanEmail, smsResult.errorCode, smsResult.providerMessage);
-        return c.json({
-          success: false,
-          error: getNetgsmSendErrorMessage(smsResult),
-          emailSent: false,
-          deliveryChannel: 'sms',
-          maskedPhone,
-          deliveryNote: directDeliveryNote,
-        });
-      }
-
-      recordLoginSuccess(`verify_${cleanEmail}`);
-      console.log('[REST] Verification code sent via SMS:', cleanEmail, 'maskedPhone:', maskedPhone, 'messageId:', smsResult.messageId);
+    if (!smsTargetPhone) {
       return c.json({
-        success: true,
-        error: null,
+        success: false,
+        error: 'Geçerli bir telefon numarası gerekli.',
         emailSent: false,
         deliveryChannel: 'sms',
         maskedPhone,
@@ -887,33 +845,32 @@ app.post("/auth/send-verification-code", async (c) => {
       });
     }
 
-    const emailResult = await sendEmail({
-      to: cleanEmail,
-      subject: '2GO - E-posta Doğrulama Kodu',
-      html: buildVerificationCodeEmail(code, cleanName),
+    const smsResult = await sendVerificationSmsCode({
+      toPhone: smsTargetPhone,
+      code,
     });
 
-    if (!emailResult.success) {
-      console.log('[REST] Verification email send failed:', cleanEmail, emailResult.errorCode, emailResult.providerMessage);
+    if (!smsResult.success) {
+      console.log('[REST] Verification SMS send failed:', cleanEmail, smsResult.errorCode, smsResult.providerMessage);
       return c.json({
         success: false,
-        error: getEmailSendErrorMessage(emailResult.errorCode),
+        error: getNetgsmSendErrorMessage(smsResult),
         emailSent: false,
-        deliveryChannel: 'email',
+        deliveryChannel: 'sms',
         maskedPhone,
-        deliveryNote: null,
+        deliveryNote: directDeliveryNote,
       });
     }
 
     recordLoginSuccess(`verify_${cleanEmail}`);
-    console.log('[REST] Verification code sent via email:', cleanEmail, 'code:', code);
+    console.log('[REST] Verification code sent via SMS:', cleanEmail, 'maskedPhone:', maskedPhone, 'messageId:', smsResult.messageId);
     return c.json({
       success: true,
       error: null,
-      emailSent: true,
-      deliveryChannel: 'email',
+      emailSent: false,
+      deliveryChannel: 'sms',
       maskedPhone,
-      deliveryNote: null,
+      deliveryNote: directDeliveryNote,
     });
   } catch (err: unknown) {
     console.log('[REST] send-verification-code error:', err instanceof Error ? err.message : err);
@@ -1324,12 +1281,12 @@ app.post("/auth/send-reset-code", async (c) => {
         ? body.phone
         : body.email;
     const identifier = typeof rawIdentifier === 'string' ? rawIdentifier.trim() : '';
-    const deliveryMethod = body.deliveryMethod === 'email' ? 'email' : 'sms';
+    const deliveryMethod = 'sms';
     if (!identifier) return c.json({ success: false, error: 'E-posta veya telefon numarası gerekli' });
 
     console.log('[REST] send-reset-code:', identifier, 'deliveryMethod:', deliveryMethod);
     const { checkLoginAttempt, recordLoginFailure, recordLoginSuccess } = await import('./utils/security');
-    const { sendEmail, generateResetCode, buildResetCodeEmail } = await import('./utils/email');
+    const { generateResetCode } = await import('./utils/email');
 
     const resetLookupKey = buildResetLookupKey(identifier);
     const loginCheck = checkLoginAttempt(resetLookupKey);
@@ -1367,7 +1324,6 @@ app.post("/auth/send-reset-code", async (c) => {
 
     console.log('[REST] send-reset-code final account state:', accountEmail, 'hasPassword:', !!hasPassword, 'accountType:', account.type);
 
-    const accountName = account.name || accountEmail.split('@')[0];
     const code = generateResetCode();
     db.resetCodes.set(accountEmail, code);
     console.log('[REST] send-reset-code stored code for:', accountEmail, 'identifier:', identifier);
@@ -1376,43 +1332,29 @@ app.post("/auth/send-reset-code", async (c) => {
     const smsTargetPhone = normalizePhoneForSms(typeof account.phone === 'string' ? account.phone : undefined);
     const directDeliveryNote = getSmsDeliveryNote(maskedPhone);
 
-    if (deliveryMethod === 'sms') {
-      if (!smsTargetPhone) {
-        console.log('[REST] Reset code missing SMS target phone:', accountEmail);
-        return c.json({
-          success: false,
-          error: 'Kayıtlı telefon numarası bulunamadı. Lütfen destek ile iletişime geçin.',
-          emailSent: false,
-          deliveryChannel: 'sms',
-          maskedPhone,
-          smsTargetPhone: null,
-          deliveryNote: directDeliveryNote,
-        });
-      }
-
-      const smsResult = await sendPasswordResetSmsCode({
-        toPhone: smsTargetPhone,
-        code,
-      });
-
-      if (!smsResult.success) {
-        console.log('[REST] SMS reset delivery failed:', accountEmail, smsResult.errorCode, smsResult.providerMessage);
-        return c.json({
-          success: false,
-          error: getNetgsmSendErrorMessage(smsResult),
-          emailSent: false,
-          deliveryChannel: 'sms',
-          maskedPhone,
-          smsTargetPhone,
-          deliveryNote: directDeliveryNote,
-        });
-      }
-
-      recordLoginSuccess(resetLookupKey);
-      console.log('[REST] Reset code sent via SMS:', accountEmail, 'maskedPhone:', maskedPhone, 'messageId:', smsResult.messageId);
+    if (!smsTargetPhone) {
+      console.log('[REST] Reset code missing SMS target phone:', accountEmail);
       return c.json({
-        success: true,
-        error: null,
+        success: false,
+        error: 'Kayıtlı telefon numarası bulunamadı. Lütfen destek ile iletişime geçin.',
+        emailSent: false,
+        deliveryChannel: 'sms',
+        maskedPhone,
+        smsTargetPhone: null,
+        deliveryNote: directDeliveryNote,
+      });
+    }
+
+    const smsResult = await sendPasswordResetSmsCode({
+      toPhone: smsTargetPhone,
+      code,
+    });
+
+    if (!smsResult.success) {
+      console.log('[REST] SMS reset delivery failed:', accountEmail, smsResult.errorCode, smsResult.providerMessage);
+      return c.json({
+        success: false,
+        error: getNetgsmSendErrorMessage(smsResult),
         emailSent: false,
         deliveryChannel: 'sms',
         maskedPhone,
@@ -1421,35 +1363,16 @@ app.post("/auth/send-reset-code", async (c) => {
       });
     }
 
-    const emailResult = await sendEmail({
-      to: accountEmail,
-      subject: '2GO - Şifre Sıfırlama Kodu',
-      html: buildResetCodeEmail(code, accountName),
-    });
-
-    if (!emailResult.success) {
-      console.log('[REST] Reset email failed:', emailResult.errorCode, emailResult.providerMessage);
-      return c.json({
-        success: false,
-        error: getEmailSendErrorMessage(emailResult.errorCode),
-        emailSent: false,
-        deliveryChannel: 'email',
-        maskedPhone,
-        smsTargetPhone,
-        deliveryNote: null,
-      });
-    }
-
     recordLoginSuccess(resetLookupKey);
-    console.log('[REST] Reset code sent to:', accountEmail, 'channel: email');
+    console.log('[REST] Reset code sent via SMS:', accountEmail, 'maskedPhone:', maskedPhone, 'messageId:', smsResult.messageId);
     return c.json({
       success: true,
       error: null,
-      emailSent: true,
-      deliveryChannel: 'email',
+      emailSent: false,
+      deliveryChannel: 'sms',
       maskedPhone,
       smsTargetPhone,
-      deliveryNote: null,
+      deliveryNote: directDeliveryNote,
     });
   } catch (err: unknown) {
     console.log('[REST] send-reset-code error:', err instanceof Error ? err.message : err);

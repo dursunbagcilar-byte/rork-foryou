@@ -57,7 +57,7 @@ async function restCall<T>(path: string, input: Record<string, unknown>): Promis
 }
 
 type Step = 'email' | 'code' | 'newPassword' | 'success';
-type DeliveryChannel = 'email' | 'sms';
+type DeliveryChannel = 'sms';
 type ResetCodeResponse = {
   success: boolean;
   error?: string | null;
@@ -96,11 +96,8 @@ export default function ForgotPasswordScreen() {
   const [newPassword, setNewPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
-  const [emailSentInfo, setEmailSentInfo] = useState<boolean>(true);
   const [localRecoveryMode, setLocalRecoveryMode] = useState<boolean>(false);
   const [_deliveryIssue, setDeliveryIssue] = useState<string | null>(null);
-  const [deliveryChannel, setDeliveryChannel] = useState<DeliveryChannel>('sms');
-  const [preferredDeliveryMethod] = useState<DeliveryChannel>('sms');
   const [registeredPhoneMask, setRegisteredPhoneMask] = useState<string | null>(null);
   const [deliveryNote, setDeliveryNote] = useState<string | null>(null);
 
@@ -139,7 +136,6 @@ export default function ForgotPasswordScreen() {
     }
 
     setLocalRecoveryMode(true);
-    setEmailSentInfo(false);
     setDeliveryIssue(reason);
     animateTransition(() => setStep('newPassword'));
     Alert.alert('Yerel Kurtarma', 'Sunucuda hesap bulunamadı ancak bu cihazda kayıtlı bilgiler bulundu. Bu cihaz için yeni bir şifre oluşturabilirsiniz.');
@@ -147,13 +143,13 @@ export default function ForgotPasswordScreen() {
   };
 
   const handleSendCode = async () => {
-    const recoveryContact = isEmailRecovery ? trimmedEmail : getRecoveryContact(trimmedEmail, trimmedPhone);
+    const recoveryContact = trimmedEmail;
     if (isEmailRecovery && !isEmailLike(trimmedEmail)) {
-      Alert.alert('Uyarı', 'E-posta ile şifre sıfırlamak için geçerli bir e-posta adresi girin');
+      Alert.alert('Uyarı', 'SMS kodu gönderebilmemiz için kayıtlı e-posta adresinizi girin');
       return;
     }
     if (!recoveryContact) {
-      Alert.alert('Uyarı', 'Lütfen e-posta adresinizi veya telefon numaranızı girin');
+      Alert.alert('Uyarı', 'Lütfen kayıtlı e-posta adresinizi girin');
       return;
     }
 
@@ -167,22 +163,17 @@ export default function ForgotPasswordScreen() {
           contact: recoveryContact,
           email: trimmedEmail,
           phone: trimmedPhone,
-          deliveryMethod: preferredDeliveryMethod,
+          deliveryMethod: 'sms',
         }
       );
 
       if (result.success) {
-        const nextDeliveryChannel: DeliveryChannel = result.deliveryChannel === 'email' ? 'email' : 'sms';
-        setDeliveryChannel(nextDeliveryChannel);
         setRegisteredPhoneMask(result.maskedPhone ?? null);
         setDeliveryNote(result.deliveryNote ?? null);
-        setEmailSentInfo(result.emailSent !== false);
         animateTransition(() => setStep('code'));
-        console.log('[ForgotPassword] Code sent, deliveryChannel:', nextDeliveryChannel, 'emailSent:', result.emailSent);
+        console.log('[ForgotPassword] Code sent via SMS for:', trimmedEmail, 'maskedPhone:', result.maskedPhone ?? 'none');
         setDeliveryIssue(null);
-        if (nextDeliveryChannel === 'sms') {
-          Alert.alert('Başarılı', 'Doğrulama kodu kayıtlı telefon numaranıza SMS olarak gönderildi.');
-        }
+        Alert.alert('Başarılı', 'Doğrulama kodu kayıtlı telefon numaranıza SMS olarak gönderildi.');
       } else {
         const resultError = result.error ?? 'Bir hata oluştu';
         const handledLocally = await tryLocalRecoveryFallback(resultError);
@@ -307,9 +298,9 @@ export default function ForgotPasswordScreen() {
   };
 
   const handleResendCode = async () => {
-    const recoveryContact = isEmailRecovery ? trimmedEmail : getRecoveryContact(trimmedEmail, trimmedPhone);
+    const recoveryContact = trimmedEmail;
     if (isEmailRecovery && !isEmailLike(trimmedEmail)) {
-      Alert.alert('Uyarı', 'E-posta ile şifre sıfırlamak için geçerli bir e-posta adresi girin');
+      Alert.alert('Uyarı', 'SMS kodu gönderebilmemiz için kayıtlı e-posta adresinizi girin');
       return;
     }
 
@@ -321,21 +312,14 @@ export default function ForgotPasswordScreen() {
           contact: recoveryContact,
           email: trimmedEmail,
           phone: trimmedPhone,
-          deliveryMethod: preferredDeliveryMethod,
+          deliveryMethod: 'sms',
         }
       );
       if (result.success) {
-        const nextDeliveryChannel: DeliveryChannel = result.deliveryChannel === 'email' ? 'email' : 'sms';
-        setDeliveryChannel(nextDeliveryChannel);
         setRegisteredPhoneMask(result.maskedPhone ?? null);
         setDeliveryNote(result.deliveryNote ?? null);
-        setEmailSentInfo(result.emailSent !== false);
         setDeliveryIssue(null);
-        if (nextDeliveryChannel === 'sms') {
-          Alert.alert('Başarılı', 'Doğrulama kodu SMS olarak tekrar gönderildi.');
-        } else {
-          Alert.alert('Başarılı', 'Yeni doğrulama kodu gönderildi');
-        }
+        Alert.alert('Başarılı', 'Doğrulama kodu SMS olarak tekrar gönderildi.');
       } else {
         Alert.alert('Hata', result.error ?? 'Kod gönderilemedi');
       }
@@ -408,12 +392,7 @@ export default function ForgotPasswordScreen() {
         </View>
         <Text style={[styles.stepTitle, { fontSize: isSmall ? 18 : 22 }]}>Kodu Girin</Text>
         <Text style={[styles.stepDesc, { fontSize: isSmall ? 12 : 14 }]}>
-          {deliveryChannel === 'sms'
-            ? `Kayıtlı telefon numaranıza SMS ile gönderilen 6 haneli kodu girin${registeredPhoneMask ? ` • kayıtlı hat: ${registeredPhoneMask}` : ''}`
-            : emailSentInfo
-              ? `${email} adresine gönderilen 6 haneli kodu girin`
-              : 'Doğrulama kodu oluşturuldu. Lütfen tekrar deneyin.'
-          }
+          {`Kayıtlı telefon numaranıza SMS ile gönderilen 6 haneli kodu girin${registeredPhoneMask ? ` • kayıtlı hat: ${registeredPhoneMask}` : ''}`}
         </Text>
       </View>
       <View style={styles.inputGroup}>
@@ -448,7 +427,7 @@ export default function ForgotPasswordScreen() {
       <View style={styles.resendRow}>
         <Text style={styles.resendLabel}>Kod gelmedi mi? </Text>
         <TouchableOpacity onPress={handleResendCode} disabled={loading}>
-          <Text style={styles.resendLink}>{deliveryChannel === 'sms' ? 'SMS\'i Tekrar Gönder' : 'Tekrar Gönder'}</Text>
+          <Text style={styles.resendLink}>SMS'i Tekrar Gönder</Text>
         </TouchableOpacity>
       </View>
       <TouchableOpacity style={styles.backStepButton} onPress={() => animateTransition(() => setStep('email'))}>
