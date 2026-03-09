@@ -12,7 +12,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import { TURKISH_CITIES, getCityByName } from '@/constants/cities';
 import type { City } from '@/constants/cities';
 import { usePrivacy } from '@/contexts/PrivacyContext';
+import { VerificationCodeModal } from '@/components/VerificationCodeModal';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
+import { sendRegistrationVerificationCode, verifyRegistrationVerificationCode } from '@/utils/authVerification';
+
+interface VerifiedContactSnapshot {
+  email: string;
+  phone: string;
+}
 
 function extractErrorMessage(e: unknown): string {
   const errObj = e as any;
@@ -60,6 +67,13 @@ export default function RegisterCustomerScreen() {
   const [showAgreementModal, setShowAgreementModal] = useState<boolean>(false);
   const [kvkkAccepted, setKvkkAccepted] = useState<boolean>(false);
   const [referralCode, setReferralCode] = useState<string>('');
+  const [verificationCode, setVerificationCode] = useState<string>('');
+  const [showVerificationModal, setShowVerificationModal] = useState<boolean>(false);
+  const [verificationBusy, setVerificationBusy] = useState<boolean>(false);
+  const [verificationConfirming, setVerificationConfirming] = useState<boolean>(false);
+  const [verificationMaskedPhone, setVerificationMaskedPhone] = useState<string | null>(null);
+  const [verificationDeliveryNote, setVerificationDeliveryNote] = useState<string | null>(null);
+  const [verifiedContactSnapshot, setVerifiedContactSnapshot] = useState<VerifiedContactSnapshot | null>(null);
   const { acceptAllConsents } = usePrivacy();
 
   const filteredCities = useMemo(() => {
@@ -94,12 +108,124 @@ export default function RegisterCustomerScreen() {
 
   const isValidEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
 
+  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedPhone = normalizeTurkishPhone(phone);
+  const isRegistrationVerified = !!verifiedContactSnapshot && verifiedContactSnapshot.email === normalizedEmail && verifiedContactSnapshot.phone === normalizedPhone;
+  const isActionBusy = loading || verificationBusy || verificationConfirming;
+  const registerButtonLabel = isRegistrationVerified ? 'Kaydı Tamamla' : 'SMS Kodu Gönder ve Devam Et';
+
+  const clearVerificationState = () => {
+    setVerificationCode('');
+    setShowVerificationModal(false);
+    setVerificationMaskedPhone(null);
+    setVerificationDeliveryNote(null);
+    setVerifiedContactSnapshot(null);
+  };
+
+  const maybeResetVerificationState = (nextEmail: string, nextPhone: string) => {
+    const nextNormalizedEmail = nextEmail.trim().toLowerCase();
+    const nextNormalizedPhone = normalizeTurkishPhone(nextPhone);
+    if (verifiedContactSnapshot && (verifiedContactSnapshot.email !== nextNormalizedEmail || verifiedContactSnapshot.phone !== nextNormalizedPhone)) {
+      console.log('[RegisterCustomer] Verification invalidated for changed contact fields');
+      clearVerificationState();
+    }
+  };
+
+  const handlePhoneChange = (value: string) => {
+    const nextPhone = normalizeTurkishPhone(value);
+    maybeResetVerificationState(email, nextPhone);
+    setPhone(nextPhone);
+  };
+
+  const handleEmailChange = (value: string) => {
+    maybeResetVerificationState(value, phone);
+    setEmail(value);
+  };
+
+  const submitRegistration = async (sanitizedPhone: string) => {
+    setLoading(true);
+    try {
+      await acceptAllConsents();
+      console.log('[RegisterCustomer] Starting registration for:', normalizedEmail, 'verified:', isRegistrationVerified);
+      await registerCustomer(name, sanitizedPhone, normalizedEmail, password, gender as 'male' | 'female', selectedCity, selectedDistrict, vehiclePlate || undefined, referralCode || undefined);
+      console.log('[RegisterCustomer] Registration successful');
+      router.replace('/(customer-tabs)/dashboard');
+    } catch (e: unknown) {
+      console.log('[RegisterCustomer] Register error:', e);
+      const errorMsg = extractErrorMessage(e);
+      Alert.alert('Hata', errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startPhoneVerification = async (sanitizedPhone: string) => {
+    setVerificationBusy(true);
+    try {
+      const result = await sendRegistrationVerificationCode({
+        name: name.trim(),
+        email: normalizedEmail,
+        phone: sanitizedPhone,
+        deliveryMethod: 'sms',
+      });
+
+      if (!result.success) {
+        throw new Error(result.error ?? 'Doğrulama kodu gönderilemedi.');
+      }
+
+      setVerificationCode('');
+      setVerificationMaskedPhone(result.maskedPhone ?? sanitizedPhone);
+      setVerificationDeliveryNote(result.deliveryNote ?? null);
+      setShowVerificationModal(true);
+      console.log('[RegisterCustomer] Verification code sent for:', normalizedEmail, 'maskedPhone:', result.maskedPhone ?? 'none');
+    } catch (error: unknown) {
+      console.log('[RegisterCustomer] Verification send error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Doğrulama kodu gönderilemedi. Lütfen tekrar deneyin.';
+      Alert.alert('Hata', errorMessage);
+    } finally {
+      setVerificationBusy(false);
+    }
+  };
+
+  const handleVerifyPhoneCode = async () => {
+    if (verificationCode.trim().length !== 6) {
+      Alert.alert('Uyarı', 'Lütfen 6 haneli SMS kodunu girin');
+      return;
+    }
+
+    setVerificationConfirming(true);
+    try {
+      const result = await verifyRegistrationVerificationCode({
+        email: normalizedEmail,
+        code: verificationCode.trim(),
+      });
+
+      if (!result.success) {
+        throw new Error(result.error ?? 'Doğrulama kodu hatalı.');
+      }
+
+      setVerifiedContactSnapshot({
+        email: normalizedEmail,
+        phone: normalizedPhone,
+      });
+      setShowVerificationModal(false);
+      setVerificationCode('');
+      console.log('[RegisterCustomer] Phone verification completed for:', normalizedEmail);
+      await submitRegistration(normalizedPhone);
+    } catch (error: unknown) {
+      console.log('[RegisterCustomer] Verification confirm error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Doğrulama kodu onaylanamadı. Lütfen tekrar deneyin.';
+      Alert.alert('Hata', errorMessage);
+    } finally {
+      setVerificationConfirming(false);
+    }
+  };
+
   const handleRegister = async () => {
     if (!name || !phone || !email || !password) {
       Alert.alert('Uyarı', 'Lütfen tüm alanları doldurun');
       return;
     }
-    const normalizedPhone = normalizeTurkishPhone(phone);
     const phoneValidationError = getTurkishPhoneValidationError(normalizedPhone);
     if (phoneValidationError) {
       Alert.alert('Uyarı', phoneValidationError);
@@ -129,20 +255,12 @@ export default function RegisterCustomerScreen() {
       Alert.alert('Uyarı', 'Devam etmek için KVKK aydınlatma metnini kabul etmelisiniz');
       return;
     }
-    setLoading(true);
-    try {
-      await acceptAllConsents();
-      console.log('[RegisterCustomer] Starting registration for:', email);
-      await registerCustomer(name, normalizedPhone, email, password, gender as 'male' | 'female', selectedCity, selectedDistrict, vehiclePlate || undefined, referralCode || undefined);
-      console.log('[RegisterCustomer] Registration successful');
-      router.replace('/(customer-tabs)/dashboard');
-    } catch (e: unknown) {
-      console.log('[RegisterCustomer] Register error:', e);
-      const errorMsg = extractErrorMessage(e);
-      Alert.alert('Hata', errorMsg);
-    } finally {
-      setLoading(false);
+    if (!isRegistrationVerified) {
+      await startPhoneVerification(normalizedPhone);
+      return;
     }
+
+    await submitRegistration(normalizedPhone);
   };
 
   return (
@@ -164,8 +282,8 @@ export default function RegisterCustomerScreen() {
             <Text style={[styles.subtitle, { fontSize: isSmall ? 13 : 15 }]}>Güvenli yolculuk için kayıt olun</Text>
             <View style={styles.formSection}>
               <InputField renderIcon={() => <User size={18} color={Colors.dark.textMuted} />} label="Ad Soyad" placeholder="Adınızı girin" value={name} onChangeText={setName} />
-              <InputField renderIcon={() => <Phone size={18} color={Colors.dark.textMuted} />} label="Telefon" placeholder="05XXXXXXXXX" value={phone} onChangeText={(value) => setPhone(normalizeTurkishPhone(value))} keyboardType="phone-pad" helpText="Telefon numarası 11 haneli olmalı ve 0 ile başlamalı. Şifre sıfırlama kodları bu numaraya SMS olarak gönderilir." />
-              <InputField renderIcon={() => <Mail size={18} color={Colors.dark.textMuted} />} label="E-posta" placeholder="ornek@email.com" value={email} onChangeText={setEmail} keyboardType="email-address" />
+              <InputField renderIcon={() => <Phone size={18} color={Colors.dark.textMuted} />} label="Telefon" placeholder="05XXXXXXXXX" value={phone} onChangeText={handlePhoneChange} keyboardType="phone-pad" helpText="Telefon numarası 11 haneli olmalı ve 0 ile başlamalı. Kayıt tamamlanmadan önce bu numaraya SMS doğrulama kodu gönderilir." />
+              <InputField renderIcon={() => <Mail size={18} color={Colors.dark.textMuted} />} label="E-posta" placeholder="ornek@email.com" value={email} onChangeText={handleEmailChange} keyboardType="email-address" />
               <InputField renderIcon={() => <Lock size={18} color={Colors.dark.textMuted} />} label="Şifre" placeholder="En az 8 karakter, büyük/küçük harf, rakam" value={password} onChangeText={setPassword} secure />
               <InputField renderIcon={() => <Hash size={18} color={Colors.dark.textMuted} />} label="Araç Plakası" placeholder="34 ABC 123" value={vehiclePlate} onChangeText={(t) => setVehiclePlate(t.toUpperCase())} autoCapitalize="characters" />
               <InputField renderIcon={() => <Gift size={18} color={Colors.dark.textMuted} />} label="Davet Kodu (Opsiyonel)" placeholder="Arkadaşınızın davet kodu" value={referralCode} onChangeText={(t) => setReferralCode(t.toUpperCase())} autoCapitalize="characters" />
@@ -270,21 +388,52 @@ export default function RegisterCustomerScreen() {
               </View>
             </View>
 
+            {isRegistrationVerified ? (
+              <View style={styles.verificationBanner}>
+                <View style={styles.verificationBannerIcon}>
+                  <CheckCircle size={16} color={Colors.dark.success} />
+                </View>
+                <View style={styles.verificationBannerContent}>
+                  <Text style={styles.verificationBannerTitle}>Telefon doğrulandı</Text>
+                  <Text style={styles.verificationBannerText}>Bu numara için SMS onayı tamamlandı. Şimdi hesabınızı oluşturabilirsiniz.</Text>
+                </View>
+              </View>
+            ) : null}
+
             <TouchableOpacity
-              style={[styles.registerButton, (!agreementAccepted || !kvkkAccepted || loading) && styles.registerButtonDisabled, { paddingVertical: isSmall ? 15 : 18, borderRadius: isSmall ? 12 : 16 }]}
+              style={[styles.registerButton, (!agreementAccepted || !kvkkAccepted || isActionBusy) && styles.registerButtonDisabled, { paddingVertical: isSmall ? 15 : 18, borderRadius: isSmall ? 12 : 16 }]}
               onPress={handleRegister}
-              disabled={loading || !agreementAccepted || !kvkkAccepted}
+              disabled={isActionBusy || !agreementAccepted || !kvkkAccepted}
               activeOpacity={0.85}
+              testID="register-customer-submit-button"
             >
-              {loading ? (
+              {isActionBusy ? (
                 <ActivityIndicator color={Colors.dark.background} size="small" />
               ) : (
-                <Text style={styles.registerButtonText}>Kayıt Ol</Text>
+                <Text style={styles.registerButtonText}>{registerButtonLabel}</Text>
               )}
             </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+      <VerificationCodeModal
+        visible={showVerificationModal}
+        title="Telefonunu doğrula"
+        subtitle="Hesabını açmadan önce telefonuna gelen SMS kodunu doğrulaman gerekiyor."
+        code={verificationCode}
+        onCodeChange={setVerificationCode}
+        onClose={() => setShowVerificationModal(false)}
+        onConfirm={handleVerifyPhoneCode}
+        onResend={() => startPhoneVerification(normalizedPhone)}
+        isConfirming={verificationConfirming}
+        isResending={verificationBusy}
+        maskedPhone={verificationMaskedPhone}
+        deliveryNote={verificationDeliveryNote}
+        confirmLabel="Telefonu Onayla"
+        resendLabel="Kodu Yeniden Gönder"
+        testIDPrefix="register-customer-verification"
+      />
+
       <Modal visible={showCityPicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView behavior="padding" style={styles.modalContent}>
@@ -489,6 +638,39 @@ const styles = StyleSheet.create({
   agreementModalText: { fontSize: 14, color: Colors.dark.textSecondary, lineHeight: 22 },
   agreementModalButton: { backgroundColor: Colors.dark.primary, marginHorizontal: 20, marginVertical: 16, paddingVertical: 16, borderRadius: 14, alignItems: 'center' as const },
   agreementModalButtonText: { fontSize: 16, fontWeight: '700' as const, color: Colors.dark.background },
+  verificationBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 18,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: 'rgba(46,204,113,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(46,204,113,0.16)',
+  },
+  verificationBannerIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(46,204,113,0.16)',
+  },
+  verificationBannerContent: {
+    flex: 1,
+    gap: 4,
+  },
+  verificationBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: Colors.dark.text,
+  },
+  verificationBannerText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: Colors.dark.textSecondary,
+  },
   registerButton: { backgroundColor: Colors.dark.primary, paddingVertical: 18, borderRadius: 16, alignItems: 'center' },
   registerButtonDisabled: { opacity: 0.6 },
   registerButtonText: { fontSize: 17, fontWeight: '700', color: Colors.dark.background },

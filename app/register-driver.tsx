@@ -17,7 +17,9 @@ import { usePrivacy } from '@/contexts/PrivacyContext';
 import { buildApiUrl, getSessionToken } from '@/lib/trpc';
 import { getGoogleMapsApiKey } from '@/utils/maps';
 import { getDbHeaders } from '@/utils/db';
+import { VerificationCodeModal } from '@/components/VerificationCodeModal';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
+import { sendRegistrationVerificationCode, verifyRegistrationVerificationCode } from '@/utils/authVerification';
 
 type DriverCategory = 'driver' | 'scooter' | 'courier';
 type RegistrationCategory = DriverCategory | 'business';
@@ -77,6 +79,11 @@ interface RegisterBusinessResponse {
     id: string;
     name: string;
   } | null;
+}
+
+interface VerifiedContactSnapshot {
+  email: string;
+  phone: string;
 }
 
 async function registerBusinessAccount(payload: RegisterBusinessPayload): Promise<RegisterBusinessResponse> {
@@ -155,6 +162,13 @@ export default function RegisterDriverScreen() {
   const [showSuccessModal, setShowSuccessModal] = useState<boolean>(false);
   const successAnim = React.useRef(new RNAnimated.Value(0)).current;
   const successScale = React.useRef(new RNAnimated.Value(0.5)).current;
+  const [verificationCode, setVerificationCode] = useState<string>('');
+  const [showVerificationModal, setShowVerificationModal] = useState<boolean>(false);
+  const [verificationBusy, setVerificationBusy] = useState<boolean>(false);
+  const [verificationConfirming, setVerificationConfirming] = useState<boolean>(false);
+  const [verificationMaskedPhone, setVerificationMaskedPhone] = useState<string | null>(null);
+  const [verificationDeliveryNote, setVerificationDeliveryNote] = useState<string | null>(null);
+  const [verifiedContactSnapshot, setVerifiedContactSnapshot] = useState<VerifiedContactSnapshot | null>(null);
 
   const [licenseFront, setLicenseFront] = useState<string>('');
   const [licenseBack, setLicenseBack] = useState<string>('');
@@ -384,6 +398,39 @@ export default function RegisterDriverScreen() {
 
   const isValidEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
 
+  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedPhone = normalizeTurkishPhone(phone);
+  const isRegistrationVerified = !!verifiedContactSnapshot && verifiedContactSnapshot.email === normalizedEmail && verifiedContactSnapshot.phone === normalizedPhone;
+  const isActionBusy = loading || verificationBusy || verificationConfirming;
+
+  const clearVerificationState = () => {
+    setVerificationCode('');
+    setShowVerificationModal(false);
+    setVerificationMaskedPhone(null);
+    setVerificationDeliveryNote(null);
+    setVerifiedContactSnapshot(null);
+  };
+
+  const maybeResetVerificationState = (nextEmail: string, nextPhone: string) => {
+    const nextNormalizedEmail = nextEmail.trim().toLowerCase();
+    const nextNormalizedPhone = normalizeTurkishPhone(nextPhone);
+    if (verifiedContactSnapshot && (verifiedContactSnapshot.email !== nextNormalizedEmail || verifiedContactSnapshot.phone !== nextNormalizedPhone)) {
+      console.log('[RegisterDriver] Verification invalidated for changed contact fields');
+      clearVerificationState();
+    }
+  };
+
+  const handlePhoneChange = (value: string) => {
+    const nextPhone = normalizeTurkishPhone(value);
+    maybeResetVerificationState(email, nextPhone);
+    setPhone(nextPhone);
+  };
+
+  const handleEmailChange = (value: string) => {
+    maybeResetVerificationState(value, phone);
+    setEmail(value);
+  };
+
   const validateFormFields = (): boolean => {
     const isCourier = driverCategory === 'courier';
     const needsPlate = driverCategory !== 'scooter' || scooterSubType !== 'escooter';
@@ -478,17 +525,15 @@ export default function RegisterDriverScreen() {
     return true;
   };
 
-  const handleRegister = async () => {
-    if (!validateFormFields()) return;
+  const submitDriverRegistration = async (sanitizedPhone: string) => {
     setLoading(true);
     try {
       const isCourier = isCourierLike;
-      const normalizedPhone = normalizeTurkishPhone(phone);
       const licenseIssueDateStr = isCourier ? undefined : (parsedLicenseDate ? parsedLicenseDate.toISOString() : undefined);
       const registrationVehicleModel = isBusinessCategorySelected ? 'İşletme hesabı' : vehicleModel;
       const registrationVehicleColor = isBusinessCategorySelected ? 'Belirtilmedi' : vehicleColor;
       await acceptAllConsents();
-      await registerDriver(name, normalizedPhone, email, password, isCourier ? '' : vehiclePlate, registrationVehicleModel, registrationVehicleColor, partnerName, selectedCity, selectedDistrict, licenseIssueDateStr, driverCategory);
+      await registerDriver(name, sanitizedPhone, normalizedEmail, password, isCourier ? '' : vehiclePlate, registrationVehicleModel, registrationVehicleColor, partnerName, selectedCity, selectedDistrict, licenseIssueDateStr, driverCategory);
 
       let businessRegistrationWarning: string | null = null;
       if (isCourier && shouldShowBusinessFields) {
@@ -505,7 +550,7 @@ export default function RegisterDriverScreen() {
             district: selectedDistrict,
             latitude: businessCoordinates?.latitude,
             longitude: businessCoordinates?.longitude,
-            phone: normalizedPhone,
+            phone: sanitizedPhone,
             deliveryTime: '25-35 dk',
             deliveryFee: 25,
             minOrder: 100,
@@ -550,6 +595,78 @@ export default function RegisterDriverScreen() {
     }
   };
 
+  const startPhoneVerification = async (sanitizedPhone: string) => {
+    setVerificationBusy(true);
+    try {
+      const result = await sendRegistrationVerificationCode({
+        name: name.trim(),
+        email: normalizedEmail,
+        phone: sanitizedPhone,
+        deliveryMethod: 'sms',
+      });
+
+      if (!result.success) {
+        throw new Error(result.error ?? 'Doğrulama kodu gönderilemedi.');
+      }
+
+      setVerificationCode('');
+      setVerificationMaskedPhone(result.maskedPhone ?? sanitizedPhone);
+      setVerificationDeliveryNote(result.deliveryNote ?? null);
+      setShowVerificationModal(true);
+      console.log('[RegisterDriver] Verification code sent for:', normalizedEmail, 'maskedPhone:', result.maskedPhone ?? 'none');
+    } catch (error: unknown) {
+      console.log('[RegisterDriver] Verification send error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Doğrulama kodu gönderilemedi. Lütfen tekrar deneyin.';
+      Alert.alert('Hata', errorMessage);
+    } finally {
+      setVerificationBusy(false);
+    }
+  };
+
+  const handleVerifyPhoneCode = async () => {
+    if (verificationCode.trim().length !== 6) {
+      Alert.alert('Uyarı', 'Lütfen 6 haneli SMS kodunu girin');
+      return;
+    }
+
+    setVerificationConfirming(true);
+    try {
+      const result = await verifyRegistrationVerificationCode({
+        email: normalizedEmail,
+        code: verificationCode.trim(),
+      });
+
+      if (!result.success) {
+        throw new Error(result.error ?? 'Doğrulama kodu hatalı.');
+      }
+
+      setVerifiedContactSnapshot({
+        email: normalizedEmail,
+        phone: normalizedPhone,
+      });
+      setShowVerificationModal(false);
+      setVerificationCode('');
+      console.log('[RegisterDriver] Phone verification completed for:', normalizedEmail);
+      await submitDriverRegistration(normalizedPhone);
+    } catch (error: unknown) {
+      console.log('[RegisterDriver] Verification confirm error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Doğrulama kodu onaylanamadı. Lütfen tekrar deneyin.';
+      Alert.alert('Hata', errorMessage);
+    } finally {
+      setVerificationConfirming(false);
+    }
+  };
+
+  const handleRegister = async () => {
+    if (!validateFormFields()) return;
+    if (!isRegistrationVerified) {
+      await startPhoneVerification(normalizedPhone);
+      return;
+    }
+
+    await submitDriverRegistration(normalizedPhone);
+  };
+
   const resetForm = () => {
     setName('');
     setPhone('');
@@ -585,6 +702,7 @@ export default function RegisterDriverScreen() {
     setBusinessDescription('');
     setBusinessCategory('Yemek');
     setBusinessAddress('');
+    clearVerificationState();
     successAnim.setValue(0);
     successScale.setValue(0.5);
     console.log('Form reset for new driver registration');
@@ -633,6 +751,8 @@ export default function RegisterDriverScreen() {
       : driverCategory === 'scooter'
         ? 'Scooter Şoför Olarak Kayıt Ol'
         : 'Kurye Olarak Kayıt Ol';
+
+  const primaryActionLabel = isRegistrationVerified ? registerButtonLabel : 'SMS Kodu Gönder ve Devam Et';
 
   return (
     <View style={styles.container}>
@@ -816,8 +936,8 @@ export default function RegisterDriverScreen() {
             <Text style={styles.sectionTitle}>Kişisel Bilgiler</Text>
             <View style={styles.formSection}>
               <InputField renderIcon={() => <User size={18} color={Colors.dark.textMuted} />} label="Ad Soyad" placeholder="Adınızı girin" value={name} onChangeText={setName} />
-              <InputField renderIcon={() => <Phone size={18} color={Colors.dark.textMuted} />} label="Telefon" placeholder="05XXXXXXXXX" value={phone} onChangeText={(value) => setPhone(normalizeTurkishPhone(value))} keyboardType="phone-pad" helpText="Telefon numarası 11 haneli olmalı ve 0 ile başlamalı. Şifre sıfırlama kodları bu numaraya SMS olarak gönderilir." />
-              <InputField renderIcon={() => <Mail size={18} color={Colors.dark.textMuted} />} label="E-posta" placeholder="ornek@email.com" value={email} onChangeText={setEmail} keyboardType="email-address" />
+              <InputField renderIcon={() => <Phone size={18} color={Colors.dark.textMuted} />} label="Telefon" placeholder="05XXXXXXXXX" value={phone} onChangeText={handlePhoneChange} keyboardType="phone-pad" helpText="Telefon numarası 11 haneli olmalı ve 0 ile başlamalı. Kayıt tamamlanmadan önce bu numaraya SMS doğrulama kodu gönderilir." />
+              <InputField renderIcon={() => <Mail size={18} color={Colors.dark.textMuted} />} label="E-posta" placeholder="ornek@email.com" value={email} onChangeText={handleEmailChange} keyboardType="email-address" />
               <InputField renderIcon={() => <Lock size={18} color={Colors.dark.textMuted} />} label="Şifre" placeholder="En az 8 karakter, büyük/küçük harf, rakam" value={password} onChangeText={setPassword} secure />
             </View>
 
@@ -1193,21 +1313,52 @@ export default function RegisterDriverScreen() {
               </View>
             </View>
 
+            {isRegistrationVerified ? (
+              <View style={styles.verificationBanner}>
+                <View style={styles.verificationBannerIcon}>
+                  <CheckCircle size={16} color={Colors.dark.success} />
+                </View>
+                <View style={styles.verificationBannerContent}>
+                  <Text style={styles.verificationBannerTitle}>Telefon doğrulandı</Text>
+                  <Text style={styles.verificationBannerText}>SMS onayı tamamlandı. Artık başvurunu güvenle gönderebilirsin.</Text>
+                </View>
+              </View>
+            ) : null}
+
             <TouchableOpacity
-              style={[styles.registerButton, (!agreementAccepted || !kvkkAccepted || loading) && styles.registerButtonDisabled]}
+              style={[styles.registerButton, (!agreementAccepted || !kvkkAccepted || isActionBusy) && styles.registerButtonDisabled]}
               onPress={handleRegister}
-              disabled={loading || !agreementAccepted || !kvkkAccepted}
+              disabled={isActionBusy || !agreementAccepted || !kvkkAccepted}
               activeOpacity={0.85}
+              testID="register-driver-submit-button"
             >
-              {loading ? (
+              {isActionBusy ? (
                 <ActivityIndicator color={Colors.dark.background} size="small" />
               ) : (
-                <Text style={styles.registerButtonText}>{registerButtonLabel}</Text>
+                <Text style={styles.registerButtonText}>{primaryActionLabel}</Text>
               )}
             </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      <VerificationCodeModal
+        visible={showVerificationModal}
+        title="Telefonunu doğrula"
+        subtitle="Şoför hesabını açmadan önce telefonuna gelen SMS kodunu doğrulaman gerekiyor."
+        code={verificationCode}
+        onCodeChange={setVerificationCode}
+        onClose={() => setShowVerificationModal(false)}
+        onConfirm={handleVerifyPhoneCode}
+        onResend={() => startPhoneVerification(normalizedPhone)}
+        isConfirming={verificationConfirming}
+        isResending={verificationBusy}
+        maskedPhone={verificationMaskedPhone}
+        deliveryNote={verificationDeliveryNote}
+        confirmLabel="Telefonu Onayla"
+        resendLabel="Kodu Yeniden Gönder"
+        testIDPrefix="register-driver-verification"
+      />
 
       <Modal visible={showAgreementModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -1774,6 +1925,39 @@ const styles = StyleSheet.create({
   agreementModalText: { fontSize: 14, color: Colors.dark.textSecondary, lineHeight: 22 },
   agreementModalButton: { backgroundColor: Colors.dark.primary, marginHorizontal: 20, marginVertical: 16, paddingVertical: 16, borderRadius: 14, alignItems: 'center' as const },
   agreementModalButtonText: { fontSize: 16, fontWeight: '700' as const, color: Colors.dark.background },
+  verificationBanner: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    gap: 12,
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: 'rgba(46,204,113,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(46,204,113,0.16)',
+  },
+  verificationBannerIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: 'rgba(46,204,113,0.16)',
+  },
+  verificationBannerContent: {
+    flex: 1,
+    gap: 4,
+  },
+  verificationBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700' as const,
+    color: Colors.dark.text,
+  },
+  verificationBannerText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: Colors.dark.textSecondary,
+  },
   registerButton: { backgroundColor: Colors.dark.primary, paddingVertical: 18, borderRadius: 16, alignItems: 'center' as const, marginTop: 8 },
   registerButtonDisabled: { opacity: 0.6 },
   registerButtonText: { fontSize: 17, fontWeight: '700' as const, color: Colors.dark.background },
