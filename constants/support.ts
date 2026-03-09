@@ -7,7 +7,7 @@ export function buildSupportWhatsAppUrl(message: string): string {
   return `${SUPPORT_WHATSAPP_URL}?text=${encodeURIComponent(message)}`;
 }
 
-export function normalizePhoneForWhatsApp(phone: string | null | undefined): string | null {
+export function normalizePhoneForSms(phone: string | null | undefined): string | null {
   const digits = (phone ?? '').replace(/\D/g, '');
   if (!digits) return null;
   if (digits.startsWith('0090') && digits.length >= 14) return digits.slice(2);
@@ -15,6 +15,15 @@ export function normalizePhoneForWhatsApp(phone: string | null | undefined): str
   if (digits.startsWith('0') && digits.length === 11) return `90${digits.slice(1)}`;
   if (digits.length === 10) return `90${digits}`;
   return digits;
+}
+
+export function normalizePhoneForWhatsApp(phone: string | null | undefined): string | null {
+  return normalizePhoneForSms(phone);
+}
+
+export function getSmsDeliveryNote(maskedPhone?: string | null): string {
+  const phoneLabel = maskedPhone ? ` ${maskedPhone}` : '';
+  return `Kod, kayıtlı${phoneLabel} telefon numaranıza SMS olarak gönderilir.`;
 }
 
 export function getWhatsAppDeliveryNote(maskedPhone?: string | null): string {

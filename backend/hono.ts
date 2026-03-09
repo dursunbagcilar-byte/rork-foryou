@@ -9,15 +9,8 @@ import { setDbConfig, isDbConfigured, getCachedDbConfig, dbGet } from "./db/rork
 import type { User, Driver, Business, BusinessMenuItem, Session } from "./db/types";
 import { checkRateLimit, getClientIP, isIPBlocked, trackSuspiciousActivity, sanitizeInput } from "./utils/security";
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../utils/phone";
-import {
-  SUPPORT_WHATSAPP_DISPLAY,
-  SUPPORT_WHATSAPP_NUMBER,
-  buildPasswordResetSupportWhatsAppUrl,
-  getWhatsAppDeliveryNote,
-  getWhatsAppSupportDeliveryNote,
-  normalizePhoneForWhatsApp,
-} from "../constants/support";
-import { getWhatsAppResetFallbackMessage, sendPasswordResetWhatsAppCode } from "./utils/whatsapp";
+import { getSmsDeliveryNote, normalizePhoneForSms } from "../constants/support";
+import { getNetgsmSendErrorMessage, sendPasswordResetSmsCode } from "./utils/netgsm";
 
 const app = new Hono();
 
@@ -36,10 +29,6 @@ function maskPhoneNumber(phone: string | undefined): string | null {
   const suffix = digits.slice(-2);
   const hiddenLength = Math.max(digits.length - (prefix.length + suffix.length), 2);
   return `${prefix}${'•'.repeat(hiddenLength)}${suffix}`;
-}
-
-function buildPasswordResetWhatsAppUrl(identifier: string, maskedPhone: string | null, reason?: string): string {
-  return buildPasswordResetSupportWhatsAppUrl(identifier, maskedPhone, reason);
 }
 
 function getEmailSendErrorMessage(errorCode: string | null | undefined): string {
@@ -61,7 +50,7 @@ function isEmailIdentifier(value: string): boolean {
 function normalizePhoneForLookup(phone: string | undefined): string | null {
   const digits = (phone ?? '').replace(/\D/g, '');
   if (!digits) return null;
-  return normalizePhoneForWhatsApp(phone) ?? digits;
+  return normalizePhoneForSms(phone) ?? digits;
 }
 
 function normalizePhoneForComparison(phone: string | undefined): string {
@@ -1151,7 +1140,7 @@ app.post("/auth/send-reset-code", async (c) => {
         ? body.phone
         : body.email;
     const identifier = typeof rawIdentifier === 'string' ? rawIdentifier.trim() : '';
-    const deliveryMethod = body.deliveryMethod === 'email' ? 'email' : 'whatsapp';
+    const deliveryMethod = body.deliveryMethod === 'email' ? 'email' : 'sms';
     if (!identifier) return c.json({ success: false, error: 'E-posta veya telefon numarası gerekli' });
 
     console.log('[REST] send-reset-code:', identifier, 'deliveryMethod:', deliveryMethod);
@@ -1200,67 +1189,51 @@ app.post("/auth/send-reset-code", async (c) => {
     console.log('[REST] send-reset-code stored code for:', accountEmail, 'identifier:', identifier);
 
     const maskedPhone = maskPhoneNumber(typeof account.phone === 'string' ? account.phone : undefined);
-    const whatsappTargetPhone = normalizePhoneForWhatsApp(typeof account.phone === 'string' ? account.phone : undefined);
-    const directDeliveryNote = getWhatsAppDeliveryNote(maskedPhone);
-    const supportDeliveryNote = getWhatsAppSupportDeliveryNote(maskedPhone);
-    const whatsappUrl = buildPasswordResetWhatsAppUrl(accountEmail, maskedPhone, 'Şifre sıfırlama doğrulama kodu talebi');
+    const smsTargetPhone = normalizePhoneForSms(typeof account.phone === 'string' ? account.phone : undefined);
+    const directDeliveryNote = getSmsDeliveryNote(maskedPhone);
 
-    if (deliveryMethod === 'whatsapp') {
-      if (whatsappTargetPhone) {
-        const whatsappResult = await sendPasswordResetWhatsAppCode({
-          toPhone: whatsappTargetPhone,
-          code,
-        });
-
-        if (whatsappResult.success) {
-          recordLoginSuccess(resetLookupKey);
-          console.log('[REST] Reset code sent via WhatsApp:', accountEmail, 'maskedPhone:', maskedPhone, 'messageId:', whatsappResult.messageId);
-          return c.json({
-            success: true,
-            error: null,
-            emailSent: false,
-            deliveryChannel: 'whatsapp',
-            whatsappDeliveryMode: 'auto',
-            supportPhone: SUPPORT_WHATSAPP_NUMBER,
-            supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
-            whatsappUrl,
-            maskedPhone,
-            whatsappTargetPhone,
-            deliveryNote: directDeliveryNote,
-          });
-        }
-
-        recordLoginSuccess(resetLookupKey);
-        console.log('[REST] WhatsApp reset delivery failed, falling back to support:', accountEmail, whatsappResult.errorCode, whatsappResult.providerMessage);
+    if (deliveryMethod === 'sms') {
+      if (!smsTargetPhone) {
+        console.log('[REST] Reset code missing SMS target phone:', accountEmail);
         return c.json({
-          success: true,
-          error: getWhatsAppResetFallbackMessage(whatsappResult),
+          success: false,
+          error: 'Kayıtlı telefon numarası bulunamadı. Lütfen destek ile iletişime geçin.',
           emailSent: false,
-          deliveryChannel: 'whatsapp',
-          whatsappDeliveryMode: 'support',
-          supportPhone: SUPPORT_WHATSAPP_NUMBER,
-          supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
-          whatsappUrl,
+          deliveryChannel: 'sms',
           maskedPhone,
-          whatsappTargetPhone,
-          deliveryNote: supportDeliveryNote,
+          smsTargetPhone: null,
+          deliveryNote: directDeliveryNote,
+        });
+      }
+
+      const smsResult = await sendPasswordResetSmsCode({
+        toPhone: smsTargetPhone,
+        code,
+      });
+
+      if (!smsResult.success) {
+        console.log('[REST] SMS reset delivery failed:', accountEmail, smsResult.errorCode, smsResult.providerMessage);
+        return c.json({
+          success: false,
+          error: getNetgsmSendErrorMessage(smsResult),
+          emailSent: false,
+          deliveryChannel: 'sms',
+          maskedPhone,
+          smsTargetPhone,
+          deliveryNote: directDeliveryNote,
         });
       }
 
       recordLoginSuccess(resetLookupKey);
-      console.log('[REST] Reset code missing WhatsApp target phone, falling back to support:', accountEmail);
+      console.log('[REST] Reset code sent via SMS:', accountEmail, 'maskedPhone:', maskedPhone, 'messageId:', smsResult.messageId);
       return c.json({
         success: true,
-        error: 'Kayıtlı WhatsApp numarası bulunamadı. Kod talebiniz destek hattına yönlendirildi.',
+        error: null,
         emailSent: false,
-        deliveryChannel: 'whatsapp',
-        whatsappDeliveryMode: 'support',
-        supportPhone: SUPPORT_WHATSAPP_NUMBER,
-        supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
-        whatsappUrl,
+        deliveryChannel: 'sms',
         maskedPhone,
-        whatsappTargetPhone,
-        deliveryNote: supportDeliveryNote,
+        smsTargetPhone,
+        deliveryNote: directDeliveryNote,
       });
     }
 
@@ -1273,17 +1246,13 @@ app.post("/auth/send-reset-code", async (c) => {
     if (!emailResult.success) {
       console.log('[REST] Reset email failed:', emailResult.errorCode, emailResult.providerMessage);
       return c.json({
-        success: true,
+        success: false,
         error: getEmailSendErrorMessage(emailResult.errorCode),
         emailSent: false,
-        deliveryChannel: 'whatsapp',
-        whatsappDeliveryMode: 'support',
-        supportPhone: SUPPORT_WHATSAPP_NUMBER,
-        supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
-        whatsappUrl,
+        deliveryChannel: 'email',
         maskedPhone,
-        whatsappTargetPhone,
-        deliveryNote: supportDeliveryNote,
+        smsTargetPhone,
+        deliveryNote: null,
       });
     }
 
@@ -1294,11 +1263,9 @@ app.post("/auth/send-reset-code", async (c) => {
       error: null,
       emailSent: true,
       deliveryChannel: 'email',
-      supportPhone: SUPPORT_WHATSAPP_NUMBER,
-      supportPhoneDisplay: SUPPORT_WHATSAPP_DISPLAY,
       maskedPhone,
-      whatsappTargetPhone,
-      deliveryNote: directDeliveryNote,
+      smsTargetPhone,
+      deliveryNote: null,
     });
   } catch (err: unknown) {
     console.log('[REST] send-reset-code error:', err instanceof Error ? err.message : err);
