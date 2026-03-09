@@ -24,6 +24,7 @@ import {
 } from 'lucide-react-native';
 import { getBaseUrl, getSessionToken } from '@/lib/trpc';
 import { useTheme } from '@/contexts/ThemeContext';
+import { getDbBootstrapPayload, getDbHeaders, getOptionalDbConfig } from '@/utils/db';
 
 interface StatusItem {
   id: string;
@@ -166,13 +167,13 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
     return null;
   });
 
-  const dbEndpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT || '';
-  const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE || '';
-  const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN || '';
+  const clientDbConfig = getOptionalDbConfig();
+  const dbBootstrapPayload = getDbBootstrapPayload();
+  const dbHeaders = getDbHeaders();
   const mapsConfigured = Boolean(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim());
-  const clientDbEnvConfigured = Boolean(dbEndpoint.trim() && dbNamespace.trim() && dbToken.trim());
+  const clientDbEnvConfigured = Boolean(clientDbConfig);
 
-  console.log('[SystemStatus] Client DB env check - endpoint:', dbEndpoint ? 'YES' : 'NO', 'namespace:', dbNamespace ? 'YES' : 'NO', 'token:', dbToken ? 'YES' : 'NO', 'configured:', clientDbEnvConfigured);
+  console.log('[SystemStatus] Client DB env configured:', clientDbEnvConfigured);
 
   let backendLive = false;
   let databaseLive = false;
@@ -185,11 +186,7 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
   let dbMessage = 'Veritabanı durumu kontrol ediliyor...';
 
   if (baseUrl) {
-    const dbHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (dbEndpoint) dbHeaders['x-db-endpoint'] = dbEndpoint;
-    if (dbNamespace) dbHeaders['x-db-namespace'] = dbNamespace;
-    if (dbToken) dbHeaders['x-db-token'] = dbToken;
-    console.log('[SystemStatus] Checking health at:', baseUrl, 'dbHeaders present:', Boolean(dbEndpoint));
+    console.log('[SystemStatus] Checking health at:', baseUrl, 'dbHeaders present:', clientDbEnvConfigured);
 
     try {
       const healthResponse = await fetchWithRetry(`${baseUrl}/api/health`, {
@@ -241,13 +238,7 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
         const bootstrapResponse = await fetchWithRetry(`${baseUrl}/api/bootstrap-db`, {
           method: 'POST',
           headers: dbHeaders,
-          body: JSON.stringify(clientDbEnvConfigured
-            ? {
-                endpoint: dbEndpoint,
-                namespace: dbNamespace,
-                token: dbToken,
-              }
-            : {}),
+          body: JSON.stringify(dbBootstrapPayload),
         }, 1);
 
         const bootstrapPayload = await bootstrapResponse.json().catch(() => null) as {
@@ -285,11 +276,7 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
         const bootstrapResponse = await fetchWithRetry(`${baseUrl}/api/bootstrap-db`, {
           method: 'POST',
           headers: dbHeaders,
-          body: JSON.stringify({
-            endpoint: dbEndpoint,
-            namespace: dbNamespace,
-            token: dbToken,
-          }),
+          body: JSON.stringify(dbBootstrapPayload),
         }, 1);
 
         const bootstrapPayload = await bootstrapResponse.json().catch(() => null) as {

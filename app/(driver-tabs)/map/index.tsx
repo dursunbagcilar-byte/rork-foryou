@@ -28,6 +28,7 @@ import type { VehicleType } from '@/constants/pricing';
 import { getVehicleImageUrl } from '@/constants/vehicleImages';
 import type { Driver } from '@/constants/mockData';
 import { buildApiUrl, getSessionToken, trpc } from '@/lib/trpc';
+import { getDbHeaders } from '@/utils/db';
 import { getGoogleMapsApiKey, getGeocodingUrl, logMapsKeyStatus } from '@/utils/maps';
 
 const GOOGLE_API_KEY = getGoogleMapsApiKey();
@@ -129,20 +130,9 @@ async function postDriverSync(path: string, body: Record<string, unknown>): Prom
     throw new Error('Oturum bulunamadı');
   }
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+  const headers = getDbHeaders({
     authorization: `Bearer ${sessionToken}`,
-  };
-
-  const dbEndpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT;
-  const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
-  const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
-
-  if (dbEndpoint && dbNamespace && dbToken) {
-    headers['x-db-endpoint'] = dbEndpoint;
-    headers['x-db-namespace'] = dbNamespace;
-    headers['x-db-token'] = dbToken;
-  }
+  });
 
   const endpoint = buildApiUrl(path);
   console.log('[Driver] REST sync request:', endpoint, JSON.stringify(body));

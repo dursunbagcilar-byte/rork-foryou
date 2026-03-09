@@ -332,47 +332,89 @@ function isValidDbUrl(url: string): boolean {
 }
 
 async function ensureDbReady(dbEp?: string, dbNs?: string, dbTk?: string): Promise<boolean> {
-  if (dbEp && dbNs && dbTk) {
-    if (!isValidDbUrl(dbEp)) {
-      console.log('[SERVER] Invalid DB endpoint URL, skipping DB init:', dbEp);
+  const cached = getCachedDbConfig();
+  const resolvedEndpoint = (dbEp || '').trim()
+    || readServerEnv('EXPO_PUBLIC_RORK_DB_ENDPOINT')
+    || readServerEnv('RORK_DB_ENDPOINT')
+    || cached?.endpoint
+    || '';
+  const resolvedNamespace = (dbNs || '').trim()
+    || readServerEnv('EXPO_PUBLIC_RORK_DB_NAMESPACE')
+    || readServerEnv('RORK_DB_NAMESPACE')
+    || cached?.namespace
+    || '';
+  const resolvedToken = (dbTk || '').trim()
+    || readServerEnv('EXPO_PUBLIC_RORK_DB_TOKEN')
+    || readServerEnv('RORK_DB_TOKEN')
+    || cached?.token
+    || '';
+
+  if (!resolvedEndpoint || !resolvedNamespace || !resolvedToken) {
+    if (_dbReady || !isDbConfigured()) {
       return _dbReady;
     }
-    const wasConfigured = isDbConfigured();
-    setDbConfig(dbEp, dbNs, dbTk);
 
-    if (!_dbReady) {
-      if (_dbInitPromise) {
-        await _dbInitPromise;
-        if (_dbReady) return true;
-      }
-
-      const initStart = Date.now();
-      _dbInitPromise = (async () => {
-        try {
-          setDbConfig(dbEp, dbNs, dbTk);
-          await reinitializeStore();
-          _dbReady = true;
-          console.log('[SERVER] DB ready from headers in', Date.now() - initStart, 'ms, users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
-        } catch (e) {
-          console.log('[SERVER] DB init error:', e, 'elapsed:', Date.now() - initStart, 'ms');
-          setDbConfig(dbEp, dbNs, dbTk);
-          try {
-            await bootstrapDbConfig(dbEp, dbNs, dbTk);
-            _dbReady = isDbConfigured();
-            if (_dbReady) {
-              console.log('[SERVER] DB recovered via bootstrap fallback in', Date.now() - initStart, 'ms');
-            }
-          } catch (e2) {
-            console.log('[SERVER] DB bootstrap fallback also failed:', e2);
-          }
-        }
-      })();
+    if (_dbInitPromise) {
       await _dbInitPromise;
-      _dbInitPromise = null;
-    } else if (!wasConfigured) {
-      setDbConfig(dbEp, dbNs, dbTk);
+      return _dbReady;
     }
+
+    const initStart = Date.now();
+    _dbInitPromise = (async () => {
+      try {
+        await reinitializeStore();
+        _dbReady = isDbConfigured();
+        console.log('[SERVER] DB reloaded from cached config in', Date.now() - initStart, 'ms, users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
+      } catch (error) {
+        console.log('[SERVER] Cached DB reload error:', error, 'elapsed:', Date.now() - initStart, 'ms');
+      }
+    })();
+    await _dbInitPromise;
+    _dbInitPromise = null;
+    return _dbReady;
   }
+
+  if (!isValidDbUrl(resolvedEndpoint)) {
+    console.log('[SERVER] Invalid DB endpoint URL, skipping DB init:', resolvedEndpoint);
+    return _dbReady;
+  }
+
+  const wasConfigured = isDbConfigured();
+  setDbConfig(resolvedEndpoint, resolvedNamespace, resolvedToken);
+
+  if (!_dbReady) {
+    if (_dbInitPromise) {
+      await _dbInitPromise;
+      if (_dbReady) return true;
+    }
+
+    const initStart = Date.now();
+    _dbInitPromise = (async () => {
+      try {
+        setDbConfig(resolvedEndpoint, resolvedNamespace, resolvedToken);
+        await reinitializeStore();
+        _dbReady = true;
+        console.log('[SERVER] DB ready in', Date.now() - initStart, 'ms, users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
+      } catch (e) {
+        console.log('[SERVER] DB init error:', e, 'elapsed:', Date.now() - initStart, 'ms');
+        setDbConfig(resolvedEndpoint, resolvedNamespace, resolvedToken);
+        try {
+          await bootstrapDbConfig(resolvedEndpoint, resolvedNamespace, resolvedToken);
+          _dbReady = isDbConfigured();
+          if (_dbReady) {
+            console.log('[SERVER] DB recovered via bootstrap fallback in', Date.now() - initStart, 'ms');
+          }
+        } catch (e2) {
+          console.log('[SERVER] DB bootstrap fallback also failed:', e2);
+        }
+      }
+    })();
+    await _dbInitPromise;
+    _dbInitPromise = null;
+  } else if (!wasConfigured) {
+    setDbConfig(resolvedEndpoint, resolvedNamespace, resolvedToken);
+  }
+
   return _dbReady;
 }
 

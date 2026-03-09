@@ -16,6 +16,7 @@ import type { City } from '@/constants/cities';
 import { usePrivacy } from '@/contexts/PrivacyContext';
 import { buildApiUrl, getSessionToken } from '@/lib/trpc';
 import { getGoogleMapsApiKey } from '@/utils/maps';
+import { getDbHeaders } from '@/utils/db';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 
 type DriverCategory = 'driver' | 'scooter' | 'courier';
@@ -84,20 +85,9 @@ async function registerBusinessAccount(payload: RegisterBusinessPayload): Promis
     throw new Error('Oturum oluşturulamadı. Lütfen tekrar giriş yapın.');
   }
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+  const headers = getDbHeaders({
     authorization: `Bearer ${sessionToken}`,
-  };
-
-  const dbEndpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT;
-  const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
-  const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
-
-  if (dbEndpoint && dbNamespace && dbToken) {
-    headers['x-db-endpoint'] = dbEndpoint;
-    headers['x-db-namespace'] = dbNamespace;
-    headers['x-db-token'] = dbToken;
-  }
+  });
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000);

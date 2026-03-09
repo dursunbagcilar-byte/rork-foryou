@@ -17,17 +17,7 @@ import {
   getWhatsAppDeliveryNote,
   getWhatsAppSupportDeliveryNote,
 } from '@/constants/support';
-
-function getDbHeaders(): Record<string, string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  const dbEndpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT;
-  const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
-  const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
-  if (dbEndpoint) headers['x-db-endpoint'] = dbEndpoint;
-  if (dbNamespace) headers['x-db-namespace'] = dbNamespace;
-  if (dbToken) headers['x-db-token'] = dbToken;
-  return headers;
-}
+import { getDbHeaders } from '@/utils/db';
 
 async function resolveApiBase(): Promise<string> {
   let base = getBaseUrl();

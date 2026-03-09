@@ -15,6 +15,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import InAppNotification from "@/components/InAppNotification";
 import { Colors } from "@/constants/colors";
 import { trpc, trpcClient, resetCircuitBreaker } from "@/lib/trpc";
+import { getDbBootstrapPayload, getDbHeaders, hasDbConfig } from "@/utils/db";
 
 try {
   void SplashScreen.preventAutoHideAsync();
@@ -195,13 +196,12 @@ export default function RootLayout() {
           console.log('[Layout] DB bootstrap - waiting for base URL...');
           baseUrl = await waitForBaseUrl(12000);
         }
-        const dbEndpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT;
-        const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
-        const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
+        const hasClientDbConfig = hasDbConfig();
+        const dbBootstrapPayload = getDbBootstrapPayload();
 
-        console.log('[Layout] DB bootstrap - baseUrl:', baseUrl ? baseUrl.substring(0, 50) : 'MISSING', 'dbEndpoint:', dbEndpoint ? 'SET' : 'MISSING');
+        console.log('[Layout] DB bootstrap - baseUrl:', baseUrl ? baseUrl.substring(0, 50) : 'MISSING', 'clientDbConfig:', hasClientDbConfig ? 'SET' : 'MISSING');
 
-        if (baseUrl && dbEndpoint && dbNamespace && dbToken) {
+        if (baseUrl) {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 10000);
           try {
@@ -209,19 +209,14 @@ export default function RootLayout() {
             console.log('[Layout] DB bootstrap URL:', bootstrapUrl);
             const res = await fetch(bootstrapUrl, {
               method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'x-db-endpoint': dbEndpoint,
-                'x-db-namespace': dbNamespace,
-                'x-db-token': dbToken,
-              },
-              body: JSON.stringify({ endpoint: dbEndpoint, namespace: dbNamespace, token: dbToken }),
+              headers: getDbHeaders(),
+              body: JSON.stringify(dbBootstrapPayload),
               signal: controller.signal,
             });
             clearTimeout(timeoutId);
             if (res.ok) {
               const data = await res.json();
-              console.log('[Layout] DB bootstrap OK - drivers:', data.drivers, 'users:', data.users);
+              console.log('[Layout] DB bootstrap OK - configured:', data.configured, 'storageMode:', data.storageMode, 'drivers:', data.drivers, 'users:', data.users);
             } else {
               console.log('[Layout] DB bootstrap status:', res.status);
             }
@@ -229,8 +224,6 @@ export default function RootLayout() {
             clearTimeout(timeoutId);
             console.log('[Layout] DB bootstrap fetch error (non-critical):', fetchErr);
           }
-        } else if (baseUrl) {
-          console.log('[Layout] DB bootstrap skipped - DB env vars missing but baseUrl available:', baseUrl.substring(0, 50));
         }
       } catch (e) {
         console.log('[Layout] DB bootstrap error (non-critical):', e);

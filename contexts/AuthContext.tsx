@@ -5,6 +5,7 @@ import createContextHook from '@nkzw/create-context-hook';
 import type { User, Driver, Ride, DriverDocuments } from '@/constants/mockData';
 import { PRICING } from '@/constants/pricing';
 import { setSessionToken, getSessionToken, getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl, trpcClient } from '@/lib/trpc';
+import { getDbHeaders as buildDbHeaders } from '@/utils/db';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 
 type UserType = 'customer' | 'driver' | null;
@@ -179,14 +180,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   }, []);
 
   const getDbHeaders = useCallback((): Record<string, string> => {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    const dbEndpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT;
-    const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
-    const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
-    if (dbEndpoint) headers['x-db-endpoint'] = dbEndpoint;
-    if (dbNamespace) headers['x-db-namespace'] = dbNamespace;
-    if (dbToken) headers['x-db-token'] = dbToken;
-    return headers;
+    return buildDbHeaders();
   }, []);
 
   const directFetch = useCallback(async (
