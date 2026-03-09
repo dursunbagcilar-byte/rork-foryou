@@ -10,7 +10,7 @@ import type { User, Driver, Business, BusinessMenuItem, Session } from "./db/typ
 import { checkRateLimit, getClientIP, isIPBlocked, trackSuspiciousActivity, sanitizeInput } from "./utils/security";
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../utils/phone";
 import { getSmsDeliveryNote, normalizePhoneForSms } from "../constants/support";
-import { getNetgsmSendErrorMessage, sendPasswordResetSmsCode } from "./utils/netgsm";
+import { getNetgsmSendErrorMessage, sendPasswordResetSmsCode, sendVerificationSmsCode } from "./utils/netgsm";
 
 const app = new Hono();
 
@@ -776,6 +776,190 @@ app.get("/health", async (c) => {
     drivers: db.drivers.getAll().length,
     users: db.users.getAll().length,
   });
+});
+
+app.post("/auth/send-verification-code", async (c) => {
+  try {
+    const dbEp = c.req.header('x-db-endpoint');
+    const dbNs = c.req.header('x-db-namespace');
+    const dbTk = c.req.header('x-db-token');
+    await ensureDbReady(dbEp, dbNs, dbTk);
+
+    const body = await c.req.json();
+    const { sanitizeInput, validateEmail, checkLoginAttempt, recordLoginSuccess } = await import('./utils/security');
+    const { sendEmail, generateResetCode, buildVerificationCodeEmail } = await import('./utils/email');
+    const cleanEmail = typeof body.email === 'string' ? body.email.toLowerCase().trim() : '';
+    const cleanName = sanitizeInput(typeof body.name === 'string' ? body.name : '');
+    const cleanPhone = normalizeTurkishPhone(typeof body.phone === 'string' ? body.phone : '');
+    const deliveryMethod = body.deliveryMethod === 'sms' ? 'sms' : 'email';
+    const phoneValidationError = typeof body.phone === 'string' && body.phone.trim()
+      ? getTurkishPhoneValidationError(cleanPhone)
+      : null;
+
+    if (!cleanEmail || !cleanName) {
+      return c.json({ success: false, error: 'Ad ve e-posta alanları zorunludur.' });
+    }
+
+    if (!validateEmail(cleanEmail)) {
+      return c.json({ success: false, error: 'Geçersiz e-posta adresi' });
+    }
+
+    if (phoneValidationError) {
+      return c.json({
+        success: false,
+        error: phoneValidationError,
+        emailSent: false,
+        deliveryChannel: 'sms',
+        maskedPhone: null,
+        deliveryNote: getSmsDeliveryNote(null),
+      });
+    }
+
+    const loginCheck = checkLoginAttempt(`verify_${cleanEmail}`);
+    if (!loginCheck.allowed) {
+      return c.json({ success: false, error: 'Çok fazla deneme. Lütfen daha sonra tekrar deneyin.' });
+    }
+
+    const existingUser = db.users.getByEmail(cleanEmail);
+    const existingDriver = db.drivers.getByEmail(cleanEmail);
+    if (existingUser || existingDriver) {
+      return c.json({ success: false, error: 'Bu e-posta adresi zaten kayıtlı' });
+    }
+
+    const maskedPhone = maskPhoneNumber(cleanPhone || undefined);
+    if (cleanPhone && isPhoneTakenByAnotherAccount(cleanPhone)) {
+      return c.json({
+        success: false,
+        error: 'Bu telefon numarası zaten kayıtlı',
+        emailSent: false,
+        deliveryChannel: deliveryMethod,
+        maskedPhone,
+        deliveryNote: deliveryMethod === 'sms' ? getSmsDeliveryNote(maskedPhone) : null,
+      });
+    }
+
+    const code = generateResetCode();
+    const codeKey = `verify_${cleanEmail}`;
+    db.resetCodes.set(codeKey, code);
+    console.log('[REST] send-verification-code stored code for:', codeKey, 'deliveryMethod:', deliveryMethod);
+
+    const smsTargetPhone = normalizePhoneForSms(cleanPhone || undefined);
+    const directDeliveryNote = getSmsDeliveryNote(maskedPhone);
+
+    if (deliveryMethod === 'sms') {
+      if (!smsTargetPhone) {
+        return c.json({
+          success: false,
+          error: 'Geçerli bir telefon numarası gerekli.',
+          emailSent: false,
+          deliveryChannel: 'sms',
+          maskedPhone,
+          deliveryNote: directDeliveryNote,
+        });
+      }
+
+      const smsResult = await sendVerificationSmsCode({
+        toPhone: smsTargetPhone,
+        code,
+      });
+
+      if (!smsResult.success) {
+        console.log('[REST] Verification SMS send failed:', cleanEmail, smsResult.errorCode, smsResult.providerMessage);
+        return c.json({
+          success: false,
+          error: getNetgsmSendErrorMessage(smsResult),
+          emailSent: false,
+          deliveryChannel: 'sms',
+          maskedPhone,
+          deliveryNote: directDeliveryNote,
+        });
+      }
+
+      recordLoginSuccess(`verify_${cleanEmail}`);
+      console.log('[REST] Verification code sent via SMS:', cleanEmail, 'maskedPhone:', maskedPhone, 'messageId:', smsResult.messageId);
+      return c.json({
+        success: true,
+        error: null,
+        emailSent: false,
+        deliveryChannel: 'sms',
+        maskedPhone,
+        deliveryNote: directDeliveryNote,
+      });
+    }
+
+    const emailResult = await sendEmail({
+      to: cleanEmail,
+      subject: '2GO - E-posta Doğrulama Kodu',
+      html: buildVerificationCodeEmail(code, cleanName),
+    });
+
+    if (!emailResult.success) {
+      console.log('[REST] Verification email send failed:', cleanEmail, emailResult.errorCode, emailResult.providerMessage);
+      return c.json({
+        success: false,
+        error: getEmailSendErrorMessage(emailResult.errorCode),
+        emailSent: false,
+        deliveryChannel: 'email',
+        maskedPhone,
+        deliveryNote: null,
+      });
+    }
+
+    recordLoginSuccess(`verify_${cleanEmail}`);
+    console.log('[REST] Verification code sent via email:', cleanEmail, 'code:', code);
+    return c.json({
+      success: true,
+      error: null,
+      emailSent: true,
+      deliveryChannel: 'email',
+      maskedPhone,
+      deliveryNote: null,
+    });
+  } catch (err: unknown) {
+    console.log('[REST] send-verification-code error:', err instanceof Error ? err.message : err);
+    return c.json({ success: false, error: 'Bir hata oluştu. Lütfen tekrar deneyin.' }, 500);
+  }
+});
+
+app.post("/auth/verify-verification-code", async (c) => {
+  try {
+    const dbEp = c.req.header('x-db-endpoint');
+    const dbNs = c.req.header('x-db-namespace');
+    const dbTk = c.req.header('x-db-token');
+    await ensureDbReady(dbEp, dbNs, dbTk);
+
+    const body = await c.req.json();
+    const cleanEmail = typeof body.email === 'string' ? body.email.toLowerCase().trim() : '';
+    const inputCode = typeof body.code === 'string' ? body.code.trim() : '';
+    if (!cleanEmail || !inputCode) {
+      return c.json({ success: false, error: 'E-posta ve kod gerekli' });
+    }
+
+    const codeKey = `verify_${cleanEmail}`;
+    const stored = await db.resetCodes.getAsync(codeKey);
+    console.log('[REST] verify-verification-code lookup:', codeKey, 'input:', inputCode, 'found:', !!stored);
+
+    if (!stored) {
+      return c.json({ success: false, error: 'Doğrulama kodu bulunamadı veya süresi dolmuş' });
+    }
+
+    if (stored.attempts >= 5) {
+      db.resetCodes.delete(codeKey);
+      return c.json({ success: false, error: 'Çok fazla hatalı deneme. Yeni kod talep edin.' });
+    }
+
+    if (stored.code !== inputCode) {
+      await db.resetCodes.incrementAttemptsAsync(codeKey);
+      return c.json({ success: false, error: 'Doğrulama kodu hatalı' });
+    }
+
+    db.resetCodes.delete(codeKey);
+    console.log('[REST] verify-verification-code success for:', cleanEmail);
+    return c.json({ success: true, error: null });
+  } catch (err: unknown) {
+    console.log('[REST] verify-verification-code error:', err instanceof Error ? err.message : err);
+    return c.json({ success: false, error: 'Bir hata oluştu. Lütfen tekrar deneyin.' }, 500);
+  }
 });
 
 app.post("/auth/register-customer", async (c) => {

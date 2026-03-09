@@ -34,17 +34,30 @@ function getMissingNetgsmConfigKeys(): string[] {
 }
 
 export type SendNetgsmErrorCode = 'not_configured' | 'invalid_phone' | 'provider_error' | 'network_error';
+export type NetgsmCodePurpose = 'password_reset' | 'account_verification';
 
-export interface SendPasswordResetSmsParams {
+export interface SendNetgsmCodeSmsParams {
   toPhone: string;
   code: string;
+  purpose?: NetgsmCodePurpose;
 }
 
-export interface SendPasswordResetSmsResult {
+export interface SendNetgsmCodeSmsResult {
   success: boolean;
   errorCode: SendNetgsmErrorCode | null;
   providerMessage: string | null;
   messageId: string | null;
+}
+
+export type SendPasswordResetSmsParams = Omit<SendNetgsmCodeSmsParams, 'purpose'>;
+export type SendPasswordResetSmsResult = SendNetgsmCodeSmsResult;
+
+function buildNetgsmCodeMessage(code: string, purpose: NetgsmCodePurpose): string {
+  if (purpose === 'account_verification') {
+    return `2GO hesap dogrulama kodunuz: ${code}. Bu kodu kimseyle paylasmayin.`;
+  }
+
+  return `2GO sifre sifirlama kodunuz: ${code}. Bu kodu kimseyle paylasmayin.`;
 }
 
 function hasNetgsmConfig(): boolean {
@@ -156,7 +169,7 @@ function getNetgsmProviderMessage(rawText: string, status: number): string {
   return rawText.trim() || `NetGSM isteği başarısız oldu (HTTP ${status}).`;
 }
 
-export function getNetgsmSendErrorMessage(result: SendPasswordResetSmsResult): string {
+export function getNetgsmSendErrorMessage(result: SendNetgsmCodeSmsResult): string {
   if (result.errorCode === 'not_configured') {
     return 'SMS servisi henüz yapılandırılmadı. NetGSM bilgilerini ekleyip tekrar deneyin.';
   }
@@ -172,7 +185,7 @@ export function getNetgsmSendErrorMessage(result: SendPasswordResetSmsResult): s
   return 'SMS servisine bağlanılamadı. Lütfen tekrar deneyin.';
 }
 
-export async function sendPasswordResetSmsCode(params: SendPasswordResetSmsParams): Promise<SendPasswordResetSmsResult> {
+export async function sendNetgsmCodeSms(params: SendNetgsmCodeSmsParams): Promise<SendNetgsmCodeSmsResult> {
   if (!hasNetgsmConfig()) {
     console.log('[NETGSM] Missing NetGSM SMS config. Missing keys:', getMissingNetgsmConfigKeys().join(', '));
     return {
@@ -194,7 +207,8 @@ export async function sendPasswordResetSmsCode(params: SendPasswordResetSmsParam
     };
   }
 
-  const message = `2GO sifre sifirlama kodunuz: ${params.code}. Bu kodu kimseyle paylasmayin.`;
+  const purpose = params.purpose ?? 'password_reset';
+  const message = buildNetgsmCodeMessage(params.code, purpose);
   const xmlPayload = `<?xml version="1.0" encoding="UTF-8"?>
 <mainbody>
   <header>
@@ -210,7 +224,7 @@ export async function sendPasswordResetSmsCode(params: SendPasswordResetSmsParam
   </body>
 </mainbody>`;
 
-  console.log('[NETGSM] Sending password reset SMS to:', normalizedPhone, 'msgheader:', NETGSM_MSGHEADER);
+  console.log('[NETGSM] Sending auth SMS to:', normalizedPhone, 'purpose:', purpose, 'msgheader:', NETGSM_MSGHEADER);
 
   try {
     const response = await fetch(NETGSM_API_URL, {
@@ -245,7 +259,7 @@ export async function sendPasswordResetSmsCode(params: SendPasswordResetSmsParam
     }
 
     const messageId = extractMessageId(rawText);
-    console.log('[NETGSM] Reset SMS sent successfully, messageId:', messageId ?? 'unknown');
+    console.log('[NETGSM] Auth SMS sent successfully, purpose:', purpose, 'messageId:', messageId ?? 'unknown');
     return {
       success: true,
       errorCode: null,
@@ -253,7 +267,7 @@ export async function sendPasswordResetSmsCode(params: SendPasswordResetSmsParam
       messageId,
     };
   } catch (error) {
-    console.log('[NETGSM] Network error while sending reset SMS:', error);
+    console.log('[NETGSM] Network error while sending auth SMS:', error);
     return {
       success: false,
       errorCode: 'network_error',
@@ -261,4 +275,18 @@ export async function sendPasswordResetSmsCode(params: SendPasswordResetSmsParam
       messageId: null,
     };
   }
+}
+
+export async function sendPasswordResetSmsCode(params: SendPasswordResetSmsParams): Promise<SendPasswordResetSmsResult> {
+  return sendNetgsmCodeSms({
+    ...params,
+    purpose: 'password_reset',
+  });
+}
+
+export async function sendVerificationSmsCode(params: Omit<SendNetgsmCodeSmsParams, 'purpose'>): Promise<SendNetgsmCodeSmsResult> {
+  return sendNetgsmCodeSms({
+    ...params,
+    purpose: 'account_verification',
+  });
 }
