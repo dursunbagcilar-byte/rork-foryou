@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import createContextHook from '@nkzw/create-context-hook';
@@ -174,6 +174,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [customVehicleImage, setCustomVehicleImage] = useState<string | null>(null);
 
   const [driverApproved, setDriverApproved] = useState<boolean>(false);
+  const authBootstrapPromiseRef = useRef<Promise<boolean> | null>(null);
+  const lastAuthBootstrapAtRef = useRef<number>(0);
 
   const getApiBase = useCallback((): string => {
     return getBaseUrl();
@@ -182,6 +184,71 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const getDbHeaders = useCallback((): Record<string, string> => {
     return buildDbHeaders();
   }, []);
+
+  const ensureBackendAuthReady = useCallback(async (reason: string, force = false): Promise<boolean> => {
+    const now = Date.now();
+    if (!force && now - lastAuthBootstrapAtRef.current < 15000) {
+      return true;
+    }
+
+    if (authBootstrapPromiseRef.current) {
+      return authBootstrapPromiseRef.current;
+    }
+
+    authBootstrapPromiseRef.current = (async () => {
+      let apiBase = getApiBase();
+      if (!apiBase) {
+        apiBase = await waitForBaseUrl(8000);
+      }
+
+      if (!apiBase) {
+        console.log('[Auth] ensureBackendAuthReady: base URL missing for', reason);
+        return false;
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      try {
+        const response = await fetch(`${normalizeApiBaseUrl(apiBase)}/api/bootstrap-db`, {
+          method: 'POST',
+          headers: getDbHeaders(),
+          body: JSON.stringify({}),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        const payload = await response.json().catch(() => null) as {
+          success?: boolean;
+          configured?: boolean;
+          storageMode?: string;
+          error?: string;
+        } | null;
+
+        const ready = response.ok && (
+          payload?.success === true ||
+          payload?.configured === true ||
+          payload?.storageMode === 'database'
+        );
+
+        console.log('[Auth] ensureBackendAuthReady result:', reason, 'status:', response.status, 'ready:', ready, 'storageMode:', payload?.storageMode ?? 'unknown', 'error:', payload?.error ?? 'none');
+
+        if (ready) {
+          lastAuthBootstrapAtRef.current = Date.now();
+        }
+
+        return ready;
+      } catch (error) {
+        clearTimeout(timeoutId);
+        console.log('[Auth] ensureBackendAuthReady error:', reason, error);
+        return false;
+      } finally {
+        authBootstrapPromiseRef.current = null;
+      }
+    })();
+
+    return authBootstrapPromiseRef.current;
+  }, [getApiBase, getDbHeaders]);
 
   const directFetch = useCallback(async (
     path: string,
@@ -805,7 +872,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       lowerMessage.includes('sunucu geçici bir hata yaşıyor') ||
       lowerMessage.includes('sunucu yanıt vermedi') ||
       lowerMessage.includes('zaman aşımı') ||
-      lowerMessage.includes('service unavailable');
+      lowerMessage.includes('service unavailable') ||
+      lowerMessage.includes('giriş sistemi şu anda hazırlanıyor') ||
+      lowerMessage.includes('kayıt sistemi şu anda hazırlanıyor') ||
+      lowerMessage.includes('kalıcı veritabanı hazır değil') ||
+      lowerMessage.includes('hesabınız kalıcı olarak kaydedilemedi') ||
+      lowerMessage.includes('oturum kalıcı olarak oluşturulamadı');
   }, []);
 
   const tryLocalLogin = useCallback(async (
@@ -876,13 +948,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       const message = error instanceof Error ? error.message : '';
       console.log('[Auth] restoreServerSession error:', message || error);
 
-      if (isNetworkError(message) && fallbackStoredUser) {
+      if ((isNetworkError(message) || shouldTryLocalAuthFallback(message)) && fallbackStoredUser) {
         try {
           const parsedStoredUser = JSON.parse(fallbackStoredUser) as User | Driver;
           setUser(parsedStoredUser);
           setUserType(parsedStoredUser.type);
           setIsAuthenticated(true);
-          console.log('[Auth] Falling back to cached session after network error:', parsedStoredUser.id);
+          console.log('[Auth] Falling back to cached session after network/backend readiness error:', parsedStoredUser.id);
           return true;
         } catch (parseError) {
           console.log('[Auth] Cached session parse error:', parseError);
@@ -896,7 +968,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
       throw error instanceof Error ? error : new Error('Oturum doğrulanamadı');
     }
-  }, [directFetch, handleSessionInvalid]);
+  }, [directFetch, handleSessionInvalid, shouldTryLocalAuthFallback]);
 
   useEffect(() => {
     const loadAuth = async () => {
@@ -1042,12 +1114,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       setUserType(actualType);
       setIsAuthenticated(true);
       await AsyncStorage.setItem('auth_user', JSON.stringify(returnedUser));
+      await persistLocalAuthBackup(returnedUser as User | Driver, password);
       await saveRememberedLogin(email, password, actualType);
       console.log('[Auth] Logged in as', actualType, ':', returnedUser.id, returnedUser.name);
       return actualType;
     }
     throw new Error(result.error ?? 'Mail adresiniz veya şifreniz hatalı');
-  }, [saveRememberedLogin]);
+  }, [persistLocalAuthBackup, saveRememberedLogin]);
 
   const loginAsCustomer = useCallback(async (email?: string, password?: string) => {
     if (!email || !password) {
@@ -1055,6 +1128,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
 
     try {
+      const backendReady = await ensureBackendAuthReady('customer-login', true);
+      if (!backendReady) {
+        throw new Error('Giriş sistemi şu anda hazırlanıyor. Lütfen birkaç saniye sonra tekrar deneyin.');
+      }
       console.log('[Auth] loginAsCustomer called for:', email, '(REST)');
       const result = await directFetch('/auth/login', { email, password, type: 'customer' });
       if (result && result.success === false && result.error) {
@@ -1074,7 +1151,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
-  }, [directFetch, handleLoginSuccess, hasLocalLoginBackup, shouldTryLocalAuthFallback, tryLocalLogin]);
+  }, [directFetch, ensureBackendAuthReady, handleLoginSuccess, hasLocalLoginBackup, shouldTryLocalAuthFallback, tryLocalLogin]);
 
   const loginAsDriver = useCallback(async (email?: string, password?: string) => {
     if (!email || !password) {
@@ -1082,6 +1159,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
 
     try {
+      const backendReady = await ensureBackendAuthReady('driver-login', true);
+      if (!backendReady) {
+        throw new Error('Giriş sistemi şu anda hazırlanıyor. Lütfen birkaç saniye sonra tekrar deneyin.');
+      }
       console.log('[Auth] loginAsDriver called for:', email, '(REST)');
       const result = await directFetch('/auth/login', { email, password, type: 'driver' });
       if (result && result.success === false && result.error) {
@@ -1101,7 +1182,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
-  }, [directFetch, handleLoginSuccess, hasLocalLoginBackup, shouldTryLocalAuthFallback, tryLocalLogin]);
+  }, [directFetch, ensureBackendAuthReady, handleLoginSuccess, hasLocalLoginBackup, shouldTryLocalAuthFallback, tryLocalLogin]);
 
   const registerCustomer = useCallback(async (name: string, phone: string, email: string, password: string, gender: 'male' | 'female', city: string, district: string, vehiclePlate?: string, referralCode?: string) => {
     const normalizedPhone = normalizeTurkishPhone(phone);
@@ -1147,6 +1228,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     };
 
     try {
+      const backendReady = await ensureBackendAuthReady('customer-register', true);
+      if (!backendReady) {
+        throw new Error('Kayıt sistemi şu anda hazırlanıyor. Lütfen birkaç saniye sonra tekrar deneyin.');
+      }
       console.log('[Auth] registerCustomer called for:', email, '(REST)');
       const result = await directFetch('/auth/register-customer', payload);
       console.log('[Auth] REST register result:', JSON.stringify(result).substring(0, 500));
@@ -1160,7 +1245,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen tekrar deneyin.');
     }
-  }, [directFetch, persistLocalAuthBackup, saveRememberedLogin]);
+  }, [directFetch, ensureBackendAuthReady, persistLocalAuthBackup, saveRememberedLogin]);
 
   const registerDriver = useCallback(async (
     name: string,
@@ -1244,6 +1329,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     };
 
     try {
+      const backendReady = await ensureBackendAuthReady('driver-register', true);
+      if (!backendReady) {
+        throw new Error('Kayıt sistemi şu anda hazırlanıyor. Lütfen birkaç saniye sonra tekrar deneyin.');
+      }
       console.log('[Auth] registerDriver called for:', email, '(REST)');
       const result = await directFetch('/auth/register-driver', payload);
       if (result && result.success === false && result.error) {
@@ -1256,7 +1345,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen tekrar deneyin.');
     }
-  }, [directFetch, persistLocalAuthBackup, saveRememberedLogin]);
+  }, [directFetch, ensureBackendAuthReady, persistLocalAuthBackup, saveRememberedLogin]);
 
   const applyPromoCode = useCallback(async (code: string): Promise<boolean> => {
     if (code.toUpperCase() === PRICING.promoCode && !promoApplied) {
