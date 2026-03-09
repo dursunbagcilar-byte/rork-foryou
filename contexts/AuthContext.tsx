@@ -847,24 +847,65 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     await AsyncStorage.removeItem('auth_user');
   }, []);
 
+  const restoreServerSession = useCallback(async (fallbackStoredUser: string | null): Promise<boolean> => {
+    const token = await getSessionToken();
+    if (!token) {
+      return false;
+    }
+
+    try {
+      const result = await directFetch('/auth/session', { token });
+      if (result?.valid && result.user) {
+        const restoredType: UserType = result.userType === 'driver' ? 'driver' : 'customer';
+        const restoredUser = {
+          ...result.user,
+          type: restoredType,
+        } as User | Driver;
+        setUser(restoredUser);
+        setUserType(restoredType);
+        setIsAuthenticated(true);
+        await AsyncStorage.setItem('auth_user', JSON.stringify(restoredUser));
+        console.log('[Auth] Session validated on server:', restoredUser.id, restoredType);
+        return true;
+      }
+
+      await handleSessionInvalid();
+      return false;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      console.log('[Auth] restoreServerSession error:', message || error);
+
+      if (isNetworkError(message) && fallbackStoredUser) {
+        try {
+          const parsedStoredUser = JSON.parse(fallbackStoredUser) as User | Driver;
+          setUser(parsedStoredUser);
+          setUserType(parsedStoredUser.type);
+          setIsAuthenticated(true);
+          console.log('[Auth] Falling back to cached session after network error:', parsedStoredUser.id);
+          return true;
+        } catch (parseError) {
+          console.log('[Auth] Cached session parse error:', parseError);
+        }
+      }
+
+      if (isSessionAuthError(message) || message.toLowerCase().includes('oturum')) {
+        await handleSessionInvalid();
+        return false;
+      }
+
+      throw error instanceof Error ? error : new Error('Oturum doğrulanamadı');
+    }
+  }, [directFetch, handleSessionInvalid]);
+
   useEffect(() => {
     const loadAuth = async () => {
       try {
         const token = await getSessionToken();
         const stored = await AsyncStorage.getItem('auth_user');
 
-        if (token && stored) {
-          const parsed = JSON.parse(stored);
-          setUser(parsed);
-          setUserType(parsed.type);
-          setIsAuthenticated(true);
-          console.log('[Auth] Session restored for:', parsed.id, parsed.name);
-
-          console.log('[Auth] Using cached session, skipping immediate validation to reduce server load');
-        } else if (token && !stored) {
-          console.log('[Auth] Token exists but no stored user, clearing stale token');
-          await setSessionToken(null);
-        } else if (stored && !token) {
+        if (token) {
+          await restoreServerSession(stored);
+        } else if (stored) {
           console.log('[Auth] No session token found, clearing stale local data');
           await AsyncStorage.removeItem('auth_user');
         }
@@ -884,12 +925,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         }
       } catch (e) {
         console.log('[Auth] Load error:', e);
+        await handleSessionInvalid();
       } finally {
         setIsLoading(false);
       }
     };
     void loadAuth();
-  }, [handleSessionInvalid]);
+  }, [handleSessionInvalid, restoreServerSession]);
 
   useEffect(() => {
     if (user && user.type === 'driver') {

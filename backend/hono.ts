@@ -5,7 +5,7 @@ import { cors } from "hono/cors";
 import { appRouter } from "./trpc/app-router";
 import { createContext } from "./trpc/create-context";
 import { db, initializeStore, bootstrapDbConfig, reinitializeStore, forceReloadStore, getPersistentStoreStatus } from "./db/store";
-import { setDbConfig, isDbConfigured, getCachedDbConfig } from "./db/rork-db";
+import { setDbConfig, isDbConfigured, getCachedDbConfig, dbGet } from "./db/rork-db";
 import type { User, Driver, Business, BusinessMenuItem, Session } from "./db/types";
 import { checkRateLimit, getClientIP, isIPBlocked, trackSuspiciousActivity, sanitizeInput } from "./utils/security";
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../utils/phone";
@@ -384,8 +384,88 @@ function getCurrentStorageMode(): 'database' | 'snapshot' | 'memory' {
   return persistentStore.available ? 'snapshot' : 'memory';
 }
 
+async function loadSessionFromDb(sessionToken: string): Promise<Session | null> {
+  try {
+    const directSession = await dbGet<Record<string, unknown>>('sessions', buildSessionRecordId(sessionToken));
+    if (!directSession) {
+      return null;
+    }
+
+    const hydratedSession: Session = {
+      token: sessionToken,
+      userId: typeof directSession.userId === 'string' ? directSession.userId : '',
+      userType: directSession.userType === 'driver' ? 'driver' : 'customer',
+      createdAt: typeof directSession.createdAt === 'string' ? directSession.createdAt : new Date().toISOString(),
+      expiresAt: typeof directSession.expiresAt === 'string' ? directSession.expiresAt : new Date().toISOString(),
+    };
+
+    if (!hydratedSession.userId) {
+      return null;
+    }
+
+    db.sessions.set(sessionToken, hydratedSession);
+    console.log('[SERVER] Session recovered from direct DB for:', hydratedSession.userId);
+    return hydratedSession;
+  } catch (error) {
+    console.log('[SERVER] Direct session lookup error:', error);
+    return null;
+  }
+}
+
+async function hydrateSessionAccount(session: Session): Promise<User | Driver | null> {
+  if (session.userType === 'customer') {
+    const memoryUser = db.users.get(session.userId);
+    if (memoryUser) {
+      return memoryUser;
+    }
+
+    try {
+      const dbUser = await dbGet<Record<string, unknown>>('users', session.userId);
+      if (!dbUser) {
+        return null;
+      }
+
+      const hydratedUser: User = {
+        ...(dbUser as unknown as User),
+        id: session.userId,
+        type: 'customer',
+      };
+      db.users.set(session.userId, hydratedUser);
+      console.log('[SERVER] Customer hydrated from direct DB for session:', session.userId);
+      return hydratedUser;
+    } catch (error) {
+      console.log('[SERVER] Customer hydrate error:', error);
+      return null;
+    }
+  }
+
+  const memoryDriver = db.drivers.get(session.userId);
+  if (memoryDriver) {
+    return memoryDriver;
+  }
+
+  try {
+    const dbDriver = await dbGet<Record<string, unknown>>('drivers', session.userId);
+    if (!dbDriver) {
+      return null;
+    }
+
+    const hydratedDriver: Driver = {
+      ...(dbDriver as unknown as Driver),
+      id: session.userId,
+      type: 'driver',
+    };
+    db.drivers.set(session.userId, hydratedDriver);
+    console.log('[SERVER] Driver hydrated from direct DB for session:', session.userId);
+    return hydratedDriver;
+  } catch (error) {
+    console.log('[SERVER] Driver hydrate error:', error);
+    return null;
+  }
+}
+
 async function resolveValidSession(sessionToken: string): Promise<Session | null> {
-  let session = db.sessions.get(sessionToken);
+  let session: Session | null | undefined = db.sessions.get(sessionToken);
 
   if (!session) {
     console.log('[SERVER] Session not found in memory, attempting reload for token');
@@ -400,6 +480,10 @@ async function resolveValidSession(sessionToken: string): Promise<Session | null
   }
 
   if (!session) {
+    session = await loadSessionFromDb(sessionToken);
+  }
+
+  if (!session) {
     return null;
   }
 
@@ -407,6 +491,13 @@ async function resolveValidSession(sessionToken: string): Promise<Session | null
   if (isExpired) {
     db.sessions.delete(sessionToken);
     console.log('[SERVER] Session expired during lookup for:', session.userId);
+    return null;
+  }
+
+  const account = await hydrateSessionAccount(session);
+  if (!account) {
+    db.sessions.delete(sessionToken);
+    console.log('[SERVER] Session account missing, invalidated token for:', session.userId);
     return null;
   }
 
@@ -850,6 +941,50 @@ app.post("/auth/login", async (c) => {
   } catch (err: any) {
     console.log('[REST] login error:', err?.message);
     return c.json({ success: false, error: 'Giriş hatası. Tekrar deneyin.', user: null, token: null }, 500);
+  }
+});
+
+app.post("/auth/session", async (c) => {
+  try {
+    const dbEp = c.req.header('x-db-endpoint');
+    const dbNs = c.req.header('x-db-namespace');
+    const dbTk = c.req.header('x-db-token');
+    await ensureDbReady(dbEp, dbNs, dbTk);
+
+    const authHeader = c.req.header('authorization');
+    const body = await c.req.json().catch((): Record<string, unknown> => ({}));
+    const tokenFromBody = typeof body.token === 'string' ? body.token.trim() : '';
+    const tokenFromHeader = authHeader?.replace('Bearer ', '').trim() ?? '';
+    const sessionToken = tokenFromBody || tokenFromHeader;
+
+    if (!sessionToken) {
+      return c.json({ valid: false, error: 'Oturum bulunamadı', user: null, userType: null }, 401);
+    }
+
+    const session = await resolveValidSession(sessionToken);
+    if (!session) {
+      return c.json({ valid: false, error: 'Oturum geçersiz veya süresi dolmuş', user: null, userType: null }, 401);
+    }
+
+    const account = await hydrateSessionAccount(session);
+    if (!account) {
+      db.sessions.delete(sessionToken);
+      return c.json({ valid: false, error: 'Hesap bulunamadı', user: null, userType: null }, 401);
+    }
+
+    return c.json({
+      valid: true,
+      error: null,
+      user: { ...account, type: session.userType },
+      userType: session.userType,
+      session: {
+        createdAt: session.createdAt,
+        expiresAt: session.expiresAt,
+      },
+    });
+  } catch (err: any) {
+    console.log('[REST] session error:', err?.message ?? err);
+    return c.json({ valid: false, error: 'Oturum doğrulanamadı', user: null, userType: null }, 500);
   }
 });
 
