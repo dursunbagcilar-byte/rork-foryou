@@ -103,12 +103,14 @@ function findStoredAccountByPhone(phone: string): { account: User | Driver | nul
   return { account: storedAccount, emailKey };
 }
 
-function resolveResetAccount(identifier: string): {
+interface ResolvedResetAccount {
   account: User | Driver | null;
   emailKey: string | null;
   identifierType: 'email' | 'phone';
   normalizedIdentifier: string;
-} {
+}
+
+function resolveResetAccount(identifier: string): ResolvedResetAccount {
   const trimmedIdentifier = identifier.trim();
   if (isEmailIdentifier(trimmedIdentifier)) {
     const cleanEmail = trimmedIdentifier.toLowerCase().trim();
@@ -131,6 +133,96 @@ function resolveResetAccount(identifier: string): {
 function buildResetLookupKey(identifier: string): string {
   const resolved = resolveResetAccount(identifier);
   return `resetcode_${resolved.normalizedIdentifier}`;
+}
+
+async function resolveResetAccountWithDirectLookup(identifier: string): Promise<ResolvedResetAccount> {
+  let resolved = resolveResetAccount(identifier);
+  if (resolved.account && resolved.emailKey) {
+    return resolved;
+  }
+
+  try {
+    await initializeStore();
+    await forceReloadStore();
+    resolved = resolveResetAccount(identifier);
+  } catch (error) {
+    console.log('[SERVER] resolveResetAccountWithDirectLookup reload error:', error);
+  }
+
+  if (resolved.account && resolved.emailKey) {
+    return resolved;
+  }
+
+  try {
+    const { dbFindByEmail, dbFindByPhone } = await import('./db/rork-db');
+
+    if (resolved.identifierType === 'email' && resolved.emailKey) {
+      const dbUser = await dbFindByEmail<Record<string, unknown>>('users', resolved.emailKey);
+      if (dbUser) {
+        const userId = dbUser.rorkId || dbUser._originalId || dbUser.id;
+        if (typeof userId === 'string') {
+          const hydratedUser = { ...dbUser, id: userId } as User;
+          db.users.set(userId, hydratedUser);
+          return {
+            ...resolved,
+            account: hydratedUser,
+            emailKey: hydratedUser.email?.toLowerCase().trim() ?? resolved.emailKey,
+          };
+        }
+      }
+
+      const dbDriver = await dbFindByEmail<Record<string, unknown>>('drivers', resolved.emailKey);
+      if (dbDriver) {
+        const driverId = dbDriver.rorkId || dbDriver._originalId || dbDriver.id;
+        if (typeof driverId === 'string') {
+          const hydratedDriver = { ...dbDriver, id: driverId } as Driver;
+          db.drivers.set(driverId, hydratedDriver);
+          return {
+            ...resolved,
+            account: hydratedDriver,
+            emailKey: hydratedDriver.email?.toLowerCase().trim() ?? resolved.emailKey,
+          };
+        }
+      }
+    }
+
+    if (resolved.identifierType === 'phone') {
+      const normalizedPhone = normalizeTurkishPhone(identifier);
+      if (normalizedPhone) {
+        const dbUser = await dbFindByPhone<Record<string, unknown>>('users', normalizedPhone);
+        if (dbUser) {
+          const userId = dbUser.rorkId || dbUser._originalId || dbUser.id;
+          if (typeof userId === 'string') {
+            const hydratedUser = { ...dbUser, id: userId } as User;
+            db.users.set(userId, hydratedUser);
+            return {
+              ...resolved,
+              account: hydratedUser,
+              emailKey: hydratedUser.email?.toLowerCase().trim() ?? null,
+            };
+          }
+        }
+
+        const dbDriver = await dbFindByPhone<Record<string, unknown>>('drivers', normalizedPhone);
+        if (dbDriver) {
+          const driverId = dbDriver.rorkId || dbDriver._originalId || dbDriver.id;
+          if (typeof driverId === 'string') {
+            const hydratedDriver = { ...dbDriver, id: driverId } as Driver;
+            db.drivers.set(driverId, hydratedDriver);
+            return {
+              ...resolved,
+              account: hydratedDriver,
+              emailKey: hydratedDriver.email?.toLowerCase().trim() ?? null,
+            };
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.log('[SERVER] resolveResetAccountWithDirectLookup direct-db error:', error);
+  }
+
+  return resolved;
 }
 
 interface LoadedAuthAccount {
@@ -703,7 +795,12 @@ app.post("/auth/register-customer", async (c) => {
     const dbEp = c.req.header('x-db-endpoint');
     const dbNs = c.req.header('x-db-namespace');
     const dbTk = c.req.header('x-db-token');
-    await ensureDbReady(dbEp, dbNs, dbTk);
+    const dbReady = await ensureDbReady(dbEp, dbNs, dbTk);
+    const storageMode = getCurrentStorageMode();
+    if (!dbReady || storageMode !== 'database') {
+      console.log('[REST] register-customer blocked - persistent auth store unavailable, storageMode:', storageMode, 'dbConfigured:', isDbConfigured());
+      return c.json({ success: false, error: 'Kayıt sistemi şu anda hazır değil. Lütfen biraz sonra tekrar deneyin.', user: null, token: null }, 503);
+    }
 
     const body = await c.req.json();
     console.log('[REST] register-customer start:', body.email, 'dbReady:', _dbReady, 'dbConfigured:', isDbConfigured());
@@ -820,7 +917,12 @@ app.post("/auth/register-driver", async (c) => {
     const dbEp = c.req.header('x-db-endpoint');
     const dbNs = c.req.header('x-db-namespace');
     const dbTk = c.req.header('x-db-token');
-    await ensureDbReady(dbEp, dbNs, dbTk);
+    const dbReady = await ensureDbReady(dbEp, dbNs, dbTk);
+    const storageMode = getCurrentStorageMode();
+    if (!dbReady || storageMode !== 'database') {
+      console.log('[REST] register-driver blocked - persistent auth store unavailable, storageMode:', storageMode, 'dbConfigured:', isDbConfigured());
+      return c.json({ success: false, error: 'Kayıt sistemi şu anda hazır değil. Lütfen biraz sonra tekrar deneyin.', driver: null, token: null }, 503);
+    }
 
     const body = await c.req.json();
     console.log('[REST] register-driver start:', body.email, 'dbReady:', _dbReady, 'dbConfigured:', isDbConfigured());
@@ -923,7 +1025,12 @@ app.post("/auth/login", async (c) => {
     const dbEp = c.req.header('x-db-endpoint');
     const dbNs = c.req.header('x-db-namespace');
     const dbTk = c.req.header('x-db-token');
-    await ensureDbReady(dbEp, dbNs, dbTk);
+    const dbReady = await ensureDbReady(dbEp, dbNs, dbTk);
+    const storageMode = getCurrentStorageMode();
+    if (!dbReady && storageMode === 'memory') {
+      console.log('[REST] login blocked - auth store unavailable, storageMode:', storageMode, 'dbConfigured:', isDbConfigured());
+      return c.json({ success: false, error: 'Giriş sistemi şu anda hazır değil. Lütfen biraz sonra tekrar deneyin.', user: null, token: null }, 503);
+    }
 
     const body = await c.req.json();
     console.log('[REST] login:', body.email, 'type:', body.type, 'dbReady:', _dbReady, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
@@ -1057,59 +1164,21 @@ app.post("/auth/send-reset-code", async (c) => {
       return c.json({ success: false, error: 'Çok fazla deneme. Lütfen daha sonra tekrar deneyin.' });
     }
 
-    let resolvedAccount = resolveResetAccount(identifier);
-    let account = resolvedAccount.account;
-    let accountEmail = resolvedAccount.emailKey;
+    const resolvedAccount = await resolveResetAccountWithDirectLookup(identifier);
+    const account = resolvedAccount.account;
+    const accountEmail = resolvedAccount.emailKey;
     let hasPassword = accountEmail ? db.passwords.get(accountEmail) : null;
 
-    if (!account || !hasPassword) {
+    if (!hasPassword && accountEmail) {
       try {
-        await initializeStore();
-        resolvedAccount = resolveResetAccount(identifier);
-        account = resolvedAccount.account;
-        accountEmail = resolvedAccount.emailKey;
-        hasPassword = accountEmail ? db.passwords.get(accountEmail) : null;
-      } catch (e) {
-        console.log('[REST] send-reset-code init err:', e);
-      }
-    }
-
-    if ((!account || !hasPassword) && resolvedAccount.identifierType === 'email' && accountEmail) {
-      try {
-        const { dbFindByEmail, dbSearchPasswordByEmail } = await import('./db/rork-db');
-        if (!account) {
-          const dbUser = await dbFindByEmail<Record<string, unknown>>('users', accountEmail);
-          if (dbUser) {
-            const userId = dbUser.rorkId || dbUser._originalId || dbUser.id;
-            if (typeof userId === 'string') {
-              const hydratedUser = { ...dbUser, id: userId } as User;
-              account = hydratedUser;
-              accountEmail = hydratedUser.email.toLowerCase().trim();
-              db.users.set(userId, hydratedUser);
-            }
-          }
-        }
-        if (!account) {
-          const dbDriver = await dbFindByEmail<Record<string, unknown>>('drivers', accountEmail);
-          if (dbDriver) {
-            const driverId = dbDriver.rorkId || dbDriver._originalId || dbDriver.id;
-            if (typeof driverId === 'string') {
-              const hydratedDriver = { ...dbDriver, id: driverId } as Driver;
-              account = hydratedDriver;
-              accountEmail = hydratedDriver.email.toLowerCase().trim();
-              db.drivers.set(driverId, hydratedDriver);
-            }
-          }
-        }
-        if (!hasPassword && accountEmail) {
-          const passwordResult = await dbSearchPasswordByEmail(accountEmail);
-          if (passwordResult?.hash) {
-            hasPassword = passwordResult.hash;
-            db.passwords.set(accountEmail, passwordResult.hash);
-          }
+        const { dbSearchPasswordByEmail } = await import('./db/rork-db');
+        const passwordResult = await dbSearchPasswordByEmail(accountEmail);
+        if (passwordResult?.hash) {
+          hasPassword = passwordResult.hash;
+          db.passwords.set(accountEmail, passwordResult.hash);
         }
       } catch (e) {
-        console.log('[REST] send-reset-code db lookup err:', e);
+        console.log('[REST] send-reset-code password lookup err:', e);
       }
     }
 
@@ -1254,18 +1323,8 @@ app.post("/auth/verify-reset-code", async (c) => {
     const inputCode = typeof body.code === 'string' ? body.code.trim() : '';
     if (!identifier || !inputCode) return c.json({ success: false, error: 'E-posta veya telefon numarası ile kod gerekli' });
 
-    let resolvedAccount = resolveResetAccount(identifier);
+    const resolvedAccount = await resolveResetAccountWithDirectLookup(identifier);
     let accountEmail = resolvedAccount.emailKey;
-
-    if (!accountEmail && resolvedAccount.identifierType === 'phone') {
-      try {
-        await initializeStore();
-        resolvedAccount = resolveResetAccount(identifier);
-        accountEmail = resolvedAccount.emailKey;
-      } catch (e) {
-        console.log('[REST] verify-reset-code init err:', e);
-      }
-    }
 
     if (!accountEmail && isEmailIdentifier(identifier)) {
       accountEmail = identifier.toLowerCase().trim();
@@ -1319,18 +1378,8 @@ app.post("/auth/reset-password", async (c) => {
     const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
     if (!identifier || !inputCode || !newPassword) return c.json({ success: false, error: 'Tüm alanlar gerekli' });
 
-    let resolvedAccount = resolveResetAccount(identifier);
+    const resolvedAccount = await resolveResetAccountWithDirectLookup(identifier);
     let accountEmail = resolvedAccount.emailKey;
-
-    if (!accountEmail && resolvedAccount.identifierType === 'phone') {
-      try {
-        await initializeStore();
-        resolvedAccount = resolveResetAccount(identifier);
-        accountEmail = resolvedAccount.emailKey;
-      } catch (e) {
-        console.log('[REST] reset-password init err:', e);
-      }
-    }
 
     if (!accountEmail && isEmailIdentifier(identifier)) {
       accountEmail = identifier.toLowerCase().trim();

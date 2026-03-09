@@ -1,3 +1,5 @@
+import { normalizeTurkishPhone } from "../../utils/phone";
+
 let STATIC_ENDPOINT = '';
 let STATIC_NAMESPACE = '';
 let STATIC_TOKEN = '';
@@ -277,6 +279,35 @@ export async function dbFindByEmail<T>(table: string, email: string): Promise<T 
     return null;
   } catch (err) {
     console.log(`[RORK-DB] dbFindByEmail error for ${table}/${email}:`, err);
+    return null;
+  }
+}
+
+export async function dbFindByPhone<T>(table: string, phone: string): Promise<T | null> {
+  if (!isConfigured()) return null;
+  try {
+    const normalizedPhone = normalizeTurkishPhone(phone);
+    if (!normalizedPhone) {
+      return null;
+    }
+
+    const trimmedPhone = phone.trim();
+    const safeNormalizedPhone = escapeValue(normalizedPhone);
+    const safeTrimmedPhone = escapeValue(trimmedPhone);
+    const whereClause = trimmedPhone && trimmedPhone !== normalizedPhone
+      ? `phone = '${safeNormalizedPhone}' OR phone = '${safeTrimmedPhone}'`
+      : `phone = '${safeNormalizedPhone}'`;
+
+    const results = await executeSql(`SELECT * FROM ${table} WHERE ${whereClause};`);
+    if (results.length > 0 && results[0].result && results[0].result.length > 0) {
+      console.log(`[RORK-DB] dbFindByPhone found record in ${table} for phone: ${normalizedPhone}`);
+      return results[0].result[0] as T;
+    }
+
+    console.log(`[RORK-DB] dbFindByPhone: no record in ${table} for phone: ${normalizedPhone}`);
+    return null;
+  } catch (err) {
+    console.log(`[RORK-DB] dbFindByPhone error for ${table}/${phone}:`, err);
     return null;
   }
 }

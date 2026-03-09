@@ -1130,7 +1130,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     try {
       const backendReady = await ensureBackendAuthReady('customer-login', true);
       if (!backendReady) {
-        throw new Error('Giriş sistemi şu anda hazırlanıyor. Lütfen birkaç saniye sonra tekrar deneyin.');
+        console.log('[Auth] customer-login bootstrap not confirmed, trying direct login anyway');
       }
       console.log('[Auth] loginAsCustomer called for:', email, '(REST)');
       const result = await directFetch('/auth/login', { email, password, type: 'customer' });
@@ -1161,7 +1161,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     try {
       const backendReady = await ensureBackendAuthReady('driver-login', true);
       if (!backendReady) {
-        throw new Error('Giriş sistemi şu anda hazırlanıyor. Lütfen birkaç saniye sonra tekrar deneyin.');
+        console.log('[Auth] driver-login bootstrap not confirmed, trying direct login anyway');
       }
       console.log('[Auth] loginAsDriver called for:', email, '(REST)');
       const result = await directFetch('/auth/login', { email, password, type: 'driver' });
@@ -1230,7 +1230,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     try {
       const backendReady = await ensureBackendAuthReady('customer-register', true);
       if (!backendReady) {
-        throw new Error('Kayıt sistemi şu anda hazırlanıyor. Lütfen birkaç saniye sonra tekrar deneyin.');
+        console.log('[Auth] customer-register bootstrap not confirmed, trying direct registration anyway');
       }
       console.log('[Auth] registerCustomer called for:', email, '(REST)');
       const result = await directFetch('/auth/register-customer', payload);
@@ -1331,7 +1331,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     try {
       const backendReady = await ensureBackendAuthReady('driver-register', true);
       if (!backendReady) {
-        throw new Error('Kayıt sistemi şu anda hazırlanıyor. Lütfen birkaç saniye sonra tekrar deneyin.');
+        console.log('[Auth] driver-register bootstrap not confirmed, trying direct registration anyway');
       }
       console.log('[Auth] registerDriver called for:', email, '(REST)');
       const result = await directFetch('/auth/register-driver', payload);

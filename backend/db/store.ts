@@ -1,5 +1,6 @@
 import type { User, Driver, Ride, Rating, Message, Payment, Session, PushToken, Notification, DriverDocuments, Referral, Business } from "./types";
 import { dbLoadAll, dbUpsert, dbDelete, dbGet, isDbConfigured, setDbConfig, reapplyDbConfig, getCachedDbConfig, flushPendingOps, getPendingOpsCount } from "./rork-db";
+import { normalizeTurkishPhone } from "../../utils/phone";
 
 const users = new Map<string, User>();
 const drivers = new Map<string, Driver>();
@@ -1083,7 +1084,10 @@ export const db = {
       users.set(id, user);
       await persistSync(() => dbUpsert('users', id, { ...user, _originalId: id, rorkId: id }));
     },
-    getByPhone: (phone: string) => Array.from(users.values()).find(u => u.phone === phone),
+    getByPhone: (phone: string) => {
+      const normalizedPhone = normalizeTurkishPhone(phone);
+      return Array.from(users.values()).find((u) => normalizeTurkishPhone(u.phone) === normalizedPhone);
+    },
     getByEmail: (email: string) => {
       const lower = email.toLowerCase().trim();
       const found = Array.from(users.values()).find(u => u.email?.toLowerCase().trim() === lower);
@@ -1115,7 +1119,10 @@ export const db = {
       if (driver.email) driverEmailIndex.set(driver.email.toLowerCase(), id);
       await persistSync(() => dbUpsert('drivers', id, { ...driver, _originalId: id, rorkId: id }));
     },
-    getByPhone: (phone: string) => Array.from(drivers.values()).find(d => d.phone === phone),
+    getByPhone: (phone: string) => {
+      const normalizedPhone = normalizeTurkishPhone(phone);
+      return Array.from(drivers.values()).find((d) => normalizeTurkishPhone(d.phone) === normalizedPhone);
+    },
     getByEmail: (email: string) => {
       const indexed = driverEmailIndex.get(email.toLowerCase());
       if (indexed) {
