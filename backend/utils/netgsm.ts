@@ -1,7 +1,37 @@
 const NETGSM_API_URL = 'https://api.netgsm.com.tr/sms/send/xml';
-const NETGSM_USERCODE = process.env.NETGSM_USERCODE?.trim() ?? process.env.NETGSM_USERNAME?.trim() ?? '';
-const NETGSM_PASSWORD = process.env.NETGSM_PASSWORD?.trim() ?? process.env.NETGSM_USER_PASSWORD?.trim() ?? '';
-const NETGSM_MSGHEADER = process.env.NETGSM_MSGHEADER?.trim() ?? process.env.NETGSM_HEADER?.trim() ?? '';
+
+function readNetgsmEnvValue(...keys: string[]): string {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return '';
+}
+
+const NETGSM_USERCODE = readNetgsmEnvValue('NETGSM_USERCODE', 'NETGSM_USER_CODE', 'NETGSM_USERNAME');
+const NETGSM_PASSWORD = readNetgsmEnvValue('NETGSM_PASSWORD', 'NETGSM_USER_PASSWORD');
+const NETGSM_MSGHEADER = readNetgsmEnvValue('NETGSM_MSGHEADER', 'NETGSM_HEADER', 'NETGSM_SENDER');
+
+function getMissingNetgsmConfigKeys(): string[] {
+  const missingKeys: string[] = [];
+
+  if (!NETGSM_USERCODE) {
+    missingKeys.push('NETGSM_USERCODE');
+  }
+
+  if (!NETGSM_PASSWORD) {
+    missingKeys.push('NETGSM_PASSWORD');
+  }
+
+  if (!NETGSM_MSGHEADER) {
+    missingKeys.push('NETGSM_MSGHEADER');
+  }
+
+  return missingKeys;
+}
 
 export type SendNetgsmErrorCode = 'not_configured' | 'invalid_phone' | 'provider_error' | 'network_error';
 
@@ -18,7 +48,7 @@ export interface SendPasswordResetSmsResult {
 }
 
 function hasNetgsmConfig(): boolean {
-  return Boolean(NETGSM_USERCODE && NETGSM_PASSWORD && NETGSM_MSGHEADER);
+  return getMissingNetgsmConfigKeys().length === 0;
 }
 
 function normalizeNetgsmPhone(phone: string): string {
@@ -144,7 +174,7 @@ export function getNetgsmSendErrorMessage(result: SendPasswordResetSmsResult): s
 
 export async function sendPasswordResetSmsCode(params: SendPasswordResetSmsParams): Promise<SendPasswordResetSmsResult> {
   if (!hasNetgsmConfig()) {
-    console.log('[NETGSM] Missing NetGSM SMS config');
+    console.log('[NETGSM] Missing NetGSM SMS config. Missing keys:', getMissingNetgsmConfigKeys().join(', '));
     return {
       success: false,
       errorCode: 'not_configured',
