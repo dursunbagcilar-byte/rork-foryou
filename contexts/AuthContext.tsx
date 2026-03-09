@@ -582,6 +582,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     return !!legacyUser;
   }, [buildLegacyLocalUser, getLocalAuthBackup]);
 
+  const hasLocalLoginBackup = useCallback(async (email: string): Promise<boolean> => {
+    const backup = await getLocalAuthBackup(email);
+    const hasBackup = !!backup?.passwordHash;
+    console.log('[Auth] hasLocalLoginBackup:', email, hasBackup);
+    return hasBackup;
+  }, [getLocalAuthBackup]);
+
   const syncStoredAccount = useCallback(async (account: User | Driver): Promise<void> => {
     const normalizedEmail = normalizeAuthEmail(account.email);
     const normalizedAccount = {
@@ -817,7 +824,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
     if (!backup) {
       console.log('[Auth] tryLocalLogin - no backup for:', normalizedEmail);
-      throw new Error('Bu cihazda kayıtlı bir hesap yedeği bulunamadı. Lütfen şifrenizi yeniden oluşturun.');
+      throw new Error('Sunucuya şu an ulaşılamıyor ve bu cihazda çevrimdışı giriş yedeği bulunamadı. Lütfen tekrar deneyin.');
     }
 
     const passwordHash = await hashLocalPassword(password);
@@ -1064,7 +1071,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       console.log('[Auth] loginAsCustomer error:', err?.message);
       const errorMessage = err instanceof Error ? err.message : '';
       if (shouldTryLocalAuthFallback(errorMessage)) {
-        const hasLocalBackup = await hasLocalRecoveryAccount(email);
+        const hasLocalBackup = await hasLocalLoginBackup(email);
         console.log('[Auth] loginAsCustomer local fallback availability:', hasLocalBackup, 'email:', email);
         if (hasLocalBackup) {
           return tryLocalLogin(email, password, 'customer');
@@ -1073,7 +1080,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
-  }, [directFetch, handleLoginSuccess, hasLocalRecoveryAccount, shouldTryLocalAuthFallback, tryLocalLogin]);
+  }, [directFetch, handleLoginSuccess, hasLocalLoginBackup, shouldTryLocalAuthFallback, tryLocalLogin]);
 
   const loginAsDriver = useCallback(async (email?: string, password?: string) => {
     if (!email || !password) {
@@ -1091,7 +1098,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       console.log('[Auth] loginAsDriver error:', err?.message);
       const errorMessage = err instanceof Error ? err.message : '';
       if (shouldTryLocalAuthFallback(errorMessage)) {
-        const hasLocalBackup = await hasLocalRecoveryAccount(email);
+        const hasLocalBackup = await hasLocalLoginBackup(email);
         console.log('[Auth] loginAsDriver local fallback availability:', hasLocalBackup, 'email:', email);
         if (hasLocalBackup) {
           return tryLocalLogin(email, password, 'driver');
@@ -1100,7 +1107,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
-  }, [directFetch, handleLoginSuccess, hasLocalRecoveryAccount, shouldTryLocalAuthFallback, tryLocalLogin]);
+  }, [directFetch, handleLoginSuccess, hasLocalLoginBackup, shouldTryLocalAuthFallback, tryLocalLogin]);
 
   const registerCustomer = useCallback(async (name: string, phone: string, email: string, password: string, gender: 'male' | 'female', city: string, district: string, vehiclePlate?: string, referralCode?: string) => {
     const normalizedPhone = normalizeTurkishPhone(phone);

@@ -989,7 +989,11 @@ export async function forceReloadStore(): Promise<void> {
       if (email) passwords.set(email, p.hash);
     }
     for (const [email, hash] of memPasswords) {
-      if (!passwords.has(email)) passwords.set(email, hash);
+      if (!passwords.has(email)) {
+        passwords.set(email, hash);
+        await dbUpsert('passwords', email.replace(/[^a-zA-Z0-9]/g, '_'), { email, hash, _originalEmail: email }).catch(() => {});
+        console.log('[STORE] Restored in-memory password hash to DB for:', email);
+      }
     }
 
     for (const s of dbSessions) {
@@ -997,7 +1001,11 @@ export async function forceReloadStore(): Promise<void> {
       if (token) { s.token = token; delete (s as any)._originalToken; sessions.set(token, s); }
     }
     for (const [token, session] of memSessions) {
-      if (!sessions.has(token)) sessions.set(token, session);
+      if (!sessions.has(token)) {
+        sessions.set(token, session);
+        await dbUpsert('sessions', token.replace(/[^a-zA-Z0-9]/g, '_'), { ...session, _originalToken: token }).catch(() => {});
+        console.log('[STORE] Restored in-memory session to DB for:', session.userId);
+      }
     }
 
     for (const doc of dbDriverDocs) {

@@ -232,7 +232,7 @@ export async function dbUpsert(table: string, id: string, data: Record<string, a
     throw new Error(`[RORK-DB] DB not configured, queued ${table}:${id}`);
   }
   const jsonData = JSON.stringify(data);
-  const sql = `UPDATE ${toSurrealId(table, id)} CONTENT ${jsonData};`;
+  const sql = `UPSERT ${toSurrealId(table, id)} CONTENT ${jsonData};`;
   console.log(`[RORK-DB] Upsert ${table}:${id}`);
   await executeSql(sql);
 }
@@ -292,7 +292,7 @@ export async function flushPendingOps(): Promise<number> {
     try {
       if (op.type === 'upsert' && op.data) {
         const jsonData = JSON.stringify(op.data);
-        const sql = `UPDATE ${toSurrealId(op.table, op.id)} CONTENT ${jsonData};`;
+        const sql = `UPSERT ${toSurrealId(op.table, op.id)} CONTENT ${jsonData};`;
         await executeSql(sql);
         flushed++;
       } else if (op.type === 'delete') {
@@ -377,7 +377,7 @@ export async function dbDirectUpsert(table: string, id: string, data: Record<str
   }
   try {
     const jsonData = JSON.stringify(data);
-    const sql = `UPDATE ${toSurrealId(table, id)} CONTENT ${jsonData};`;
+    const sql = `UPSERT ${toSurrealId(table, id)} CONTENT ${jsonData};`;
     await executeSql(sql);
     console.log(`[RORK-DB] dbDirectUpsert OK for ${table}:${id}`);
     return true;
