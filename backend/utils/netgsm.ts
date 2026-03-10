@@ -69,25 +69,45 @@ function buildNetgsmMsgHeaderCandidates(value: string): string[] {
   return Array.from(new Set(candidates));
 }
 
-const NETGSM_USERCODE = readNetgsmEnvValue('NETGSM_USERCODE', 'NETGSM_USER_CODE', 'NETGSM_USERNAME');
-const NETGSM_PASSWORD = readNetgsmEnvValue('NETGSM_PASSWORD', 'NETGSM_USER_PASSWORD');
-const NETGSM_MSGHEADER = readNetgsmEnvValue('NETGSM_MSGHEADER', 'NETGSM_HEADER', 'NETGSM_SENDER');
-const NORMALIZED_NETGSM_MSGHEADER = normalizeNetgsmMsgHeader(NETGSM_MSGHEADER);
-const NETGSM_MSGHEADER_CANDIDATES = buildNetgsmMsgHeaderCandidates(NETGSM_MSGHEADER);
-const PRIMARY_NETGSM_MSGHEADER = NETGSM_MSGHEADER_CANDIDATES[0] ?? '';
+interface NetgsmRuntimeConfig {
+  usercode: string;
+  password: string;
+  msgHeader: string;
+  normalizedMsgHeader: string;
+  msgHeaderCandidates: string[];
+  primaryMsgHeader: string;
+}
 
-function getMissingNetgsmConfigKeys(): string[] {
+function getNetgsmRuntimeConfig(): NetgsmRuntimeConfig {
+  const usercode = readNetgsmEnvValue('NETGSM_USERCODE', 'NETGSM_USER_CODE', 'NETGSM_USERNAME');
+  const password = readNetgsmEnvValue('NETGSM_PASSWORD', 'NETGSM_USER_PASSWORD');
+  const msgHeader = readNetgsmEnvValue('NETGSM_MSGHEADER', 'NETGSM_HEADER', 'NETGSM_SENDER');
+  const normalizedMsgHeader = normalizeNetgsmMsgHeader(msgHeader);
+  const msgHeaderCandidates = buildNetgsmMsgHeaderCandidates(msgHeader);
+  const primaryMsgHeader = msgHeaderCandidates[0] ?? '';
+
+  return {
+    usercode,
+    password,
+    msgHeader,
+    normalizedMsgHeader,
+    msgHeaderCandidates,
+    primaryMsgHeader,
+  };
+}
+
+function getMissingNetgsmConfigKeys(config: NetgsmRuntimeConfig = getNetgsmRuntimeConfig()): string[] {
   const missingKeys: string[] = [];
 
-  if (!NETGSM_USERCODE) {
+  if (!config.usercode) {
     missingKeys.push('NETGSM_USERCODE');
   }
 
-  if (!NETGSM_PASSWORD) {
+  if (!config.password) {
     missingKeys.push('NETGSM_PASSWORD');
   }
 
-  if (!NETGSM_MSGHEADER) {
+  if (!config.msgHeader) {
     missingKeys.push('NETGSM_MSGHEADER');
   }
 
@@ -122,15 +142,16 @@ export interface NetgsmConfigStatus {
 }
 
 export function getNetgsmConfigStatus(): NetgsmConfigStatus {
-  const missingKeys = getMissingNetgsmConfigKeys();
-  const normalizedSenderName = NORMALIZED_NETGSM_MSGHEADER || PRIMARY_NETGSM_MSGHEADER || null;
+  const config = getNetgsmRuntimeConfig();
+  const missingKeys = getMissingNetgsmConfigKeys(config);
+  const normalizedSenderName = config.normalizedMsgHeader || config.primaryMsgHeader || null;
 
   return {
     configured: missingKeys.length === 0,
     missingKeys,
-    senderName: PRIMARY_NETGSM_MSGHEADER || null,
+    senderName: config.primaryMsgHeader || null,
     normalizedSenderName,
-    senderVariants: NETGSM_MSGHEADER_CANDIDATES,
+    senderVariants: config.msgHeaderCandidates,
   };
 }
 
@@ -142,8 +163,8 @@ function buildNetgsmCodeMessage(code: string, purpose: NetgsmCodePurpose): strin
   return `2GO sifre sifirlama kodunuz: ${code}. Bu kodu kimseyle paylasmayin.`;
 }
 
-function hasNetgsmConfig(): boolean {
-  return getMissingNetgsmConfigKeys().length === 0;
+function hasNetgsmConfig(config: NetgsmRuntimeConfig = getNetgsmRuntimeConfig()): boolean {
+  return getMissingNetgsmConfigKeys(config).length === 0;
 }
 
 function normalizeNetgsmPhone(phone: string): string {
@@ -274,8 +295,10 @@ export function getNetgsmSendErrorMessage(result: SendNetgsmCodeSmsResult): stri
 }
 
 export async function sendNetgsmCodeSms(params: SendNetgsmCodeSmsParams): Promise<SendNetgsmCodeSmsResult> {
-  if (!hasNetgsmConfig()) {
-    console.log('[NETGSM] Missing NetGSM SMS config. Missing keys:', getMissingNetgsmConfigKeys().join(', '));
+  const config = getNetgsmRuntimeConfig();
+
+  if (!hasNetgsmConfig(config)) {
+    console.log('[NETGSM] Missing NetGSM SMS config. Missing keys:', getMissingNetgsmConfigKeys(config).join(', '));
     return {
       success: false,
       errorCode: 'not_configured',
@@ -301,13 +324,13 @@ export async function sendNetgsmCodeSms(params: SendNetgsmCodeSmsParams): Promis
   try {
     let lastProviderMessage: string | null = null;
 
-    for (const currentMsgHeader of NETGSM_MSGHEADER_CANDIDATES) {
+    for (const currentMsgHeader of config.msgHeaderCandidates) {
       const xmlPayload = `<?xml version="1.0" encoding="UTF-8"?>
 <mainbody>
   <header>
     <company dil="TR">Netgsm</company>
-    <usercode>${escapeXml(NETGSM_USERCODE)}</usercode>
-    <password>${escapeXml(NETGSM_PASSWORD)}</password>
+    <usercode>${escapeXml(config.usercode)}</usercode>
+    <password>${escapeXml(config.password)}</password>
     <type>1:n</type>
     <msgheader>${escapeXml(currentMsgHeader)}</msgheader>
   </header>
@@ -317,7 +340,22 @@ export async function sendNetgsmCodeSms(params: SendNetgsmCodeSmsParams): Promis
   </body>
 </mainbody>`;
 
-      console.log('[NETGSM] Sending auth SMS to:', normalizedPhone, 'purpose:', purpose, 'msgheader:', currentMsgHeader, 'msgheaderLength:', currentMsgHeader.length, 'allHeaders:', NETGSM_MSGHEADER_CANDIDATES.join(' | '), 'configuredHeader:', NETGSM_MSGHEADER, 'normalizedHeader:', NORMALIZED_NETGSM_MSGHEADER);
+      console.log(
+        '[NETGSM] Sending auth SMS to:',
+        normalizedPhone,
+        'purpose:',
+        purpose,
+        'msgheader:',
+        currentMsgHeader,
+        'msgheaderLength:',
+        currentMsgHeader.length,
+        'allHeaders:',
+        config.msgHeaderCandidates.join(' | '),
+        'configuredHeader:',
+        config.msgHeader,
+        'normalizedHeader:',
+        config.normalizedMsgHeader,
+      );
 
       const response = await fetch(NETGSM_API_URL, {
         method: 'POST',
@@ -335,7 +373,8 @@ export async function sendNetgsmCodeSms(params: SendNetgsmCodeSmsParams): Promis
         const providerMessage = getNetgsmProviderMessage(rawText, response.status, currentMsgHeader);
         lastProviderMessage = providerMessage;
         const providerCode = extractProviderCode(rawText);
-        const shouldRetryWithNextHeader = providerCode === '40' && currentMsgHeader !== NETGSM_MSGHEADER_CANDIDATES[NETGSM_MSGHEADER_CANDIDATES.length - 1];
+        const lastCandidate = config.msgHeaderCandidates[config.msgHeaderCandidates.length - 1];
+        const shouldRetryWithNextHeader = providerCode === '40' && currentMsgHeader !== lastCandidate;
         if (shouldRetryWithNextHeader) {
           console.log('[NETGSM] Retrying with next sender header candidate after code 40:', currentMsgHeader);
           continue;
@@ -353,7 +392,8 @@ export async function sendNetgsmCodeSms(params: SendNetgsmCodeSmsParams): Promis
       if (providerCode && ['20', '30', '40', '50', '60', '70', '80', '85'].includes(providerCode)) {
         const providerMessage = getNetgsmProviderMessage(rawText, response.status, currentMsgHeader);
         lastProviderMessage = providerMessage;
-        const shouldRetryWithNextHeader = providerCode === '40' && currentMsgHeader !== NETGSM_MSGHEADER_CANDIDATES[NETGSM_MSGHEADER_CANDIDATES.length - 1];
+        const lastCandidate = config.msgHeaderCandidates[config.msgHeaderCandidates.length - 1];
+        const shouldRetryWithNextHeader = providerCode === '40' && currentMsgHeader !== lastCandidate;
         if (shouldRetryWithNextHeader) {
           console.log('[NETGSM] Retrying with next sender header candidate after provider code 40:', currentMsgHeader);
           continue;
