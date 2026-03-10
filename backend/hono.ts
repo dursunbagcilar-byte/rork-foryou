@@ -10,7 +10,7 @@ import type { User, Driver, Business, BusinessMenuItem, Session } from "./db/typ
 import { checkRateLimit, getClientIP, isIPBlocked, trackSuspiciousActivity, sanitizeInput } from "./utils/security";
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../utils/phone";
 import { getSmsDeliveryNote, normalizePhoneForSms } from "../constants/support";
-import { getNetgsmSendErrorMessage, sendPasswordResetSmsCode, sendVerificationSmsCode } from "./utils/netgsm";
+import { getNetgsmConfigStatus, getNetgsmSendErrorMessage, sendPasswordResetSmsCode, sendVerificationSmsCode } from "./utils/netgsm";
 
 const app = new Hono();
 
@@ -751,7 +751,8 @@ app.get("/health", async (c) => {
   const persistentStore = getPersistentStoreStatus();
   const storageMode = getCurrentStorageMode();
   const ready = storageMode !== 'memory';
-  console.log('[SERVER] Health response: configured:', configured, 'ready:', ready, 'storageMode:', storageMode, 'snapshotAvailable:', persistentStore.available, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
+  const netgsmStatus = getNetgsmConfigStatus();
+  console.log('[SERVER] Health response: configured:', configured, 'ready:', ready, 'storageMode:', storageMode, 'snapshotAvailable:', persistentStore.available, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length, 'smsConfigured:', netgsmStatus.configured, 'smsSenderName:', netgsmStatus.senderName ?? 'none');
   return c.json({
     status: "ok",
     version: "67",
@@ -761,6 +762,10 @@ app.get("/health", async (c) => {
     persistentStoreAvailable: persistentStore.available,
     persistentStoreLastSavedAt: persistentStore.lastSavedAt,
     dbMissing: (!ep || !ns || !tk) ? { endpoint: !ep, namespace: !ns, token: !tk } : undefined,
+    smsProvider: 'netgsm',
+    smsConfigured: netgsmStatus.configured,
+    smsSenderName: netgsmStatus.senderName,
+    smsMissing: netgsmStatus.missingKeys,
     drivers: db.drivers.getAll().length,
     users: db.users.getAll().length,
   });

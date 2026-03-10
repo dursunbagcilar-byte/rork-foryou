@@ -65,6 +65,21 @@ export interface SendNetgsmCodeSmsResult {
 export type SendPasswordResetSmsParams = Omit<SendNetgsmCodeSmsParams, 'purpose'>;
 export type SendPasswordResetSmsResult = SendNetgsmCodeSmsResult;
 
+export interface NetgsmConfigStatus {
+  configured: boolean;
+  missingKeys: string[];
+  senderName: string | null;
+}
+
+export function getNetgsmConfigStatus(): NetgsmConfigStatus {
+  const missingKeys = getMissingNetgsmConfigKeys();
+  return {
+    configured: missingKeys.length === 0,
+    missingKeys,
+    senderName: NETGSM_MSGHEADER || null,
+  };
+}
+
 function buildNetgsmCodeMessage(code: string, purpose: NetgsmCodePurpose): string {
   if (purpose === 'account_verification') {
     return `2GO hesap dogrulama kodunuz: ${code}. Bu kodu kimseyle paylasmayin.`;

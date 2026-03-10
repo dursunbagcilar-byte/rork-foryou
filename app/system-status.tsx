@@ -20,6 +20,7 @@ import {
   MapPinned,
   Server,
   ShieldCheck,
+  Smartphone,
   type LucideIcon,
 } from 'lucide-react-native';
 import { getBaseUrl, getSessionToken } from '@/lib/trpc';
@@ -70,6 +71,19 @@ function getDatabaseDescription(mode: StorageMode, users: number, drivers: numbe
   }
 
   return 'Kalıcı veritabanı bağlı değil. Backend şu anda geçici bellek modunda çalışıyor.';
+}
+
+function getSmsDescription(configured: boolean, senderName: string | null, missingKeys: string[]): string {
+  if (configured) {
+    const senderLabel = senderName?.trim() ? ` ${senderName.trim()}` : '';
+    return `NetGSM bağlı.${senderLabel ? `${senderLabel} başlığı` : ' Tanımlı başlık'} ile doğrulama ve şifre sıfırlama SMS'leri gönderiliyor.`;
+  }
+
+  if (missingKeys.length > 0) {
+    return `NetGSM eksik yapılandırma: ${missingKeys.join(', ')}.`;
+  }
+
+  return 'NetGSM durumu alınamadı.';
 }
 
 function getStatusColors(status: StatusItem['status'], isDark: boolean) {
@@ -182,8 +196,13 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
   let backendStorageMode: StorageMode = 'memory';
   let users = 0;
   let drivers = 0;
+  let smsConfigured = false;
+  let smsProvider = 'netgsm';
+  let smsSenderName: string | null = null;
+  let smsMissing: string[] = [];
   let backendMessage = baseUrl ? 'API adresi çözüldü, canlı kontrol yapılıyor...' : 'API adresi çözülemedi.';
   let dbMessage = 'Veritabanı durumu kontrol ediliyor...';
+  let smsMessage = 'NetGSM durumu kontrol ediliyor...';
 
   if (baseUrl) {
     console.log('[SystemStatus] Checking health at:', baseUrl, 'dbHeaders present:', clientDbEnvConfigured);
@@ -206,6 +225,10 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
           namespace?: boolean;
           token?: boolean;
         };
+        smsProvider?: string;
+        smsConfigured?: boolean;
+        smsSenderName?: string | null;
+        smsMissing?: string[];
         drivers?: number;
         users?: number;
       } | null;
@@ -224,7 +247,16 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
         databaseLive = backendPersistenceReady || isPersistentStorageMode(backendStorageMode);
         users = typeof healthPayload.users === 'number' ? healthPayload.users : 0;
         drivers = typeof healthPayload.drivers === 'number' ? healthPayload.drivers : 0;
+        smsProvider = typeof healthPayload.smsProvider === 'string' && healthPayload.smsProvider.trim()
+          ? healthPayload.smsProvider.trim()
+          : 'netgsm';
+        smsConfigured = Boolean(healthPayload.smsConfigured);
+        smsSenderName = typeof healthPayload.smsSenderName === 'string' ? healthPayload.smsSenderName : null;
+        smsMissing = Array.isArray(healthPayload.smsMissing)
+          ? healthPayload.smsMissing.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+          : [];
         dbMessage = getDatabaseDescription(backendStorageMode, users, drivers, clientDbEnvConfigured);
+        smsMessage = getSmsDescription(smsConfigured, smsSenderName, smsMissing);
       }
 
       console.log('[SystemStatus] Health check:', { backendLive, databaseLive, users, drivers });
@@ -319,6 +351,12 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
       ? 'live'
       : 'offline';
 
+  const smsStatus: StatusItem['status'] = smsConfigured
+    ? 'live'
+    : backendLive || baseUrl
+      ? 'partial'
+      : 'offline';
+
   const items: StatusItem[] = [
     {
       id: 'backend',
@@ -360,6 +398,13 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
           : 'API adresi çözülemedi.',
       status: backendLive ? 'live' : baseUrl ? 'partial' : 'offline',
       icon: KeyRound,
+    },
+    {
+      id: 'sms',
+      title: `SMS altyapısı (${smsProvider.toUpperCase()})`,
+      description: smsMessage,
+      status: smsStatus,
+      icon: Smartphone,
     },
   ];
 
