@@ -13,7 +13,7 @@ function sanitizeNetgsmEnvValue(value: string | undefined): string {
     .trim();
 }
 
-function normalizeNetgsmMsgHeader(value: string): string {
+function toNetgsmAscii(value: string): string {
   return sanitizeNetgsmEnvValue(value)
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -24,8 +24,19 @@ function normalizeNetgsmMsgHeader(value: string): string {
     .replace(/[öÖ]/g, 'O')
     .replace(/[çÇ]/g, 'C')
     .replace(/\s+/g, ' ')
-    .toUpperCase()
     .trim();
+}
+
+function normalizeNetgsmMsgHeader(value: string): string {
+  return toNetgsmAscii(value).toUpperCase();
+}
+
+function compactNetgsmMsgHeader(value: string): string {
+  return toNetgsmAscii(value).replace(/\s+/g, '');
+}
+
+function compactRawNetgsmMsgHeader(value: string): string {
+  return sanitizeNetgsmEnvValue(value).replace(/\s+/g, '');
 }
 
 function readNetgsmEnvValue(...keys: string[]): string {
@@ -41,14 +52,27 @@ function readNetgsmEnvValue(...keys: string[]): string {
 
 function buildNetgsmMsgHeaderCandidates(value: string): string[] {
   const exactValue = sanitizeNetgsmEnvValue(value);
+  const asciiValue = toNetgsmAscii(value);
   const normalizedValue = normalizeNetgsmMsgHeader(value);
-  const candidates = [exactValue, normalizedValue].filter((item): item is string => Boolean(item));
+  const compactExactValue = compactRawNetgsmMsgHeader(value);
+  const compactAsciiValue = compactNetgsmMsgHeader(value);
+  const compactNormalizedValue = normalizedValue.replace(/\s+/g, '');
+  const candidates = [
+    exactValue,
+    asciiValue,
+    compactExactValue,
+    compactAsciiValue,
+    normalizedValue,
+    compactNormalizedValue,
+  ].filter((item): item is string => Boolean(item));
+
   return Array.from(new Set(candidates));
 }
 
 const NETGSM_USERCODE = readNetgsmEnvValue('NETGSM_USERCODE', 'NETGSM_USER_CODE', 'NETGSM_USERNAME');
 const NETGSM_PASSWORD = readNetgsmEnvValue('NETGSM_PASSWORD', 'NETGSM_USER_PASSWORD');
 const NETGSM_MSGHEADER = readNetgsmEnvValue('NETGSM_MSGHEADER', 'NETGSM_HEADER', 'NETGSM_SENDER');
+const NORMALIZED_NETGSM_MSGHEADER = normalizeNetgsmMsgHeader(NETGSM_MSGHEADER);
 const NETGSM_MSGHEADER_CANDIDATES = buildNetgsmMsgHeaderCandidates(NETGSM_MSGHEADER);
 const PRIMARY_NETGSM_MSGHEADER = NETGSM_MSGHEADER_CANDIDATES[0] ?? '';
 
@@ -99,7 +123,7 @@ export interface NetgsmConfigStatus {
 
 export function getNetgsmConfigStatus(): NetgsmConfigStatus {
   const missingKeys = getMissingNetgsmConfigKeys();
-  const normalizedSenderName = NETGSM_MSGHEADER_CANDIDATES[1] ?? PRIMARY_NETGSM_MSGHEADER ?? null;
+  const normalizedSenderName = NORMALIZED_NETGSM_MSGHEADER || PRIMARY_NETGSM_MSGHEADER || null;
 
   return {
     configured: missingKeys.length === 0,
@@ -202,7 +226,7 @@ function getNetgsmProviderMessage(rawText: string, status: number, attemptedHead
 
   if (code === '40') {
     const headerSuffix = attemptedHeader ? ` Denenen başlık: ${attemptedHeader}.` : '';
-    return `NetGSM mesaj başlığı sistemde tanımlı değil.${headerSuffix} NETGSM_MSGHEADER değeri, NetGSM panelindeki onaylı başlık ile birebir aynı olmalı. Başlık İşlemleri bölümündeki aktif başlığı kopyalayıp env alanına yapıştırın ve uygulamayı yeniden başlatın.`;
+    return `NetGSM mesaj başlığı sistemde tanımlı değil.${headerSuffix} NETGSM_MSGHEADER değeri, NetGSM panelindeki onaylı başlık ile birebir aynı olmalı. Başlık İşlemleri bölümündeki aktif başlığı tırnaksız şekilde kopyalayıp env alanına yapıştırın. Örnek: Dursunkucuk. Ardından uygulamayı yeniden başlatın.`;
   }
 
   if (code === '50') {
@@ -293,7 +317,7 @@ export async function sendNetgsmCodeSms(params: SendNetgsmCodeSmsParams): Promis
   </body>
 </mainbody>`;
 
-      console.log('[NETGSM] Sending auth SMS to:', normalizedPhone, 'purpose:', purpose, 'msgheader:', currentMsgHeader, 'msgheaderLength:', currentMsgHeader.length, 'allHeaders:', NETGSM_MSGHEADER_CANDIDATES.join(' | '));
+      console.log('[NETGSM] Sending auth SMS to:', normalizedPhone, 'purpose:', purpose, 'msgheader:', currentMsgHeader, 'msgheaderLength:', currentMsgHeader.length, 'allHeaders:', NETGSM_MSGHEADER_CANDIDATES.join(' | '), 'configuredHeader:', NETGSM_MSGHEADER, 'normalizedHeader:', NORMALIZED_NETGSM_MSGHEADER);
 
       const response = await fetch(NETGSM_API_URL, {
         method: 'POST',
