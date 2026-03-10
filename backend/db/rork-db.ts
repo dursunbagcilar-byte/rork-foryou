@@ -231,7 +231,7 @@ export async function dbUpsert(table: string, id: string, data: Record<string, a
       _pendingOps.push({ type: 'upsert', table, id, data, timestamp: Date.now() });
     }
     console.log(`[RORK-DB] Queued upsert ${table}:${id} (pending: ${_pendingOps.length})`);
-    throw new Error(`[RORK-DB] DB not configured, queued ${table}:${id}`);
+    return;
   }
   const jsonData = JSON.stringify(data);
   const sql = `UPSERT ${toSurrealId(table, id)} CONTENT ${jsonData};`;
@@ -245,7 +245,7 @@ export async function dbDelete(table: string, id: string): Promise<void> {
     if (upsertIdx >= 0) _pendingOps.splice(upsertIdx, 1);
     _pendingOps.push({ type: 'delete', table, id, timestamp: Date.now() });
     console.log(`[RORK-DB] Queued delete ${table}:${id} (pending: ${_pendingOps.length})`);
-    throw new Error(`[RORK-DB] DB not configured, queued delete ${table}:${id}`);
+    return;
   }
   const sql = `DELETE ${toSurrealId(table, id)};`;
   console.log(`[RORK-DB] Delete ${table}:${id}`);

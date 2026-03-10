@@ -15,7 +15,7 @@ import { getNetgsmConfigStatus, getNetgsmSendErrorMessage, sendPasswordResetSmsC
 
 const app = new Hono();
 
-console.log("[SERVER] Hono v67 started - improved DB config detection + snapshot persistence");
+console.log("[SERVER] Hono v69 started - registration always allowed regardless of DB status");
 
 let _dbReady = false;
 let _dbInitPromise: Promise<void> | null = null;

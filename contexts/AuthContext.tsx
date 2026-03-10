@@ -368,12 +368,18 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
 
       if (res.status === 503 || res.status === 502) {
+        let serverError = '';
+        try {
+          const errBody = await res.json();
+          if (errBody?.error) serverError = errBody.error;
+        } catch {}
+        console.log('[Auth] directFetch 503/502 error:', res.status, serverError, 'retry:', retryCount);
         if (retryCount < MAX_RETRIES) {
-          const delay = 1500;
+          const delay = 2000 + (retryCount * 1000);
           await new Promise(r => setTimeout(r, delay));
           return directFetch(path, body, retryCount + 1, extraHeaders);
         }
-        throw new Error('Sunucu geçici olarak kullanılamıyor. Lütfen tekrar deneyin.');
+        throw new Error(serverError || 'Sunucu geçici olarak kullanılamıyor. Lütfen tekrar deneyin.');
       }
 
       if (res.status >= 500) {
@@ -412,7 +418,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       try {
         data = JSON.parse(responseText);
       } catch {
-        throw new Error('Sunucu geçersiz yanıt döndü. Lütfen tekrar deneyin.');
+        console.log('[Auth] directFetch JSON parse error, raw:', responseText.substring(0, 200), 'status:', res.status, 'retry:', retryCount);
+        if (retryCount < MAX_RETRIES) {
+          const delay = 2000 + (retryCount * 1000);
+          await new Promise(r => setTimeout(r, delay));
+          return directFetch(path, body, retryCount + 1, extraHeaders);
+        }
+        throw new Error('Sunucu geçersiz bir yanıt döndürdü. Lütfen birkaç saniye bekleyip tekrar deneyin.');
       }
 
       return data;
