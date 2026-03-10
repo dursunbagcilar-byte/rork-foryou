@@ -73,19 +73,29 @@ function getDatabaseDescription(mode: StorageMode, users: number, drivers: numbe
   return 'Kalıcı veritabanı bağlı değil. Backend şu anda geçici bellek modunda çalışıyor.';
 }
 
-function getSmsDescription(configured: boolean, senderName: string | null, missingKeys: string[]): string {
+function getSmsDescription(
+  configured: boolean,
+  senderName: string | null,
+  missingKeys: string[],
+  headerMismatch: boolean,
+  configuredHeader: string | null,
+  senderLocked: boolean,
+): string {
   if (configured) {
     const senderLabel = senderName?.trim() ? senderName.trim() : 'Tanımlı başlık';
-    return `NetGSM yapılandırıldı. Gönderici başlığı: ${senderLabel}. Bu ekran env bilgisini doğrular; gerçek gönderimde başlığın API alt kullanıcısına tanımlı ve SMS API için yetkili olması ayrıca gerekir.`;
+    const envHeaderLabel = configuredHeader?.trim() ? configuredHeader.trim() : null;
+
+    if (headerMismatch && envHeaderLabel) {
+      return `NetGSM çalışıyor ancak uygulama ${senderLabel} başlığını zorluyor, env içinde ise ${envHeaderLabel} görünüyor. Sorunsuz gönderim için NetGSM paneli ve env başlığını ${senderLabel} ile eşitleyin.`;
+    }
+
+    const lockedSuffix = senderLocked ? ' Gönderici başlığı kod tarafında sabitlenmiş durumda.' : '';
+    return `NetGSM yapılandırıldı. Gönderici başlığı: ${senderLabel}.${lockedSuffix}`;
   }
 
   if (missingKeys.length > 0) {
     const missingList = missingKeys.join(', ');
-    const requiresHeader = missingKeys.includes('NETGSM_MSGHEADER');
-    const headerHint = requiresHeader
-      ? ' NETGSM_MSGHEADER alanına NetGSM panelindeki onaylı başlığı tırnaksız ve birebir aynı şekilde yazın.'
-      : '';
-    return `NetGSM eksik yapılandırma: ${missingList}.${headerHint} Değişiklikten sonra uygulamayı yeniden başlatın.`;
+    return `NetGSM eksik yapılandırma: ${missingList}. Değişiklikten sonra uygulamayı yeniden başlatın.`;
   }
 
   return 'NetGSM durumu alınamadı.';
@@ -204,6 +214,9 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
   let smsConfigured = false;
   let smsProvider = 'netgsm';
   let smsSenderName: string | null = null;
+  let smsConfiguredHeader: string | null = null;
+  let smsHeaderMismatch = false;
+  let smsSenderLocked = false;
   let smsMissing: string[] = [];
   let backendMessage = baseUrl ? 'API adresi çözüldü, canlı kontrol yapılıyor...' : 'API adresi çözülemedi.';
   let dbMessage = 'Veritabanı durumu kontrol ediliyor...';
@@ -233,6 +246,9 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
         smsProvider?: string;
         smsConfigured?: boolean;
         smsSenderName?: string | null;
+        smsConfiguredHeader?: string | null;
+        smsHeaderMismatch?: boolean;
+        smsSenderLocked?: boolean;
         smsMissing?: string[];
         drivers?: number;
         users?: number;
@@ -257,11 +273,14 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
           : 'netgsm';
         smsConfigured = Boolean(healthPayload.smsConfigured);
         smsSenderName = typeof healthPayload.smsSenderName === 'string' ? healthPayload.smsSenderName : null;
+        smsConfiguredHeader = typeof healthPayload.smsConfiguredHeader === 'string' ? healthPayload.smsConfiguredHeader : null;
+        smsHeaderMismatch = Boolean(healthPayload.smsHeaderMismatch);
+        smsSenderLocked = Boolean(healthPayload.smsSenderLocked);
         smsMissing = Array.isArray(healthPayload.smsMissing)
           ? healthPayload.smsMissing.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
           : [];
         dbMessage = getDatabaseDescription(backendStorageMode, users, drivers, clientDbEnvConfigured);
-        smsMessage = getSmsDescription(smsConfigured, smsSenderName, smsMissing);
+        smsMessage = getSmsDescription(smsConfigured, smsSenderName, smsMissing, smsHeaderMismatch, smsConfiguredHeader, smsSenderLocked);
       }
 
       console.log('[SystemStatus] Health check:', { backendLive, databaseLive, users, drivers });
@@ -357,7 +376,9 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
       : 'offline';
 
   const smsStatus: StatusItem['status'] = smsConfigured
-    ? 'live'
+    ? smsHeaderMismatch
+      ? 'partial'
+      : 'live'
     : backendLive || baseUrl
       ? 'partial'
       : 'offline';

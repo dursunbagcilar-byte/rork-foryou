@@ -753,7 +753,7 @@ app.get("/health", async (c) => {
   const storageMode = getCurrentStorageMode();
   const ready = storageMode !== 'memory';
   const netgsmStatus = getNetgsmConfigStatus();
-  console.log('[SERVER] Health response: configured:', configured, 'ready:', ready, 'storageMode:', storageMode, 'snapshotAvailable:', persistentStore.available, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length, 'smsConfigured:', netgsmStatus.configured, 'smsSenderName:', netgsmStatus.senderName ?? 'none');
+  console.log('[SERVER] Health response: configured:', configured, 'ready:', ready, 'storageMode:', storageMode, 'snapshotAvailable:', persistentStore.available, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length, 'smsConfigured:', netgsmStatus.configured, 'smsSenderName:', netgsmStatus.senderName ?? 'none', 'smsConfiguredHeader:', netgsmStatus.configuredSenderName ?? 'none', 'smsHeaderMismatch:', netgsmStatus.senderHeaderMismatch, 'smsSenderLocked:', netgsmStatus.senderLocked);
   return c.json({
     status: "ok",
     version: "67",
@@ -766,6 +766,9 @@ app.get("/health", async (c) => {
     smsProvider: AUTH_SMS_PROVIDER,
     smsConfigured: netgsmStatus.configured,
     smsSenderName: netgsmStatus.senderName,
+    smsConfiguredHeader: netgsmStatus.configuredSenderName,
+    smsHeaderMismatch: netgsmStatus.senderHeaderMismatch,
+    smsSenderLocked: netgsmStatus.senderLocked,
     smsMissing: netgsmStatus.missingKeys,
     drivers: db.drivers.getAll().length,
     users: db.users.getAll().length,

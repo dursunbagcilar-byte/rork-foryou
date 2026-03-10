@@ -1,7 +1,6 @@
-import { APP_BRAND } from '../../constants/branding';
-
 const NETGSM_API_URL = 'https://api.netgsm.com.tr/sms/send/xml';
-const NETGSM_HEADER_TROUBLESHOOTING_TEXT = 'NETGSM_MSGHEADER değeri panelde görünen onaylı başlık ile birebir aynı olmalı. Başlık portalda görünse bile API alt kullanıcısında SMS yetkisi yoksa, API erişimi kapalıysa veya bu başlık ilgili alt kullanıcıya tanımlı değilse NetGSM yine 40 hatası döndürebilir. NetGSM desteğinden kullandığınız API kullanıcısı için başlığın SMS API gönderimine yetkili olup olmadığını kontrol etmelerini isteyin. Gerekirse aynı kullanıcıda tanımlı diğer gönderici başlığını ya da abone numarası göndericisini deneyin.';
+const NETGSM_LOCKED_SENDER_HEADER = 'Dursunkucuk';
+const NETGSM_HEADER_TROUBLESHOOTING_TEXT = `Uygulama şu anda ${NETGSM_LOCKED_SENDER_HEADER} başlığını gönderiyor. NetGSM panelindeki onaylı başlık ile bu değerin birebir aynı olması gerekir. Başlık portalda görünse bile API alt kullanıcısında SMS yetkisi yoksa, API erişimi kapalıysa veya bu başlık ilgili alt kullanıcıya tanımlı değilse NetGSM yine 40 hatası döndürebilir. NetGSM desteğinden kullandığınız API kullanıcısı için ${NETGSM_LOCKED_SENDER_HEADER} başlığının SMS API gönderimine yetkili olup olmadığını kontrol etmelerini isteyin.`;
 
 function getNetgsmHeaderTroubleshootingText(attemptedHeader?: string): string {
   const headerSuffix = attemptedHeader ? ` Denenen başlık: ${attemptedHeader}.` : '';
@@ -40,14 +39,6 @@ function normalizeNetgsmMsgHeader(value: string): string {
   return toNetgsmAscii(value).toUpperCase();
 }
 
-function compactNetgsmMsgHeader(value: string): string {
-  return toNetgsmAscii(value).replace(/\s+/g, '');
-}
-
-function compactRawNetgsmMsgHeader(value: string): string {
-  return sanitizeNetgsmEnvValue(value).replace(/\s+/g, '');
-}
-
 function readNetgsmEnvValue(...keys: string[]): string {
   for (const key of keys) {
     const value = sanitizeNetgsmEnvValue(process.env[key]);
@@ -62,18 +53,7 @@ function readNetgsmEnvValue(...keys: string[]): string {
 function buildNetgsmMsgHeaderCandidates(value: string): string[] {
   const exactValue = sanitizeNetgsmEnvValue(value);
   const asciiValue = toNetgsmAscii(value);
-  const normalizedValue = normalizeNetgsmMsgHeader(value);
-  const compactExactValue = compactRawNetgsmMsgHeader(value);
-  const compactAsciiValue = compactNetgsmMsgHeader(value);
-  const compactNormalizedValue = normalizedValue.replace(/\s+/g, '');
-  const candidates = [
-    exactValue,
-    asciiValue,
-    compactExactValue,
-    compactAsciiValue,
-    normalizedValue,
-    compactNormalizedValue,
-  ].filter((item): item is string => Boolean(item));
+  const candidates = [exactValue, asciiValue].filter((item): item is string => Boolean(item));
 
   return Array.from(new Set(candidates));
 }
@@ -81,29 +61,35 @@ function buildNetgsmMsgHeaderCandidates(value: string): string[] {
 interface NetgsmRuntimeConfig {
   usercode: string;
   password: string;
+  configuredMsgHeader: string;
   msgHeader: string;
   normalizedMsgHeader: string;
   msgHeaderCandidates: string[];
   primaryMsgHeader: string;
+  senderHeaderMismatch: boolean;
 }
 
 function getNetgsmRuntimeConfig(): NetgsmRuntimeConfig {
   const usercode = readNetgsmEnvValue('NETGSM_USERCODE', 'NETGSM_USER_CODE', 'NETGSM_USERNAME');
   const password = readNetgsmEnvValue('NETGSM_PASSWORD', 'NETGSM_USER_PASSWORD');
   const configuredMsgHeader = readNetgsmEnvValue('NETGSM_MSGHEADER', 'NETGSM_HEADER', 'NETGSM_SENDER');
-  const preferredMsgHeader = sanitizeNetgsmEnvValue(APP_BRAND);
-  const msgHeader = preferredMsgHeader || configuredMsgHeader;
+  const msgHeader = sanitizeNetgsmEnvValue(NETGSM_LOCKED_SENDER_HEADER) || 'Dursunkucuk';
   const normalizedMsgHeader = normalizeNetgsmMsgHeader(msgHeader);
   const msgHeaderCandidates = buildNetgsmMsgHeaderCandidates(msgHeader);
-  const primaryMsgHeader = msgHeaderCandidates[0] ?? '';
+  const primaryMsgHeader = msgHeaderCandidates[0] ?? msgHeader;
+  const senderHeaderMismatch = Boolean(
+    configuredMsgHeader && normalizeNetgsmMsgHeader(configuredMsgHeader) !== normalizedMsgHeader,
+  );
 
   return {
     usercode,
     password,
+    configuredMsgHeader,
     msgHeader,
     normalizedMsgHeader,
     msgHeaderCandidates,
     primaryMsgHeader,
+    senderHeaderMismatch,
   };
 }
 
@@ -116,10 +102,6 @@ function getMissingNetgsmConfigKeys(config: NetgsmRuntimeConfig = getNetgsmRunti
 
   if (!config.password) {
     missingKeys.push('NETGSM_PASSWORD');
-  }
-
-  if (!config.msgHeader) {
-    missingKeys.push('NETGSM_MSGHEADER');
   }
 
   return missingKeys;
@@ -150,6 +132,9 @@ export interface NetgsmConfigStatus {
   senderName: string | null;
   normalizedSenderName: string | null;
   senderVariants: string[];
+  configuredSenderName: string | null;
+  senderHeaderMismatch: boolean;
+  senderLocked: boolean;
 }
 
 export function getNetgsmConfigStatus(): NetgsmConfigStatus {
@@ -163,11 +148,14 @@ export function getNetgsmConfigStatus(): NetgsmConfigStatus {
     senderName: config.primaryMsgHeader || null,
     normalizedSenderName,
     senderVariants: config.msgHeaderCandidates,
+    configuredSenderName: config.configuredMsgHeader || null,
+    senderHeaderMismatch: config.senderHeaderMismatch,
+    senderLocked: true,
   };
 }
 
 function buildNetgsmCodeMessage(code: string, purpose: NetgsmCodePurpose): string {
-  const smsBrand = toNetgsmAscii(APP_BRAND) || 'Dursunkucuk';
+  const smsBrand = toNetgsmAscii(NETGSM_LOCKED_SENDER_HEADER) || 'Dursunkucuk';
 
   if (purpose === 'account_verification') {
     return `${smsBrand} hesap dogrulama kodunuz: ${code}. Bu kodu kimseyle paylasmayin.`;
@@ -365,6 +353,10 @@ export async function sendNetgsmCodeSms(params: SendNetgsmCodeSmsParams): Promis
         config.msgHeaderCandidates.join(' | '),
         'configuredHeader:',
         config.msgHeader,
+        'configuredEnvHeader:',
+        config.configuredMsgHeader || 'none',
+        'senderHeaderMismatch:',
+        config.senderHeaderMismatch,
         'normalizedHeader:',
         config.normalizedMsgHeader,
       );
