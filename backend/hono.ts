@@ -935,9 +935,8 @@ app.post("/auth/register-customer", async (c) => {
     const dbTk = c.req.header('x-db-token');
     const dbReady = await ensureDbReady(dbEp, dbNs, dbTk);
     const storageMode = getCurrentStorageMode();
-    if (!dbReady || storageMode !== 'database') {
-      console.log('[REST] register-customer blocked - persistent auth store unavailable, storageMode:', storageMode, 'dbConfigured:', isDbConfigured());
-      return c.json({ success: false, error: 'Kayıt sistemi şu anda hazır değil. Lütfen biraz sonra tekrar deneyin.', user: null, token: null }, 503);
+    if (!dbReady) {
+      console.log('[REST] register-customer continuing without confirmed DB readiness, storageMode:', storageMode, 'dbConfigured:', isDbConfigured());
     }
 
     const body = await c.req.json();
@@ -1057,9 +1056,8 @@ app.post("/auth/register-driver", async (c) => {
     const dbTk = c.req.header('x-db-token');
     const dbReady = await ensureDbReady(dbEp, dbNs, dbTk);
     const storageMode = getCurrentStorageMode();
-    if (!dbReady || storageMode !== 'database') {
-      console.log('[REST] register-driver blocked - persistent auth store unavailable, storageMode:', storageMode, 'dbConfigured:', isDbConfigured());
-      return c.json({ success: false, error: 'Kayıt sistemi şu anda hazır değil. Lütfen biraz sonra tekrar deneyin.', driver: null, token: null }, 503);
+    if (!dbReady) {
+      console.log('[REST] register-driver continuing without confirmed DB readiness, storageMode:', storageMode, 'dbConfigured:', isDbConfigured());
     }
 
     const body = await c.req.json();
