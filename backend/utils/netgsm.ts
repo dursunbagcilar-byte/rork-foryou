@@ -13,6 +13,21 @@ function sanitizeNetgsmEnvValue(value: string | undefined): string {
     .trim();
 }
 
+function normalizeNetgsmMsgHeader(value: string): string {
+  return sanitizeNetgsmEnvValue(value)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[ıİ]/g, 'I')
+    .replace(/[şŞ]/g, 'S')
+    .replace(/[ğĞ]/g, 'G')
+    .replace(/[üÜ]/g, 'U')
+    .replace(/[öÖ]/g, 'O')
+    .replace(/[çÇ]/g, 'C')
+    .replace(/\s+/g, ' ')
+    .toUpperCase()
+    .trim();
+}
+
 function readNetgsmEnvValue(...keys: string[]): string {
   for (const key of keys) {
     const value = sanitizeNetgsmEnvValue(process.env[key]);
@@ -24,9 +39,18 @@ function readNetgsmEnvValue(...keys: string[]): string {
   return '';
 }
 
+function buildNetgsmMsgHeaderCandidates(value: string): string[] {
+  const exactValue = sanitizeNetgsmEnvValue(value);
+  const normalizedValue = normalizeNetgsmMsgHeader(value);
+  const candidates = [exactValue, normalizedValue].filter((item): item is string => Boolean(item));
+  return Array.from(new Set(candidates));
+}
+
 const NETGSM_USERCODE = readNetgsmEnvValue('NETGSM_USERCODE', 'NETGSM_USER_CODE', 'NETGSM_USERNAME');
 const NETGSM_PASSWORD = readNetgsmEnvValue('NETGSM_PASSWORD', 'NETGSM_USER_PASSWORD');
 const NETGSM_MSGHEADER = readNetgsmEnvValue('NETGSM_MSGHEADER', 'NETGSM_HEADER', 'NETGSM_SENDER');
+const NETGSM_MSGHEADER_CANDIDATES = buildNetgsmMsgHeaderCandidates(NETGSM_MSGHEADER);
+const PRIMARY_NETGSM_MSGHEADER = NETGSM_MSGHEADER_CANDIDATES[0] ?? '';
 
 function getMissingNetgsmConfigKeys(): string[] {
   const missingKeys: string[] = [];
@@ -69,14 +93,20 @@ export interface NetgsmConfigStatus {
   configured: boolean;
   missingKeys: string[];
   senderName: string | null;
+  normalizedSenderName: string | null;
+  senderVariants: string[];
 }
 
 export function getNetgsmConfigStatus(): NetgsmConfigStatus {
   const missingKeys = getMissingNetgsmConfigKeys();
+  const normalizedSenderName = NETGSM_MSGHEADER_CANDIDATES[1] ?? PRIMARY_NETGSM_MSGHEADER ?? null;
+
   return {
     configured: missingKeys.length === 0,
     missingKeys,
-    senderName: NETGSM_MSGHEADER || null,
+    senderName: PRIMARY_NETGSM_MSGHEADER || null,
+    normalizedSenderName,
+    senderVariants: NETGSM_MSGHEADER_CANDIDATES,
   };
 }
 
@@ -160,7 +190,7 @@ function extractProviderCode(rawText: string): string | null {
   return /^\d+$/.test(firstToken) ? firstToken : null;
 }
 
-function getNetgsmProviderMessage(rawText: string, status: number): string {
+function getNetgsmProviderMessage(rawText: string, status: number, attemptedHeader?: string): string {
   const code = extractProviderCode(rawText);
   if (code === '20') {
     return 'SMS metni geçersiz veya karakter limiti aşıldı.';
@@ -171,7 +201,8 @@ function getNetgsmProviderMessage(rawText: string, status: number): string {
   }
 
   if (code === '40') {
-    return 'NetGSM mesaj başlığı sistemde tanımlı değil. NETGSM_MSGHEADER değeri, NetGSM panelindeki onaylı başlık ile birebir aynı olmalı. Başlık İşlemleri bölümündeki aktif başlığı kopyalayıp env alanına yapıştırın ve uygulamayı yeniden başlatın.';
+    const headerSuffix = attemptedHeader ? ` Denenen başlık: ${attemptedHeader}.` : '';
+    return `NetGSM mesaj başlığı sistemde tanımlı değil.${headerSuffix} NETGSM_MSGHEADER değeri, NetGSM panelindeki onaylı başlık ile birebir aynı olmalı. Başlık İşlemleri bölümündeki aktif başlığı kopyalayıp env alanına yapıştırın ve uygulamayı yeniden başlatın.`;
   }
 
   if (code === '50') {
@@ -242,14 +273,19 @@ export async function sendNetgsmCodeSms(params: SendNetgsmCodeSmsParams): Promis
 
   const purpose = params.purpose ?? 'password_reset';
   const message = buildNetgsmCodeMessage(params.code, purpose);
-  const xmlPayload = `<?xml version="1.0" encoding="UTF-8"?>
+
+  try {
+    let lastProviderMessage: string | null = null;
+
+    for (const currentMsgHeader of NETGSM_MSGHEADER_CANDIDATES) {
+      const xmlPayload = `<?xml version="1.0" encoding="UTF-8"?>
 <mainbody>
   <header>
     <company dil="TR">Netgsm</company>
     <usercode>${escapeXml(NETGSM_USERCODE)}</usercode>
     <password>${escapeXml(NETGSM_PASSWORD)}</password>
     <type>1:n</type>
-    <msgheader>${escapeXml(NETGSM_MSGHEADER)}</msgheader>
+    <msgheader>${escapeXml(currentMsgHeader)}</msgheader>
   </header>
   <body>
     <msg><![CDATA[${message}]]></msg>
@@ -257,47 +293,71 @@ export async function sendNetgsmCodeSms(params: SendNetgsmCodeSmsParams): Promis
   </body>
 </mainbody>`;
 
-  console.log('[NETGSM] Sending auth SMS to:', normalizedPhone, 'purpose:', purpose, 'msgheader:', NETGSM_MSGHEADER, 'msgheaderLength:', NETGSM_MSGHEADER.length);
+      console.log('[NETGSM] Sending auth SMS to:', normalizedPhone, 'purpose:', purpose, 'msgheader:', currentMsgHeader, 'msgheaderLength:', currentMsgHeader.length, 'allHeaders:', NETGSM_MSGHEADER_CANDIDATES.join(' | '));
 
-  try {
-    const response = await fetch(NETGSM_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/xml; charset=UTF-8',
-        Accept: 'text/plain, text/xml, application/xml;q=0.9, */*;q=0.8',
-      },
-      body: xmlPayload,
-    });
+      const response = await fetch(NETGSM_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/xml; charset=UTF-8',
+          Accept: 'text/plain, text/xml, application/xml;q=0.9, */*;q=0.8',
+        },
+        body: xmlPayload,
+      });
 
-    const rawText = (await response.text()).trim();
-    console.log('[NETGSM] SMS response status:', response.status, 'body:', rawText || 'empty');
+      const rawText = (await response.text()).trim();
+      console.log('[NETGSM] SMS response status:', response.status, 'msgheader:', currentMsgHeader, 'body:', rawText || 'empty');
 
-    if (!response.ok) {
+      if (!response.ok) {
+        const providerMessage = getNetgsmProviderMessage(rawText, response.status, currentMsgHeader);
+        lastProviderMessage = providerMessage;
+        const providerCode = extractProviderCode(rawText);
+        const shouldRetryWithNextHeader = providerCode === '40' && currentMsgHeader !== NETGSM_MSGHEADER_CANDIDATES[NETGSM_MSGHEADER_CANDIDATES.length - 1];
+        if (shouldRetryWithNextHeader) {
+          console.log('[NETGSM] Retrying with next sender header candidate after code 40:', currentMsgHeader);
+          continue;
+        }
+
+        return {
+          success: false,
+          errorCode: 'provider_error',
+          providerMessage,
+          messageId: null,
+        };
+      }
+
+      const providerCode = extractProviderCode(rawText);
+      if (providerCode && ['20', '30', '40', '50', '60', '70', '80', '85'].includes(providerCode)) {
+        const providerMessage = getNetgsmProviderMessage(rawText, response.status, currentMsgHeader);
+        lastProviderMessage = providerMessage;
+        const shouldRetryWithNextHeader = providerCode === '40' && currentMsgHeader !== NETGSM_MSGHEADER_CANDIDATES[NETGSM_MSGHEADER_CANDIDATES.length - 1];
+        if (shouldRetryWithNextHeader) {
+          console.log('[NETGSM] Retrying with next sender header candidate after provider code 40:', currentMsgHeader);
+          continue;
+        }
+
+        return {
+          success: false,
+          errorCode: 'provider_error',
+          providerMessage,
+          messageId: null,
+        };
+      }
+
+      const messageId = extractMessageId(rawText);
+      console.log('[NETGSM] Auth SMS sent successfully, purpose:', purpose, 'messageId:', messageId ?? 'unknown', 'msgheader:', currentMsgHeader);
       return {
-        success: false,
-        errorCode: 'provider_error',
-        providerMessage: getNetgsmProviderMessage(rawText, response.status),
-        messageId: null,
+        success: true,
+        errorCode: null,
+        providerMessage: null,
+        messageId,
       };
     }
 
-    const providerCode = extractProviderCode(rawText);
-    if (providerCode && ['20', '30', '40', '50', '60', '70', '80', '85'].includes(providerCode)) {
-      return {
-        success: false,
-        errorCode: 'provider_error',
-        providerMessage: getNetgsmProviderMessage(rawText, response.status),
-        messageId: null,
-      };
-    }
-
-    const messageId = extractMessageId(rawText);
-    console.log('[NETGSM] Auth SMS sent successfully, purpose:', purpose, 'messageId:', messageId ?? 'unknown');
     return {
-      success: true,
-      errorCode: null,
-      providerMessage: null,
-      messageId,
+      success: false,
+      errorCode: 'provider_error',
+      providerMessage: lastProviderMessage ?? 'NetGSM mesaj başlığı sistemde tanımlı değil.',
+      messageId: null,
     };
   } catch (error) {
     console.log('[NETGSM] Network error while sending auth SMS:', error);
