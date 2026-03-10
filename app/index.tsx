@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Car, Wine, ArrowRight, ShieldCheck } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/colors';
+import { APP_BRAND } from '@/constants/branding';
 import { useAuth } from '@/contexts/AuthContext';
 
 const ONBOARDING_KEY = 'onboarding_completed';
@@ -105,7 +106,7 @@ export default function WelcomeScreen() {
               <Car size={iconSize} color="#FFF" />
             </View>
           </View>
-          <Text style={[styles.brand, { fontSize: Math.round(isSmall ? 34 : isTablet ? 56 : 42) }]}>2GO</Text>
+          <Text style={[styles.brand, { fontSize: Math.round(isSmall ? 34 : isTablet ? 56 : 42) }]}>{APP_BRAND}</Text>
           <Text style={[styles.tagline, { fontSize: Math.round(isSmall ? 15 : isTablet ? 22 : 18) }]}>Güvenli ve hızlı ulaşım</Text>
           <Text style={[styles.description, { fontSize: Math.round(isSmall ? 13 : isTablet ? 17 : 15), maxWidth: isTablet ? 420 : width * 0.8 }]}>
             Alkol aldığınızda dahi nereye gitmek isterseniz, 2GO ile güvenle gidin. Profesyonel şoförlerimiz sizi kendi aracınız ile istediğiniz yere sürpriz ücret olmadan ulaştırsın.

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated,
-  useWindowDimensions, StatusBar, Platform, Image,
+  useWindowDimensions, StatusBar, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -9,6 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ArrowRight, Sparkles } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
+import { APP_BRAND } from '@/constants/branding';
 
 const ONBOARDING_KEY = 'onboarding_completed';
 
@@ -86,24 +87,24 @@ export default function OnboardingScreen() {
     });
   }, [fadeAnim, slideAnim]);
 
-  const handleNext = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    if (currentIndex < SLIDES.length - 1) {
-      animateTransition(currentIndex + 1);
-    } else {
-      handleFinish();
-    }
-  }, [currentIndex, animateTransition]);
-
-  const handleSkip = useCallback(() => {
-    handleFinish();
-  }, []);
-
   const handleFinish = useCallback(async () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     await AsyncStorage.setItem(ONBOARDING_KEY, 'true');
     router.replace('/');
   }, [router]);
+
+  const handleNext = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    if (currentIndex < SLIDES.length - 1) {
+      animateTransition(currentIndex + 1);
+    } else {
+      void handleFinish();
+    }
+  }, [currentIndex, animateTransition, handleFinish]);
+
+  const handleSkip = useCallback(() => {
+    void handleFinish();
+  }, [handleFinish]);
 
   const slide = SLIDES[currentIndex];
   const isLast = currentIndex === SLIDES.length - 1;
@@ -130,7 +131,7 @@ export default function OnboardingScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.topRow}>
           <View style={styles.brandRow}>
-            <Text style={styles.brandText}>2GO</Text>
+            <Text style={styles.brandText}>{APP_BRAND}</Text>
           </View>
           {!isLast ? (
             <TouchableOpacity onPress={handleSkip} style={styles.skipBtn} activeOpacity={0.7}>

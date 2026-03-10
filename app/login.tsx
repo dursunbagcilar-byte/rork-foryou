@@ -8,6 +8,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Mail, Lock, Car, User } from 'lucide-react-native';
 import { useMutation } from '@tanstack/react-query';
+import { APP_BRAND } from '@/constants/branding';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function LoginScreen() {
@@ -182,7 +183,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
           <View style={[styles.heroSection, { paddingHorizontal: isSmall ? 20 : isTablet ? 48 : 28, paddingTop: heroHeight }]}>
-            <Text style={[styles.brand, { fontSize: isSmall ? 38 : isTablet ? 56 : 48 }]}>2GO</Text>
+            <Text style={[styles.brand, { fontSize: isSmall ? 38 : isTablet ? 56 : 48 }]}>{APP_BRAND}</Text>
             <Text style={[styles.tagline, { fontSize: isSmall ? 13 : isTablet ? 18 : 16 }]}>Güvenli Yolculuk</Text>
           </View>
           <View style={[styles.formCard, {

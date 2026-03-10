@@ -9,6 +9,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Mail, Lock, CheckCircle, KeyRound, Phone } from 'lucide-react-native';
 import { getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl } from '@/lib/trpc';
+import { APP_BRAND } from '@/constants/branding';
 import { useAuth } from '@/contexts/AuthContext';
 import { getDbHeaders } from '@/utils/db';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
@@ -646,7 +647,7 @@ export default function ForgotPasswordScreen() {
             </TouchableOpacity>
           </View>
           <View style={[styles.heroSection, { paddingHorizontal: isSmall ? 20 : isTablet ? 48 : 28, paddingTop: heroHeight }]}>
-            <Text style={[styles.brand, { fontSize: isSmall ? 38 : isTablet ? 56 : 48 }]}>2GO</Text>
+            <Text style={[styles.brand, { fontSize: isSmall ? 38 : isTablet ? 56 : 48 }]}>{APP_BRAND}</Text>
             <Text style={[styles.tagline, { fontSize: isSmall ? 13 : isTablet ? 18 : 16 }]}>Şifre Sıfırlama</Text>
           </View>
           <View style={[styles.formCard, {
