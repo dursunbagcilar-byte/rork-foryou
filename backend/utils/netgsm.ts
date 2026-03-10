@@ -1,3 +1,5 @@
+import { APP_BRAND } from '../../constants/branding';
+
 const NETGSM_API_URL = 'https://api.netgsm.com.tr/sms/send/xml';
 const NETGSM_HEADER_TROUBLESHOOTING_TEXT = 'NETGSM_MSGHEADER değeri panelde görünen onaylı başlık ile birebir aynı olmalı. Başlık portalda görünse bile API alt kullanıcısında SMS yetkisi yoksa, API erişimi kapalıysa veya bu başlık ilgili alt kullanıcıya tanımlı değilse NetGSM yine 40 hatası döndürebilir. NetGSM desteğinden kullandığınız API kullanıcısı için başlığın SMS API gönderimine yetkili olup olmadığını kontrol etmelerini isteyin. Gerekirse aynı kullanıcıda tanımlı diğer gönderici başlığını ya da abone numarası göndericisini deneyin.';
 
@@ -88,7 +90,9 @@ interface NetgsmRuntimeConfig {
 function getNetgsmRuntimeConfig(): NetgsmRuntimeConfig {
   const usercode = readNetgsmEnvValue('NETGSM_USERCODE', 'NETGSM_USER_CODE', 'NETGSM_USERNAME');
   const password = readNetgsmEnvValue('NETGSM_PASSWORD', 'NETGSM_USER_PASSWORD');
-  const msgHeader = readNetgsmEnvValue('NETGSM_MSGHEADER', 'NETGSM_HEADER', 'NETGSM_SENDER');
+  const configuredMsgHeader = readNetgsmEnvValue('NETGSM_MSGHEADER', 'NETGSM_HEADER', 'NETGSM_SENDER');
+  const preferredMsgHeader = sanitizeNetgsmEnvValue(APP_BRAND);
+  const msgHeader = preferredMsgHeader || configuredMsgHeader;
   const normalizedMsgHeader = normalizeNetgsmMsgHeader(msgHeader);
   const msgHeaderCandidates = buildNetgsmMsgHeaderCandidates(msgHeader);
   const primaryMsgHeader = msgHeaderCandidates[0] ?? '';
@@ -163,11 +167,13 @@ export function getNetgsmConfigStatus(): NetgsmConfigStatus {
 }
 
 function buildNetgsmCodeMessage(code: string, purpose: NetgsmCodePurpose): string {
+  const smsBrand = toNetgsmAscii(APP_BRAND) || 'Dursunkucuk';
+
   if (purpose === 'account_verification') {
-    return `2GO hesap dogrulama kodunuz: ${code}. Bu kodu kimseyle paylasmayin.`;
+    return `${smsBrand} hesap dogrulama kodunuz: ${code}. Bu kodu kimseyle paylasmayin.`;
   }
 
-  return `2GO sifre sifirlama kodunuz: ${code}. Bu kodu kimseyle paylasmayin.`;
+  return `${smsBrand} sifre sifirlama kodunuz: ${code}. Bu kodu kimseyle paylasmayin.`;
 }
 
 function hasNetgsmConfig(config: NetgsmRuntimeConfig = getNetgsmRuntimeConfig()): boolean {
