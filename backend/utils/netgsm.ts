@@ -50,12 +50,33 @@ function readNetgsmEnvValue(...keys: string[]): string {
   return '';
 }
 
-function buildNetgsmMsgHeaderCandidates(value: string): string[] {
-  const exactValue = sanitizeNetgsmEnvValue(value);
-  const asciiValue = toNetgsmAscii(value);
-  const candidates = [exactValue, asciiValue].filter((item): item is string => Boolean(item));
+function buildNetgsmMsgHeaderCandidates(preferredValue: string, configuredValue?: string): string[] {
+  const exactPreferredValue = sanitizeNetgsmEnvValue(preferredValue);
+  const asciiPreferredValue = toNetgsmAscii(preferredValue);
+  const exactConfiguredValue = sanitizeNetgsmEnvValue(configuredValue);
+  const asciiConfiguredValue = toNetgsmAscii(configuredValue ?? '');
+  const candidates = [
+    exactPreferredValue,
+    exactConfiguredValue,
+    asciiPreferredValue,
+    asciiConfiguredValue,
+  ].filter((item): item is string => Boolean(item));
 
   return Array.from(new Set(candidates));
+}
+
+function resolveNetgsmLockedHeader(): string {
+  return sanitizeNetgsmEnvValue(NETGSM_LOCKED_SENDER_HEADER) || 'Dursunkucuk';
+}
+
+function resolveNetgsmPrimaryHeader(configuredMsgHeader: string, lockedMsgHeader: string): string {
+  const normalizedLockedHeader = normalizeNetgsmMsgHeader(lockedMsgHeader);
+  const sanitizedConfiguredHeader = sanitizeNetgsmEnvValue(configuredMsgHeader);
+  if (sanitizedConfiguredHeader && normalizeNetgsmMsgHeader(sanitizedConfiguredHeader) === normalizedLockedHeader) {
+    return sanitizedConfiguredHeader;
+  }
+
+  return lockedMsgHeader;
 }
 
 interface NetgsmRuntimeConfig {
@@ -73,13 +94,18 @@ function getNetgsmRuntimeConfig(): NetgsmRuntimeConfig {
   const usercode = readNetgsmEnvValue('NETGSM_USERCODE', 'NETGSM_USER_CODE', 'NETGSM_USERNAME');
   const password = readNetgsmEnvValue('NETGSM_PASSWORD', 'NETGSM_USER_PASSWORD');
   const configuredMsgHeader = readNetgsmEnvValue('NETGSM_MSGHEADER', 'NETGSM_HEADER', 'NETGSM_SENDER');
-  const msgHeader = sanitizeNetgsmEnvValue(NETGSM_LOCKED_SENDER_HEADER) || 'Dursunkucuk';
+  const lockedMsgHeader = resolveNetgsmLockedHeader();
+  const normalizedLockedMsgHeader = normalizeNetgsmMsgHeader(lockedMsgHeader);
+  const msgHeader = resolveNetgsmPrimaryHeader(configuredMsgHeader, lockedMsgHeader);
   const normalizedMsgHeader = normalizeNetgsmMsgHeader(msgHeader);
-  const msgHeaderCandidates = buildNetgsmMsgHeaderCandidates(msgHeader);
-  const primaryMsgHeader = msgHeaderCandidates[0] ?? msgHeader;
   const senderHeaderMismatch = Boolean(
-    configuredMsgHeader && normalizeNetgsmMsgHeader(configuredMsgHeader) !== normalizedMsgHeader,
+    configuredMsgHeader && normalizeNetgsmMsgHeader(configuredMsgHeader) !== normalizedLockedMsgHeader,
   );
+  const msgHeaderCandidates = buildNetgsmMsgHeaderCandidates(
+    msgHeader,
+    senderHeaderMismatch ? undefined : configuredMsgHeader,
+  );
+  const primaryMsgHeader = msgHeaderCandidates[0] ?? msgHeader;
 
   return {
     usercode,
@@ -155,7 +181,7 @@ export function getNetgsmConfigStatus(): NetgsmConfigStatus {
 }
 
 function buildNetgsmCodeMessage(code: string, purpose: NetgsmCodePurpose): string {
-  const smsBrand = toNetgsmAscii(NETGSM_LOCKED_SENDER_HEADER) || 'Dursunkucuk';
+  const smsBrand = toNetgsmAscii(resolveNetgsmLockedHeader()) || 'Dursunkucuk';
 
   if (purpose === 'account_verification') {
     return `${smsBrand} hesap dogrulama kodunuz: ${code}. Bu kodu kimseyle paylasmayin.`;
