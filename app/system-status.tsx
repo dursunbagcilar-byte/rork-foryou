@@ -75,12 +75,17 @@ function getDatabaseDescription(mode: StorageMode, users: number, drivers: numbe
 
 function getSmsDescription(configured: boolean, senderName: string | null, missingKeys: string[]): string {
   if (configured) {
-    const senderLabel = senderName?.trim() ? ` ${senderName.trim()}` : '';
-    return `NetGSM bağlı.${senderLabel ? `${senderLabel} başlığı` : ' Tanımlı başlık'} ile doğrulama ve şifre sıfırlama SMS'leri gönderiliyor.`;
+    const senderLabel = senderName?.trim() ? senderName.trim() : 'Tanımlı başlık';
+    return `NetGSM bağlı. Gönderici başlığı: ${senderLabel}. Doğrulama ve şifre sıfırlama SMS'leri bu başlıkla gönderiliyor.`;
   }
 
   if (missingKeys.length > 0) {
-    return `NetGSM eksik yapılandırma: ${missingKeys.join(', ')}.`;
+    const missingList = missingKeys.join(', ');
+    const requiresHeader = missingKeys.includes('NETGSM_MSGHEADER');
+    const headerHint = requiresHeader
+      ? ' NETGSM_MSGHEADER alanına NetGSM panelindeki onaylı başlığı tırnaksız ve birebir aynı şekilde yazın.'
+      : '';
+    return `NetGSM eksik yapılandırma: ${missingList}.${headerHint} Değişiklikten sonra uygulamayı yeniden başlatın.`;
   }
 
   return 'NetGSM durumu alınamadı.';
