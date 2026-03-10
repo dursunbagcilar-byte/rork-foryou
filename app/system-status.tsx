@@ -76,7 +76,7 @@ function getDatabaseDescription(mode: StorageMode, users: number, drivers: numbe
 function getSmsDescription(configured: boolean, senderName: string | null, missingKeys: string[]): string {
   if (configured) {
     const senderLabel = senderName?.trim() ? senderName.trim() : 'Tanımlı başlık';
-    return `NetGSM bağlı. Gönderici başlığı: ${senderLabel}. Doğrulama ve şifre sıfırlama SMS'leri bu başlıkla gönderiliyor.`;
+    return `NetGSM yapılandırıldı. Gönderici başlığı: ${senderLabel}. Bu ekran env bilgisini doğrular; gerçek gönderimde başlığın API alt kullanıcısına tanımlı ve SMS API için yetkili olması ayrıca gerekir.`;
   }
 
   if (missingKeys.length > 0) {

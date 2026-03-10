@@ -1,4 +1,11 @@
 const NETGSM_API_URL = 'https://api.netgsm.com.tr/sms/send/xml';
+const NETGSM_HEADER_TROUBLESHOOTING_TEXT = 'NETGSM_MSGHEADER değeri panelde görünen onaylı başlık ile birebir aynı olmalı. Başlık portalda görünse bile API alt kullanıcısında SMS yetkisi yoksa, API erişimi kapalıysa veya bu başlık ilgili alt kullanıcıya tanımlı değilse NetGSM yine 40 hatası döndürebilir. NetGSM desteğinden kullandığınız API kullanıcısı için başlığın SMS API gönderimine yetkili olup olmadığını kontrol etmelerini isteyin. Gerekirse aynı kullanıcıda tanımlı diğer gönderici başlığını ya da abone numarası göndericisini deneyin.';
+
+function getNetgsmHeaderTroubleshootingText(attemptedHeader?: string): string {
+  const headerSuffix = attemptedHeader ? ` Denenen başlık: ${attemptedHeader}.` : '';
+  return `NetGSM mesaj başlığı sistemde tanımlı değil.${headerSuffix} ${NETGSM_HEADER_TROUBLESHOOTING_TEXT}`;
+}
+
 
 function sanitizeNetgsmEnvValue(value: string | undefined): string {
   const trimmedValue = value?.trim() ?? '';
@@ -246,8 +253,7 @@ function getNetgsmProviderMessage(rawText: string, status: number, attemptedHead
   }
 
   if (code === '40') {
-    const headerSuffix = attemptedHeader ? ` Denenen başlık: ${attemptedHeader}.` : '';
-    return `NetGSM mesaj başlığı sistemde tanımlı değil.${headerSuffix} NETGSM_MSGHEADER değeri, NetGSM panelindeki onaylı başlık ile birebir aynı olmalı. Başlık İşlemleri bölümündeki aktif başlığı tırnaksız şekilde kopyalayıp env alanına yapıştırın. Örnek: Dursunkucuk. Ardından uygulamayı yeniden başlatın.`;
+    return getNetgsmHeaderTroubleshootingText(attemptedHeader);
   }
 
   if (code === '50') {
@@ -420,7 +426,7 @@ export async function sendNetgsmCodeSms(params: SendNetgsmCodeSmsParams): Promis
     return {
       success: false,
       errorCode: 'provider_error',
-      providerMessage: lastProviderMessage ?? 'NetGSM mesaj başlığı sistemde tanımlı değil.',
+      providerMessage: lastProviderMessage ?? getNetgsmHeaderTroubleshootingText(config.primaryMsgHeader),
       messageId: null,
     };
   } catch (error) {
