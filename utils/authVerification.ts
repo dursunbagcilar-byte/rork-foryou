@@ -2,6 +2,7 @@ import { getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl } from '@/lib/trpc';
 import { getDbHeaders } from '@/utils/db';
 
 export type VerificationDeliveryChannel = 'sms';
+export type VerificationSmsProvider = 'netgsm';
 
 export interface SendRegistrationVerificationInput {
   name: string;
@@ -17,6 +18,7 @@ export interface SendRegistrationVerificationResponse {
   deliveryChannel?: VerificationDeliveryChannel;
   maskedPhone?: string | null;
   deliveryNote?: string | null;
+  smsProvider?: VerificationSmsProvider;
 }
 
 export interface VerifyRegistrationVerificationInput {

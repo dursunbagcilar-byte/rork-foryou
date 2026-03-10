@@ -10,6 +10,7 @@ import type { User, Driver, Business, BusinessMenuItem, Session } from "./db/typ
 import { checkRateLimit, getClientIP, isIPBlocked, trackSuspiciousActivity, sanitizeInput } from "./utils/security";
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../utils/phone";
 import { getSmsDeliveryNote, normalizePhoneForSms } from "../constants/support";
+import { AUTH_SMS_PROVIDER, generateAuthCode } from "./utils/auth-code";
 import { getNetgsmConfigStatus, getNetgsmSendErrorMessage, sendPasswordResetSmsCode, sendVerificationSmsCode } from "./utils/netgsm";
 
 const app = new Hono();
@@ -762,7 +763,7 @@ app.get("/health", async (c) => {
     persistentStoreAvailable: persistentStore.available,
     persistentStoreLastSavedAt: persistentStore.lastSavedAt,
     dbMissing: (!ep || !ns || !tk) ? { endpoint: !ep, namespace: !ns, token: !tk } : undefined,
-    smsProvider: 'netgsm',
+    smsProvider: AUTH_SMS_PROVIDER,
     smsConfigured: netgsmStatus.configured,
     smsSenderName: netgsmStatus.senderName,
     smsMissing: netgsmStatus.missingKeys,
@@ -780,7 +781,6 @@ app.post("/auth/send-verification-code", async (c) => {
 
     const body = await c.req.json();
     const { sanitizeInput, validateEmail, checkLoginAttempt, recordLoginSuccess } = await import('./utils/security');
-    const { generateResetCode } = await import('./utils/email');
     const cleanEmail = typeof body.email === 'string' ? body.email.toLowerCase().trim() : '';
     const cleanName = sanitizeInput(typeof body.name === 'string' ? body.name : '');
     const cleanPhone = normalizeTurkishPhone(typeof body.phone === 'string' ? body.phone : '');
@@ -831,7 +831,7 @@ app.post("/auth/send-verification-code", async (c) => {
       });
     }
 
-    const code = generateResetCode();
+    const code = generateAuthCode();
     const codeKey = `verify_${cleanEmail}`;
     db.resetCodes.set(codeKey, code);
     console.log('[REST] send-verification-code stored code for:', codeKey, 'deliveryMethod:', deliveryMethod);
@@ -1291,7 +1291,6 @@ app.post("/auth/send-reset-code", async (c) => {
 
     console.log('[REST] send-reset-code:', identifier, 'deliveryMethod:', deliveryMethod);
     const { checkLoginAttempt, recordLoginFailure, recordLoginSuccess } = await import('./utils/security');
-    const { generateResetCode } = await import('./utils/email');
 
     const resetLookupKey = buildResetLookupKey(identifier);
     const loginCheck = checkLoginAttempt(resetLookupKey);
@@ -1329,7 +1328,7 @@ app.post("/auth/send-reset-code", async (c) => {
 
     console.log('[REST] send-reset-code final account state:', accountEmail, 'hasPassword:', !!hasPassword, 'accountType:', account.type);
 
-    const code = generateResetCode();
+    const code = generateAuthCode();
     db.resetCodes.set(accountEmail, code);
     console.log('[REST] send-reset-code stored code for:', accountEmail, 'identifier:', identifier);
 

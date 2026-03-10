@@ -14,7 +14,7 @@ import {
   validateEmail,
   validatePassword,
 } from "../../utils/security";
-import { generateResetCode } from "../../utils/email";
+import { AUTH_SMS_PROVIDER, generateAuthCode } from "../../utils/auth-code";
 import { getNetgsmSendErrorMessage, sendPasswordResetSmsCode, sendVerificationSmsCode } from "../../utils/netgsm";
 import { getSmsDeliveryNote, normalizePhoneForSms } from "../../../constants/support";
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../../../utils/phone";
@@ -223,7 +223,7 @@ export const authRouter = createTRPCRouter({
       email: z.string().email().max(254),
       name: z.string().min(1).max(100),
       phone: z.string().min(1).max(20).optional(),
-      deliveryMethod: z.enum(['email', 'sms']).optional(),
+      deliveryMethod: z.literal('sms').optional(),
     }))
     .mutation(async ({ input }) => {
       const cleanEmail = input.email.toLowerCase().trim();
@@ -264,7 +264,7 @@ export const authRouter = createTRPCRouter({
         };
       }
 
-      const code = generateResetCode();
+      const code = generateAuthCode();
       const codeKey = `verify_${cleanEmail}`;
       db.resetCodes.set(codeKey, code);
       console.log('[AUTH] sendVerificationCode - stored code:', code, 'for key:', codeKey, 'deliveryMethod:', deliveryMethod);
@@ -310,6 +310,7 @@ export const authRouter = createTRPCRouter({
         deliveryChannel: 'sms' as const,
         maskedPhone,
         deliveryNote: directDeliveryNote,
+        smsProvider: AUTH_SMS_PROVIDER,
       };
     }),
 
@@ -758,7 +759,7 @@ export const authRouter = createTRPCRouter({
   sendResetCode: publicProcedure
     .input(z.object({
       email: z.string().email().max(254),
-      deliveryMethod: z.enum(['email', 'sms']).optional(),
+      deliveryMethod: z.literal('sms').optional(),
     }))
     .mutation(async ({ input }) => {
       const cleanEmail = input.email.toLowerCase().trim();
@@ -840,7 +841,7 @@ export const authRouter = createTRPCRouter({
         return { success: false, error: "Bu e-posta adresiyle kayıtlı hesap bulunamadı" };
       }
 
-      const code = generateResetCode();
+      const code = generateAuthCode();
       db.resetCodes.set(cleanEmail, code);
       console.log('[AUTH] sendResetCode - stored code:', code, 'for email:', cleanEmail);
 
@@ -893,6 +894,7 @@ export const authRouter = createTRPCRouter({
         maskedPhone,
         smsTargetPhone,
         deliveryNote: directDeliveryNote,
+        smsProvider: AUTH_SMS_PROVIDER,
       };
     }),
 
