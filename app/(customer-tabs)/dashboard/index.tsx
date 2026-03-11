@@ -9,7 +9,7 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import WebMapFallback from '@/components/WebMapFallback';
 import type { WebMapMarker, WebMapPolyline } from '@/components/WebMapFallback';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { MapPin, Navigation, Search, X, Clock, Banknote, Gift, ChevronRight, ChevronLeft, Car, Phone, MessageCircle, Star, Send, AlertTriangle, Share2, FileText, Shield, Bike, Package, Plus, Minus, CheckCircle, Store, Camera, ImagePlus, Edit3, MapPinned, CreditCard, Menu, CloudRain, Bird } from 'lucide-react-native';
+import { MapPin, Navigation, Search, X, Clock, Banknote, Gift, ChevronRight, ChevronLeft, Car, Phone, MessageCircle, Star, Send, AlertTriangle, Share2, FileText, Shield, Bike, Package, Plus, Minus, CheckCircle, Store, Camera, ImagePlus, Edit3, MapPinned, CreditCard, Menu, CloudRain, Bird, ArrowUpDown } from 'lucide-react-native';
 
 import * as WebBrowser from 'expo-web-browser';
 import * as ImagePicker from 'expo-image-picker';
@@ -52,6 +52,15 @@ interface CartItem {
   quantity: number;
 }
 
+interface RoutePickerRecentItem {
+  id: string;
+  title: string;
+  subtitle: string;
+  latitude?: number;
+  longitude?: number;
+  source: 'history' | 'city' | 'popular';
+}
+
 function decodePolyline(encoded: string): { latitude: number; longitude: number }[] {
   const points: { latitude: number; longitude: number }[] = [];
   let index = 0;
@@ -85,7 +94,7 @@ function decodePolyline(encoded: string): { latitude: number; longitude: number 
 export default function CustomerHomeScreen() {
   const { height: SCREEN_HEIGHT } = useWindowDimensions();
   const MAP_BOTTOM_PADDING = Math.round(SCREEN_HEIGHT * 0.37);
-  const { user, promoApplied, isFreeRide, remainingFreeRides, applyPromoCode, incrementCompletedRides, addRideToHistory, customVehicleImage } = useAuth();
+  const { user, promoApplied, isFreeRide, remainingFreeRides, applyPromoCode, incrementCompletedRides, addRideToHistory, customVehicleImage, rideHistory } = useAuth();
   const { draft: rideForOtherDraft, resetRideForOtherDraft } = useRideForOthers();
 
   const { location: gpsLocation } = useLocation(true, 8000);
@@ -216,11 +225,88 @@ export default function CustomerHomeScreen() {
     return getNightlifeVenuesByCity(user?.city ?? '', user?.district ?? '');
   }, [user?.city, user?.district]);
   const venuePhotos = useVenuePhotos(cityVenues);
-  const _filteredDestinations = isUserInIstanbul
-    ? POPULAR_DESTINATIONS.filter((d) =>
-        destination ? d.name.toLowerCase().includes(destination.toLowerCase()) : true
-      )
-    : [];
+  const filteredDestinations = useMemo(() => {
+    if (!isUserInIstanbul) {
+      return [] as DestinationOption[];
+    }
+
+    return POPULAR_DESTINATIONS.filter((d) => (
+      destination ? d.name.toLowerCase().includes(destination.toLowerCase()) : true
+    ));
+  }, [destination, isUserInIstanbul]);
+
+  const currentLocationLabel = useMemo(() => {
+    if (user?.district && user?.city) {
+      return `${user.district}, ${user.city}`;
+    }
+
+    if (user?.city) {
+      return user.city;
+    }
+
+    return 'Mevcut konumunuz';
+  }, [user?.city, user?.district]);
+
+  const routePickerRecentItems = useMemo<RoutePickerRecentItem[]>(() => {
+    const items: RoutePickerRecentItem[] = [];
+    const seenKeys = new Set<string>();
+
+    const pushItem = (item: RoutePickerRecentItem) => {
+      const dedupeKey = `${item.title}|${item.subtitle}`.toLocaleLowerCase('tr-TR');
+      if (seenKeys.has(dedupeKey)) {
+        return;
+      }
+      seenKeys.add(dedupeKey);
+      items.push(item);
+    };
+
+    rideHistory.slice(0, 6).forEach((ride, index) => {
+      if (!ride.dropoffAddress) {
+        return;
+      }
+
+      pushItem({
+        id: `recent-ride-${ride.id}-${index}`,
+        title: ride.dropoffAddress,
+        subtitle: ride.pickupAddress || currentLocationLabel,
+        latitude: ride.dropoffLat,
+        longitude: ride.dropoffLng,
+        source: 'history',
+      });
+    });
+
+    if (userCity) {
+      const citySubtitleParts: string[] = [];
+      if (user?.city) {
+        citySubtitleParts.push(user.city);
+      }
+      if (user?.district) {
+        citySubtitleParts.push(user.district);
+      }
+
+      pushItem({
+        id: 'quick-city-center',
+        title: user?.district ? `${user.district} Merkez` : `${user?.city ?? 'Şehir'} Merkez`,
+        subtitle: citySubtitleParts.join(' / ') || 'Hızlı seçim',
+        latitude: userCity.latitude,
+        longitude: userCity.longitude,
+        source: 'city',
+      });
+    }
+
+    filteredDestinations.slice(0, 3).forEach((item, index) => {
+      pushItem({
+        id: `popular-destination-${index}`,
+        title: item.name,
+        subtitle: user?.city ? `${user.city} için popüler nokta` : 'Popüler rota',
+        latitude: item.latitude,
+        longitude: item.longitude,
+        source: 'popular',
+      });
+    });
+
+    return items.slice(0, 5);
+  }, [rideHistory, currentLocationLabel, user?.city, user?.district, userCity, filteredDestinations]);
 
   const onlineDriversQuery = trpc.drivers.getOnlineByCity.useQuery(
     { city: user?.city ?? '' },
@@ -966,6 +1052,33 @@ export default function CustomerHomeScreen() {
       console.log(`Selected: ${dest.name}, Haversine Distance: ${haversineDist}km, Price: ₺${calculatePrice(haversineDist, selectedVehiclePackage as VehicleType)}, Vehicle: ${selectedVehiclePackage}`);
     }
   }, [mapRegion.latitude, mapRegion.longitude, selectedVehiclePackage, fetchDrivingDistance]);
+
+  const handleSelectRoutePickerItem = useCallback((item: RoutePickerRecentItem) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+
+    if (typeof item.latitude === 'number' && typeof item.longitude === 'number') {
+      clearPredictions();
+      Keyboard.dismiss();
+      void selectDestination({
+        name: item.title,
+        latitude: item.latitude,
+        longitude: item.longitude,
+      });
+      console.log('[RoutePicker] Quick destination selected:', item.title);
+      return;
+    }
+
+    setDestination(item.title);
+    setSelectedDest(null);
+    void fetchPredictions(item.title);
+    console.log('[RoutePicker] Searching quick destination:', item.title);
+  }, [clearPredictions, fetchPredictions, selectDestination]);
+
+  const handleRoutePickerMapSelection = useCallback(() => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    Alert.alert('Yakında', 'Harita üzerinden konum seçme özelliği çok yakında eklenecek.');
+    console.log('[RoutePicker] Map selection placeholder pressed');
+  }, []);
 
   const initializePaymentMutation = trpc.payments.initializePayment.useMutation();
   const createRideMutation = trpc.rides.create.useMutation();
@@ -1841,9 +1954,9 @@ export default function CustomerHomeScreen() {
 
   const handleOpenVehicleSelect = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    console.log('[Vehicle] Navigating to vehicle select');
-    router.push('/(customer-tabs)/dashboard/vehicle-select' as any);
-  }, [router]);
+    console.log('[RoutePicker] Opening destination composer from 2GO card');
+    toggleSearch(true);
+  }, [toggleSearch]);
 
   const handleOpenRideForOther = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -2461,248 +2574,342 @@ export default function CustomerHomeScreen() {
         )}
         {isSearching && (
           <KeyboardAvoidingView
-            style={styles.searchPanelKeyboard}
+            style={styles.routePickerKeyboard}
             behavior="padding"
             keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
           >
-            <View style={styles.searchPanel}>
-              <View style={styles.searchPanelHeader}>
-                <Text style={styles.searchPanelTitle}>Nereye?</Text>
-                <TouchableOpacity onPress={() => { Keyboard.dismiss(); toggleSearch(false); }}>
-                  <X size={22} color="#8A8A9A" />
-                </TouchableOpacity>
-              </View>
-              {rideForOtherDraft.enabled && rideForOtherDraft.recipient && (
-                <TouchableOpacity style={styles.rideForOtherSummaryCard} onPress={handleOpenRideForOther} activeOpacity={0.85}>
-                  <View style={styles.rideForOtherSummaryHeader}>
-                    <Text style={styles.rideForOtherSummaryTitle}>Misafir yolculuğu aktif</Text>
-                    <Text style={styles.rideForOtherSummaryAction}>Düzenle</Text>
-                  </View>
-                  <Text style={styles.rideForOtherSummaryName}>{rideForOtherDraft.recipient.name}</Text>
-                  <Text style={styles.rideForOtherSummaryPhone}>{rideForOtherDraft.recipient.phone}</Text>
-                </TouchableOpacity>
-              )}
-              <View style={styles.searchInputRow}>
-                <View style={styles.searchDots}>
-                  <View style={styles.dotGreen} />
-                  <View style={styles.dotLine} />
-                  <View style={styles.dotRed} />
+            <SafeAreaView style={styles.routePickerSafeArea} edges={['top']}>
+              <View style={styles.routePickerSurface}>
+                <View style={styles.routePickerHeader}>
+                  <TouchableOpacity
+                    style={styles.routePickerHeaderButton}
+                    onPress={() => { Keyboard.dismiss(); toggleSearch(false); }}
+                    activeOpacity={0.7}
+                    testID="route-picker-close"
+                  >
+                    <X size={24} color="#1A1A2E" />
+                  </TouchableOpacity>
+                  <Text style={styles.routePickerHeaderTitle}>Güzergahın</Text>
+                  <View style={styles.routePickerHeaderSpacer} />
                 </View>
-                <View style={styles.searchInputs}>
-                  <View style={styles.searchInputWrapper}>
-                    <TextInput
-                      style={styles.searchInput}
-                      placeholder="Mevcut konum"
-                      placeholderTextColor="#B0B0BA"
-                      editable={false}
-                      value="Mevcut Konumunuz"
-                    />
+
+                {rideForOtherDraft.enabled && rideForOtherDraft.recipient && (
+                  <TouchableOpacity style={styles.rideForOtherSummaryCard} onPress={handleOpenRideForOther} activeOpacity={0.85}>
+                    <View style={styles.rideForOtherSummaryHeader}>
+                      <Text style={styles.rideForOtherSummaryTitle}>Misafir yolculuğu aktif</Text>
+                      <Text style={styles.rideForOtherSummaryAction}>Düzenle</Text>
+                    </View>
+                    <Text style={styles.rideForOtherSummaryName}>{rideForOtherDraft.recipient.name}</Text>
+                    <Text style={styles.rideForOtherSummaryPhone}>{rideForOtherDraft.recipient.phone}</Text>
+                  </TouchableOpacity>
+                )}
+
+                <View style={styles.routeComposerRow}>
+                  <View style={styles.routeComposerInputs}>
+                    <View style={styles.routeComposerOriginField}>
+                      <View style={styles.routeComposerOriginDot} />
+                      <Text style={styles.routeComposerOriginText} numberOfLines={1}>{currentLocationLabel}</Text>
+                    </View>
+                    <View style={styles.routeComposerDestinationField}>
+                      <View style={styles.routeComposerSearchIconWrap}>
+                        <Search size={24} color="#111111" />
+                      </View>
+                      <TextInput
+                        style={styles.routeComposerDestinationInput}
+                        placeholder="Varış noktası"
+                        placeholderTextColor="#B0B0BA"
+                        value={destination}
+                        onChangeText={(text) => {
+                          setDestination(text);
+                          setSelectedDest(null);
+                          void fetchPredictions(text);
+                        }}
+                        autoFocus
+                        testID="destination-input"
+                      />
+                      <TouchableOpacity
+                        style={styles.routeComposerMapButton}
+                        onPress={handleRoutePickerMapSelection}
+                        activeOpacity={0.7}
+                        testID="route-picker-map-button"
+                      >
+                        <MapPinned size={18} color="#757B8E" />
+                      </TouchableOpacity>
+                      {(autoCompleteLoading || placesLoading) && (
+                        <ActivityIndicator size="small" color={Colors.dark.primary} style={styles.routeComposerSpinner} />
+                      )}
+                    </View>
                   </View>
-                  <View style={styles.searchInputWrapper}>
-                    <TextInput
-                      style={styles.searchInput}
-                      placeholder="Gitmek istediğiniz adres"
-                      placeholderTextColor="#B0B0BA"
-                      value={destination}
-                      onChangeText={(text) => {
-                        setDestination(text);
-                        setSelectedDest(null);
-                        void fetchPredictions(text);
+                  <View style={styles.routeComposerActions}>
+                    <TouchableOpacity
+                      style={styles.routeComposerActionButton}
+                      onPress={() => {
+                        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                        Alert.alert('Yakında', 'Çok duraklı rota özelliği çok yakında aktif olacak.');
                       }}
-                      autoFocus
-                      testID="destination-input"
-                    />
-                    {(autoCompleteLoading || placesLoading) && (
-                      <ActivityIndicator size="small" color={Colors.dark.primary} style={styles.inputSpinner} />
+                      activeOpacity={0.7}
+                      testID="route-picker-add-stop"
+                    >
+                      <Plus size={22} color="#6E7385" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.routeComposerActionButton}
+                      onPress={() => {
+                        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                        setDestination('');
+                        setSelectedDest(null);
+                        clearPredictions();
+                        console.log('[RoutePicker] Destination input reset');
+                      }}
+                      activeOpacity={0.7}
+                      testID="route-picker-reset"
+                    >
+                      <ArrowUpDown size={20} color="#6E7385" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <ScrollView
+                  style={styles.routePickerList}
+                  contentContainerStyle={styles.routePickerListContent}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                >
+                  <Text style={styles.routePickerSectionLabel}>
+                    {showGoogleResults ? 'Adres önerileri' : 'Son konumlar ve hızlı seçimler'}
+                  </Text>
+
+                  <View style={styles.routePickerRecentList}>
+                    {showGoogleResults && predictions.length > 0 && predictions.map((prediction) => (
+                      <TouchableOpacity
+                        key={prediction.place_id}
+                        style={styles.routePickerRecentRow}
+                        onPress={async () => {
+                          console.log('[Selection] Tapped prediction:', prediction.place_id, prediction.description);
+                          setPlacesLoading(true);
+                          try {
+                            const details = await getPlaceDetails(prediction.place_id);
+                            setPlacesLoading(false);
+                            if (details) {
+                              console.log('[Selection] Got details:', details.name, details.latitude, details.longitude);
+                              const dest: DestinationOption = {
+                                name: prediction.structured_formatting?.main_text ?? details.name,
+                                latitude: details.latitude,
+                                longitude: details.longitude,
+                              };
+                              setDestination(dest.name);
+                              clearPredictions();
+                              void selectDestination(dest);
+                              Keyboard.dismiss();
+                            } else {
+                              console.warn('[Selection] Details returned null for:', prediction.place_id);
+                              Alert.alert('Hata', 'Adres detayları alınamadı. Lütfen tekrar deneyin.');
+                            }
+                          } catch (err) {
+                            setPlacesLoading(false);
+                            console.error('[Selection] Error getting details:', err);
+                            Alert.alert('Hata', 'Adres seçilirken bir sorun oluştu.');
+                          }
+                        }}
+                      >
+                        <View style={styles.routePickerRecentIcon}>
+                          <MapPin size={17} color={Colors.dark.primary} />
+                        </View>
+                        <View style={styles.routePickerRecentContent}>
+                          <Text style={styles.routePickerRecentTitle} numberOfLines={1}>
+                            {prediction.structured_formatting?.main_text ?? prediction.description}
+                          </Text>
+                          <Text style={styles.routePickerRecentSubtitle} numberOfLines={1}>
+                            {prediction.structured_formatting?.secondary_text ?? ''}
+                          </Text>
+                        </View>
+                        <View style={styles.routePickerRecentTrailing}>
+                          <Star size={20} color="#D2D5DE" />
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+
+                    {!showGoogleResults && routePickerRecentItems.map((item) => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={styles.routePickerRecentRow}
+                        onPress={() => handleSelectRoutePickerItem(item)}
+                        activeOpacity={0.8}
+                        testID={`route-picker-quick-${item.id}`}
+                      >
+                        <View style={styles.routePickerRecentIcon}>
+                          <Clock size={17} color="#8C90A1" />
+                        </View>
+                        <View style={styles.routePickerRecentContent}>
+                          <Text style={styles.routePickerRecentTitle} numberOfLines={1}>{item.title}</Text>
+                          <Text style={styles.routePickerRecentSubtitle} numberOfLines={1}>{item.subtitle}</Text>
+                        </View>
+                        <View style={styles.routePickerRecentTrailing}>
+                          <Star size={20} color="#D2D5DE" />
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+
+                    {showGoogleResults && predictions.length === 0 && !autoCompleteLoading && destination.length >= 2 && !selectedDest && (
+                      <View style={styles.noResultRow}>
+                        <Text style={styles.noResultText}>Sonuç bulunamadı, aramaya devam edin...</Text>
+                      </View>
+                    )}
+
+                    {!showGoogleResults && routePickerRecentItems.length === 0 && (
+                      <View style={styles.noResultRow}>
+                        <Text style={styles.noResultText}>Henüz hızlı seçim bulunmuyor. Adres aramaya başlayın.</Text>
+                      </View>
                     )}
                   </View>
-                </View>
-              </View>
-              <ScrollView
-                style={styles.searchResultsScroll}
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}
-              >
-                <View style={styles.recentPlaces}>
-                  {showGoogleResults && predictions.length > 0 && predictions.map((prediction) => (
-                    <TouchableOpacity
-                      key={prediction.place_id}
-                      style={styles.recentPlace}
-                      onPress={async () => {
-                        console.log('[Selection] Tapped prediction:', prediction.place_id, prediction.description);
-                        setPlacesLoading(true);
-                        try {
-                          const details = await getPlaceDetails(prediction.place_id);
-                          setPlacesLoading(false);
-                          if (details) {
-                            console.log('[Selection] Got details:', details.name, details.latitude, details.longitude);
-                            const dest: DestinationOption = {
-                              name: prediction.structured_formatting?.main_text ?? details.name,
-                              latitude: details.latitude,
-                              longitude: details.longitude,
-                            };
-                            setDestination(dest.name);
-                            clearPredictions();
-                            void selectDestination(dest);
-                            Keyboard.dismiss();
-                          } else {
-                            console.warn('[Selection] Details returned null for:', prediction.place_id);
-                            Alert.alert('Hata', 'Adres detayları alınamadı. Lütfen tekrar deneyin.');
-                          }
-                        } catch (err) {
-                          setPlacesLoading(false);
-                          console.error('[Selection] Error getting details:', err);
-                          Alert.alert('Hata', 'Adres seçilirken bir sorun oluştu.');
-                        }
-                      }}
-                    >
-                      <View style={styles.recentPlaceIcon}>
-                        <MapPin size={16} color={Colors.dark.primary} />
+
+                  <TouchableOpacity
+                    style={styles.routePickerMapRow}
+                    onPress={handleRoutePickerMapSelection}
+                    activeOpacity={0.8}
+                    testID="route-picker-map-selection"
+                  >
+                    <View style={styles.routePickerMapRowIcon}>
+                      <MapPin size={18} color="#6E7385" />
+                    </View>
+                    <Text style={styles.routePickerMapRowText}>Konumu harita üzerinden belirle</Text>
+                  </TouchableOpacity>
+
+                  {selectedDest && (
+                    <View style={styles.routePickerSelectedCard}>
+                      <View style={styles.routePickerSelectedInfo}>
+                        <Text style={styles.routePickerSelectedTitle} numberOfLines={1}>{selectedDest.name}</Text>
+                        <View style={styles.routePickerSelectedMeta}>
+                          <Text style={styles.routePickerSelectedMetaText}>{rideDistance} km</Text>
+                          <Text style={styles.routePickerSelectedMetaDot}>•</Text>
+                          <Text style={styles.routePickerSelectedMetaText}>~{rideDuration} dk</Text>
+                        </View>
                       </View>
-                      <View style={styles.recentPlaceContent}>
-                        <Text style={styles.recentPlaceText} numberOfLines={1}>
-                          {prediction.structured_formatting?.main_text ?? prediction.description}
-                        </Text>
-                        <Text style={styles.recentPlaceSub} numberOfLines={1}>
-                          {prediction.structured_formatting?.secondary_text ?? ''}
-                        </Text>
+                      <View style={styles.routePickerSelectedPriceWrap}>
+                        <Text style={styles.routePickerSelectedPriceLabel}>Tahmini</Text>
+                        <Text style={styles.routePickerSelectedPrice}>{isFreeRide() ? 'Ücretsiz' : `₺${ridePrice}`}</Text>
                       </View>
-                    </TouchableOpacity>
-                  ))}
-                  {showGoogleResults && predictions.length === 0 && !autoCompleteLoading && destination.length >= 2 && !selectedDest && (
-                    <View style={styles.noResultRow}>
-                      <Text style={styles.noResultText}>Sonuç bulunamadı, aramaya devam edin...</Text>
                     </View>
                   )}
 
                   {selectedDest && (
-                    <View style={styles.selectedDestPreview}>
-                      <Navigation size={14} color={Colors.dark.primary} />
-                      <Text style={styles.selectedDestText} numberOfLines={1}>{selectedDest.name}</Text>
-                      <Text style={styles.pricePreviewDistance}>{rideDistance} km</Text>
-                      <Text style={styles.pricePreviewDot}>•</Text>
-                      <Text style={styles.pricePreviewPrice}>
-                        {isFreeRide() ? 'ÜCRETSİZ' : `₺${ridePrice}`}
-                      </Text>
+                    <View style={styles.rideSummary}>
+                      <Text style={styles.vehicleSelectInlineTitle}>Şoför hangi pakette gelsin?</Text>
+                      <View style={styles.vehicleSelectInlineRow}>
+                        {(['scooter', 'car', 'motorcycle'] as const).map((pkg) => {
+                          const isSelected = selectedVehiclePackage === pkg;
+                          const isRestricted = isRainy && (pkg === 'scooter' || pkg === 'motorcycle');
+                          const config = pkg === 'scooter'
+                            ? { emoji: '🛴', label: 'E-Scooter', price: calculatePrice(rideDistance, 'scooter'), color: '#2ECC71' }
+                            : pkg === 'car'
+                            ? { emoji: '🚗', label: 'Otomobil', price: calculatePrice(rideDistance, 'car'), color: Colors.dark.primary }
+                            : { emoji: '🏍️', label: 'Motorsiklet', price: calculatePrice(rideDistance, 'motorcycle'), color: '#3498DB' };
+                          return (
+                            <TouchableOpacity
+                              key={pkg}
+                              style={[
+                                styles.vehicleSelectInlineCard,
+                                isSelected && styles.vehicleSelectInlineCardActive,
+                                isSelected && { borderColor: config.color },
+                                isRestricted && styles.vehicleSelectInlineCardDisabled,
+                              ]}
+                              onPress={() => handleInlineVehicleChange(pkg)}
+                              activeOpacity={isRestricted ? 1 : 0.7}
+                              testID={`inline-vehicle-${pkg}`}
+                            >
+                              {isRestricted && (
+                                <View style={styles.vehicleSelectInlineWeather}>
+                                  <CloudRain size={10} color="#FFF" />
+                                </View>
+                              )}
+                              <Text style={styles.vehicleSelectInlineEmoji}>{config.emoji}</Text>
+                              <Text style={[
+                                styles.vehicleSelectInlineLabel,
+                                isSelected && { color: config.color, fontWeight: '700' as const },
+                                isRestricted && { color: '#BBB' },
+                              ]}>{config.label}</Text>
+                              <Text style={[
+                                styles.vehicleSelectInlinePrice,
+                                isSelected && { color: config.color },
+                                isRestricted && { color: '#CCC' },
+                              ]}>
+                                {isFreeRide() ? 'Ücretsiz' : `₺${config.price}`}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                      {isRainy && (
+                        <View style={styles.vehicleSelectInlineWeatherBanner}>
+                          <CloudRain size={12} color="#E74C3C" />
+                          <Text style={styles.vehicleSelectInlineWeatherText}>Yağışlı hava — Motor ve E-Scooter kullanılamaz</Text>
+                        </View>
+                      )}
+                      <View style={styles.rideSummaryRow}>
+                        <View style={styles.rideSummaryItem}>
+                          <Text style={styles.rideSummaryLabel}>Mesafe</Text>
+                          <Text style={styles.rideSummaryValue}>{rideDistance} km</Text>
+                        </View>
+                        <View style={styles.rideSummaryDivider} />
+                        <View style={styles.rideSummaryItem}>
+                          <Text style={styles.rideSummaryLabel}>Süre</Text>
+                          <Text style={styles.rideSummaryValue}>~{rideDuration} dk</Text>
+                        </View>
+                        <View style={styles.rideSummaryDivider} />
+                        <View style={styles.rideSummaryItem}>
+                          <Text style={styles.rideSummaryLabel}>Ücret</Text>
+                          {isFreeRide() ? (
+                            <View style={styles.freePriceRow}>
+                              <Text style={styles.rideSummaryValueStrike}>₺{ridePrice}</Text>
+                              <Text style={styles.rideSummaryValueFree}>ÜCRETSİZ</Text>
+                            </View>
+                          ) : (
+                            <Text style={[styles.rideSummaryValue, { color: Colors.dark.primary }]}>₺{ridePrice}</Text>
+                          )}
+                        </View>
+                      </View>
+                      <View style={styles.paymentMethodSelector}>
+                        <TouchableOpacity
+                          style={[styles.paymentMethodOption, paymentMethod === 'cash' && styles.paymentMethodOptionActive]}
+                          onPress={() => { setPaymentMethod('cash'); void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                          activeOpacity={0.7}
+                        >
+                          <Banknote size={18} color={paymentMethod === 'cash' ? '#FFF' : '#666'} />
+                          <Text style={[styles.paymentMethodText, paymentMethod === 'cash' && styles.paymentMethodTextActive]}>Nakit</Text>
+                        </TouchableOpacity>
+                        <View style={{ flex: 1, alignItems: 'center' }}>
+                          <TouchableOpacity
+                            style={[styles.paymentMethodOption, { opacity: 0.45, flex: undefined, width: '100%' }]}
+                            disabled={true}
+                            activeOpacity={1}
+                          >
+                            <CreditCard size={18} color="#666" />
+                            <Text style={styles.paymentMethodText}>Kart ile Öde</Text>
+                          </TouchableOpacity>
+                          <Text style={{ fontSize: 10, color: '#F59E0B', marginTop: 4, fontWeight: '600', letterSpacing: 0.3 }}>Yakında Gelecek</Text>
+                        </View>
+                      </View>
                     </View>
                   )}
-                </View>
-                {selectedDest && (
-                  <View style={styles.rideSummary}>
-                    <Text style={styles.vehicleSelectInlineTitle}>Şoför hangi pakette gelsin?</Text>
-                    <View style={styles.vehicleSelectInlineRow}>
-                      {(['scooter', 'car', 'motorcycle'] as const).map((pkg) => {
-                        const isSelected = selectedVehiclePackage === pkg;
-                        const isRestricted = isRainy && (pkg === 'scooter' || pkg === 'motorcycle');
-                        const config = pkg === 'scooter'
-                          ? { emoji: '🛴', label: 'E-Scooter', price: calculatePrice(rideDistance, 'scooter'), color: '#2ECC71' }
-                          : pkg === 'car'
-                          ? { emoji: '🚗', label: 'Otomobil', price: calculatePrice(rideDistance, 'car'), color: Colors.dark.primary }
-                          : { emoji: '🏍️', label: 'Motorsiklet', price: calculatePrice(rideDistance, 'motorcycle'), color: '#3498DB' };
-                        return (
-                          <TouchableOpacity
-                            key={pkg}
-                            style={[
-                              styles.vehicleSelectInlineCard,
-                              isSelected && styles.vehicleSelectInlineCardActive,
-                              isSelected && { borderColor: config.color },
-                              isRestricted && styles.vehicleSelectInlineCardDisabled,
-                            ]}
-                            onPress={() => handleInlineVehicleChange(pkg)}
-                            activeOpacity={isRestricted ? 1 : 0.7}
-                            testID={`inline-vehicle-${pkg}`}
-                          >
-                            {isRestricted && (
-                              <View style={styles.vehicleSelectInlineWeather}>
-                                <CloudRain size={10} color="#FFF" />
-                              </View>
-                            )}
-                            <Text style={styles.vehicleSelectInlineEmoji}>{config.emoji}</Text>
-                            <Text style={[
-                              styles.vehicleSelectInlineLabel,
-                              isSelected && { color: config.color, fontWeight: '700' as const },
-                              isRestricted && { color: '#BBB' },
-                            ]}>{config.label}</Text>
-                            <Text style={[
-                              styles.vehicleSelectInlinePrice,
-                              isSelected && { color: config.color },
-                              isRestricted && { color: '#CCC' },
-                            ]}>
-                              {isFreeRide() ? 'Ücretsiz' : `₺${config.price}`}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                    {isRainy && (
-                      <View style={styles.vehicleSelectInlineWeatherBanner}>
-                        <CloudRain size={12} color="#E74C3C" />
-                        <Text style={styles.vehicleSelectInlineWeatherText}>Yağışlı hava — Motor ve E-Scooter kullanılamaz</Text>
-                      </View>
-                    )}
-                    <View style={styles.rideSummaryRow}>
-                      <View style={styles.rideSummaryItem}>
-                        <Text style={styles.rideSummaryLabel}>Mesafe</Text>
-                        <Text style={styles.rideSummaryValue}>{rideDistance} km</Text>
-                      </View>
-                      <View style={styles.rideSummaryDivider} />
-                      <View style={styles.rideSummaryItem}>
-                        <Text style={styles.rideSummaryLabel}>Süre</Text>
-                        <Text style={styles.rideSummaryValue}>~{rideDuration} dk</Text>
-                      </View>
-                      <View style={styles.rideSummaryDivider} />
-                      <View style={styles.rideSummaryItem}>
-                        <Text style={styles.rideSummaryLabel}>Ücret</Text>
-                        {isFreeRide() ? (
-                          <View style={styles.freePriceRow}>
-                            <Text style={styles.rideSummaryValueStrike}>₺{ridePrice}</Text>
-                            <Text style={styles.rideSummaryValueFree}>ÜCRETSİZ</Text>
-                          </View>
-                        ) : (
-                          <Text style={[styles.rideSummaryValue, { color: Colors.dark.primary }]}>₺{ridePrice}</Text>
-                        )}
-                      </View>
-                    </View>
-                    <View style={styles.paymentMethodSelector}>
-                      <TouchableOpacity
-                        style={[styles.paymentMethodOption, paymentMethod === 'cash' && styles.paymentMethodOptionActive]}
-                        onPress={() => { setPaymentMethod('cash'); void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                        activeOpacity={0.7}
-                      >
-                        <Banknote size={18} color={paymentMethod === 'cash' ? '#FFF' : '#666'} />
-                        <Text style={[styles.paymentMethodText, paymentMethod === 'cash' && styles.paymentMethodTextActive]}>Nakit</Text>
-                      </TouchableOpacity>
-                      <View style={{ flex: 1, alignItems: 'center' }}>
-                        <TouchableOpacity
-                          style={[styles.paymentMethodOption, { opacity: 0.45, flex: undefined, width: '100%' }]}
-                          disabled={true}
-                          activeOpacity={1}
-                        >
-                          <CreditCard size={18} color={'#666'} />
-                          <Text style={styles.paymentMethodText}>Kart ile Öde</Text>
-                        </TouchableOpacity>
-                        <Text style={{ fontSize: 10, color: '#F59E0B', marginTop: 4, fontWeight: '600', letterSpacing: 0.3 }}>Yakında Gelecek</Text>
-                      </View>
-                    </View>
+                </ScrollView>
 
-                  </View>
-                )}
-              </ScrollView>
-              <TouchableOpacity
-                style={[styles.confirmButton, !selectedDest && styles.confirmButtonDisabled]}
-                onPress={handleRequestRide}
-                disabled={!selectedDest || paymentLoading}
-                activeOpacity={0.85}
-              >
-                {paymentLoading ? (
-                  <ActivityIndicator color="#FFF" size="small" />
-                ) : (
-                  <Text style={styles.confirmButtonText}>
-                    {isFreeRide() && selectedDest ? 'Ücretsiz Sürüş Başlat' : paymentMethod === 'card' ? 'Kart ile Öde & Çağır' : 'Şoför Çağır'}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
+                <TouchableOpacity
+                  style={[styles.confirmButton, styles.routePickerConfirmButton, !selectedDest && styles.confirmButtonDisabled]}
+                  onPress={handleRequestRide}
+                  disabled={!selectedDest || paymentLoading}
+                  activeOpacity={0.85}
+                  testID="route-picker-confirm"
+                >
+                  {paymentLoading ? (
+                    <ActivityIndicator color="#FFF" size="small" />
+                  ) : (
+                    <Text style={styles.confirmButtonText}>
+                      {isFreeRide() && selectedDest ? 'Ücretsiz Sürüş Başlat' : paymentMethod === 'card' ? 'Kart ile Öde & Çağır' : 'Şoför Çağır'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </SafeAreaView>
           </KeyboardAvoidingView>
         )}
         {rideRequested && findingDriver && !reassigning && (
@@ -5639,6 +5846,262 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontSize: 13,
     color: '#666A7B',
+  },
+  routePickerKeyboard: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255,255,255,0.98)',
+  },
+  routePickerSafeArea: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  routePickerSurface: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 20,
+    paddingTop: 6,
+    paddingBottom: 16,
+  },
+  routePickerHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    marginBottom: 18,
+  },
+  routePickerHeaderButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: '#F3F4F7',
+  },
+  routePickerHeaderTitle: {
+    fontSize: 18,
+    fontWeight: '800' as const,
+    color: '#111111',
+  },
+  routePickerHeaderSpacer: {
+    width: 44,
+    height: 44,
+  },
+  routeComposerRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    gap: 12,
+    marginBottom: 18,
+  },
+  routeComposerInputs: {
+    flex: 1,
+    gap: 10,
+  },
+  routeComposerOriginField: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 12,
+  },
+  routeComposerOriginDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#14AE5C',
+    borderWidth: 4,
+    borderColor: 'rgba(20,174,92,0.18)',
+  },
+  routeComposerOriginText: {
+    flex: 1,
+    fontSize: 17,
+    color: '#A0A4AF',
+    fontWeight: '500' as const,
+  },
+  routeComposerDestinationField: {
+    minHeight: 86,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    paddingLeft: 16,
+    paddingRight: 14,
+    borderWidth: 2,
+    borderColor: '#16181D',
+    position: 'relative' as const,
+    gap: 12,
+  },
+  routeComposerSearchIconWrap: {
+    width: 38,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  routeComposerDestinationInput: {
+    flex: 1,
+    minHeight: 70,
+    fontSize: 18,
+    color: '#111111',
+    fontWeight: '500' as const,
+    paddingRight: 8,
+  },
+  routeComposerMapButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: '#F3F4F7',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  routeComposerSpinner: {
+    position: 'absolute' as const,
+    right: 62,
+    top: 31,
+  },
+  routeComposerActions: {
+    gap: 12,
+    paddingTop: 6,
+  },
+  routeComposerActionButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: '#F3F4F7',
+  },
+  routePickerList: {
+    flex: 1,
+  },
+  routePickerListContent: {
+    paddingBottom: 18,
+  },
+  routePickerSectionLabel: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+    color: '#8A8FA0',
+    marginBottom: 10,
+    letterSpacing: 0.2,
+  },
+  routePickerRecentList: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#ECEEF3',
+    overflow: 'hidden' as const,
+    marginBottom: 14,
+  },
+  routePickerRecentRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F1F4',
+  },
+  routePickerRecentIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: '#F3F4F7',
+  },
+  routePickerRecentContent: {
+    flex: 1,
+  },
+  routePickerRecentTitle: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: '#111111',
+  },
+  routePickerRecentSubtitle: {
+    marginTop: 3,
+    fontSize: 13,
+    color: '#7B8192',
+  },
+  routePickerRecentTrailing: {
+    width: 32,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  routePickerMapRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+    borderWidth: 1,
+    borderColor: '#ECEEF3',
+    marginBottom: 14,
+  },
+  routePickerMapRowIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F3F4F7',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  routePickerMapRowText: {
+    fontSize: 16,
+    fontWeight: '600' as const,
+    color: '#111111',
+  },
+  routePickerSelectedCard: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    gap: 12,
+    backgroundColor: '#FFF8EC',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.18)',
+    marginBottom: 14,
+  },
+  routePickerSelectedInfo: {
+    flex: 1,
+  },
+  routePickerSelectedTitle: {
+    fontSize: 16,
+    fontWeight: '700' as const,
+    color: '#1A1A2E',
+  },
+  routePickerSelectedMeta: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+    marginTop: 5,
+  },
+  routePickerSelectedMetaText: {
+    fontSize: 13,
+    color: '#7B8192',
+    fontWeight: '500' as const,
+  },
+  routePickerSelectedMetaDot: {
+    fontSize: 12,
+    color: '#B6BAC7',
+  },
+  routePickerSelectedPriceWrap: {
+    alignItems: 'flex-end' as const,
+  },
+  routePickerSelectedPriceLabel: {
+    fontSize: 12,
+    color: '#9AA0AE',
+    fontWeight: '600' as const,
+  },
+  routePickerSelectedPrice: {
+    marginTop: 2,
+    fontSize: 16,
+    fontWeight: '800' as const,
+    color: Colors.dark.primary,
+  },
+  routePickerConfirmButton: {
+    marginTop: 8,
   },
   activeRideGuestCard: {
     width: '100%' as unknown as number,
