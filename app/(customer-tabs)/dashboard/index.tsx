@@ -2587,9 +2587,12 @@ export default function CustomerHomeScreen() {
                     activeOpacity={0.7}
                     testID="route-picker-close"
                   >
-                    <X size={24} color="#1A1A2E" />
+                    <X size={22} color="#1A1A2E" />
                   </TouchableOpacity>
-                  <Text style={styles.routePickerHeaderTitle}>Güzergahın</Text>
+                  <View style={styles.routePickerHeaderContent}>
+                    <Text style={styles.routePickerHeaderTitle}>Güzergahın</Text>
+                    <Text style={styles.routePickerHeaderSubtitle}>Alış ve varış noktanı hızlıca düzenle</Text>
+                  </View>
                   <View style={styles.routePickerHeaderSpacer} />
                 </View>
 
@@ -2608,32 +2611,38 @@ export default function CustomerHomeScreen() {
                   <View style={styles.routeComposerInputs}>
                     <View style={styles.routeComposerOriginField}>
                       <View style={styles.routeComposerOriginDot} />
-                      <Text style={styles.routeComposerOriginText} numberOfLines={1}>{currentLocationLabel}</Text>
+                      <View style={styles.routeComposerOriginTextWrap}>
+                        <Text style={styles.routeComposerFieldLabel}>Alış noktası</Text>
+                        <Text style={styles.routeComposerOriginText} numberOfLines={1}>{currentLocationLabel}</Text>
+                      </View>
                     </View>
                     <View style={styles.routeComposerDestinationField}>
                       <View style={styles.routeComposerSearchIconWrap}>
-                        <Search size={24} color="#111111" />
+                        <Search size={20} color="#111111" />
                       </View>
-                      <TextInput
-                        style={styles.routeComposerDestinationInput}
-                        placeholder="Varış noktası"
-                        placeholderTextColor="#B0B0BA"
-                        value={destination}
-                        onChangeText={(text) => {
-                          setDestination(text);
-                          setSelectedDest(null);
-                          void fetchPredictions(text);
-                        }}
-                        autoFocus
-                        testID="destination-input"
-                      />
+                      <View style={styles.routeComposerDestinationTextWrap}>
+                        <Text style={styles.routeComposerFieldLabel}>Varış noktası</Text>
+                        <TextInput
+                          style={styles.routeComposerDestinationInput}
+                          placeholder="Adres veya mekan ara"
+                          placeholderTextColor="#A6AAB6"
+                          value={destination}
+                          onChangeText={(text) => {
+                            setDestination(text);
+                            setSelectedDest(null);
+                            void fetchPredictions(text);
+                          }}
+                          autoFocus
+                          testID="destination-input"
+                        />
+                      </View>
                       <TouchableOpacity
                         style={styles.routeComposerMapButton}
                         onPress={handleRoutePickerMapSelection}
                         activeOpacity={0.7}
                         testID="route-picker-map-button"
                       >
-                        <MapPinned size={18} color="#757B8E" />
+                        <MapPinned size={17} color="#5E6475" />
                       </TouchableOpacity>
                       {(autoCompleteLoading || placesLoading) && (
                         <ActivityIndicator size="small" color={Colors.dark.primary} style={styles.routeComposerSpinner} />
@@ -2650,7 +2659,7 @@ export default function CustomerHomeScreen() {
                       activeOpacity={0.7}
                       testID="route-picker-add-stop"
                     >
-                      <Plus size={22} color="#6E7385" />
+                      <Plus size={20} color="#6E7385" />
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.routeComposerActionButton}
@@ -2664,7 +2673,7 @@ export default function CustomerHomeScreen() {
                       activeOpacity={0.7}
                       testID="route-picker-reset"
                     >
-                      <ArrowUpDown size={20} color="#6E7385" />
+                      <ArrowUpDown size={18} color="#6E7385" />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -2676,7 +2685,7 @@ export default function CustomerHomeScreen() {
                   showsVerticalScrollIndicator={false}
                 >
                   <Text style={styles.routePickerSectionLabel}>
-                    {showGoogleResults ? 'Adres önerileri' : 'Son konumlar ve hızlı seçimler'}
+                    {showGoogleResults ? 'Adres önerileri' : 'Son aramalar ve hızlı seçimler'}
                   </Text>
 
                   <View style={styles.routePickerRecentList}>
@@ -2724,7 +2733,7 @@ export default function CustomerHomeScreen() {
                           </Text>
                         </View>
                         <View style={styles.routePickerRecentTrailing}>
-                          <Star size={20} color="#D2D5DE" />
+                          <ChevronRight size={18} color="#C5C9D5" />
                         </View>
                       </TouchableOpacity>
                     ))}
@@ -2745,7 +2754,7 @@ export default function CustomerHomeScreen() {
                           <Text style={styles.routePickerRecentSubtitle} numberOfLines={1}>{item.subtitle}</Text>
                         </View>
                         <View style={styles.routePickerRecentTrailing}>
-                          <Star size={20} color="#D2D5DE" />
+                          <ChevronRight size={18} color="#C5C9D5" />
                         </View>
                       </TouchableOpacity>
                     ))}
@@ -2772,29 +2781,40 @@ export default function CustomerHomeScreen() {
                     <View style={styles.routePickerMapRowIcon}>
                       <MapPin size={18} color="#6E7385" />
                     </View>
-                    <Text style={styles.routePickerMapRowText}>Konumu harita üzerinden belirle</Text>
+                    <View style={styles.routePickerMapRowTextWrap}>
+                      <Text style={styles.routePickerMapRowText}>Haritadan konum seç</Text>
+                      <Text style={styles.routePickerMapRowSubtext}>Pini taşıyarak tam adres belirle</Text>
+                    </View>
+                    <ChevronRight size={18} color="#C5C9D5" />
                   </TouchableOpacity>
 
                   {selectedDest && (
                     <View style={styles.routePickerSelectedCard}>
-                      <View style={styles.routePickerSelectedInfo}>
-                        <Text style={styles.routePickerSelectedTitle} numberOfLines={1}>{selectedDest.name}</Text>
-                        <View style={styles.routePickerSelectedMeta}>
-                          <Text style={styles.routePickerSelectedMetaText}>{rideDistance} km</Text>
-                          <Text style={styles.routePickerSelectedMetaDot}>•</Text>
-                          <Text style={styles.routePickerSelectedMetaText}>~{rideDuration} dk</Text>
+                      <View style={styles.routePickerSelectedCardTopRow}>
+                        <View style={styles.routePickerSelectedBadge}>
+                          <Text style={styles.routePickerSelectedBadgeText}>Seçilen rota</Text>
                         </View>
+                        <Text style={styles.routePickerSelectedPriceLabel}>Tahmini ücret</Text>
                       </View>
-                      <View style={styles.routePickerSelectedPriceWrap}>
-                        <Text style={styles.routePickerSelectedPriceLabel}>Tahmini</Text>
-                        <Text style={styles.routePickerSelectedPrice}>{isFreeRide() ? 'Ücretsiz' : `₺${ridePrice}`}</Text>
+                      <View style={styles.routePickerSelectedCardBottomRow}>
+                        <View style={styles.routePickerSelectedInfo}>
+                          <Text style={styles.routePickerSelectedTitle} numberOfLines={1}>{selectedDest.name}</Text>
+                          <View style={styles.routePickerSelectedMeta}>
+                            <Text style={styles.routePickerSelectedMetaText}>{rideDistance} km</Text>
+                            <Text style={styles.routePickerSelectedMetaDot}>•</Text>
+                            <Text style={styles.routePickerSelectedMetaText}>~{rideDuration} dk</Text>
+                          </View>
+                        </View>
+                        <View style={styles.routePickerSelectedPriceWrap}>
+                          <Text style={styles.routePickerSelectedPrice}>{isFreeRide() ? 'Ücretsiz' : `₺${ridePrice}`}</Text>
+                        </View>
                       </View>
                     </View>
                   )}
 
                   {selectedDest && (
                     <View style={styles.rideSummary}>
-                      <Text style={styles.vehicleSelectInlineTitle}>Şoför hangi pakette gelsin?</Text>
+                      <Text style={styles.vehicleSelectInlineTitle}>Araç paketini seç</Text>
                       <View style={styles.vehicleSelectInlineRow}>
                         {(['scooter', 'car', 'motorcycle'] as const).map((pkg) => {
                           const isSelected = selectedVehiclePackage === pkg;
@@ -4328,34 +4348,48 @@ const styles = StyleSheet.create({
     color: Colors.dark.primary,
   },
   rideSummary: {
-    backgroundColor: '#F0F0F5',
-    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
     marginBottom: 16,
-    overflow: 'hidden',
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#ECEEF3',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
+    elevation: 4,
   },
   rideSummaryRow: {
     flexDirection: 'row',
     paddingVertical: 14,
+    marginTop: 4,
+    backgroundColor: '#F8F9FC',
+    borderRadius: 18,
   },
   rideSummaryItem: {
     flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
   },
   rideSummaryLabel: {
-    fontSize: 11,
-    color: '#999',
-    marginBottom: 4,
+    fontSize: 10,
+    color: '#8E94A8',
+    marginBottom: 6,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.7,
+    fontWeight: '700' as const,
   },
   rideSummaryValue: {
     fontSize: 16,
-    fontWeight: '700' as const,
+    fontWeight: '800' as const,
     color: '#1A1A2E',
   },
   rideSummaryDivider: {
     width: 1,
-    backgroundColor: '#E8E8ED',
+    backgroundColor: '#E3E7EF',
+    marginVertical: 10,
   },
   freePriceRow: {
     alignItems: 'center',
@@ -4387,10 +4421,10 @@ const styles = StyleSheet.create({
   paymentMethodSelector: {
     flexDirection: 'row' as const,
     gap: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 14,
+    marginTop: 14,
     borderTopWidth: 1,
-    borderTopColor: '#E8E8ED',
+    borderTopColor: '#EEF1F5',
   },
   paymentMethodOption: {
     flex: 1,
@@ -4398,11 +4432,11 @@ const styles = StyleSheet.create({
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
     gap: 8,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: '#F0F0F5',
+    paddingVertical: 13,
+    borderRadius: 14,
+    backgroundColor: '#F8F9FC',
     borderWidth: 1.5,
-    borderColor: '#E0E0E8',
+    borderColor: '#E3E7EF',
   },
   paymentMethodOptionActive: {
     backgroundColor: Colors.dark.success,
@@ -4422,9 +4456,14 @@ const styles = StyleSheet.create({
   },
   confirmButton: {
     backgroundColor: Colors.dark.primary,
-    paddingVertical: 18,
-    borderRadius: 16,
+    paddingVertical: 17,
+    borderRadius: 18,
     alignItems: 'center',
+    shadowColor: Colors.dark.primary,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.22,
+    shadowRadius: 16,
+    elevation: 6,
   },
   confirmButtonDisabled: {
     opacity: 0.4,
@@ -5858,51 +5897,66 @@ const styles = StyleSheet.create({
   routePickerSurface: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 20,
-    paddingTop: 6,
-    paddingBottom: 16,
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 14,
   },
   routePickerHeader: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'space-between' as const,
-    marginBottom: 18,
+    marginBottom: 14,
   },
   routePickerHeaderButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
-    backgroundColor: '#F3F4F7',
+    backgroundColor: '#F5F7FB',
+    borderWidth: 1,
+    borderColor: '#ECEEF3',
+  },
+  routePickerHeaderContent: {
+    flex: 1,
+    alignItems: 'center' as const,
+    paddingHorizontal: 12,
   },
   routePickerHeaderTitle: {
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: '800' as const,
     color: '#111111',
   },
+  routePickerHeaderSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    color: '#8B90A0',
+    fontWeight: '500' as const,
+  },
   routePickerHeaderSpacer: {
-    width: 44,
-    height: 44,
+    width: 42,
+    height: 42,
   },
   routeComposerRow: {
     flexDirection: 'row' as const,
     alignItems: 'flex-start' as const,
-    gap: 12,
-    marginBottom: 18,
+    gap: 10,
+    marginBottom: 16,
   },
   routeComposerInputs: {
     flex: 1,
-    gap: 10,
+    gap: 8,
   },
   routeComposerOriginField: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
+    backgroundColor: '#F8F9FC',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     gap: 12,
+    borderWidth: 1,
+    borderColor: '#ECEEF3',
   },
   routeComposerOriginDot: {
     width: 14,
@@ -5910,64 +5964,87 @@ const styles = StyleSheet.create({
     borderRadius: 7,
     backgroundColor: '#14AE5C',
     borderWidth: 4,
-    borderColor: 'rgba(20,174,92,0.18)',
+    borderColor: 'rgba(20,174,92,0.16)',
+  },
+  routeComposerOriginTextWrap: {
+    flex: 1,
+  },
+  routeComposerFieldLabel: {
+    fontSize: 11,
+    color: '#8D93A6',
+    fontWeight: '700' as const,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase' as const,
+    marginBottom: 2,
   },
   routeComposerOriginText: {
     flex: 1,
-    fontSize: 17,
-    color: '#A0A4AF',
-    fontWeight: '500' as const,
+    fontSize: 15,
+    color: '#222530',
+    fontWeight: '600' as const,
   },
   routeComposerDestinationField: {
-    minHeight: 86,
+    minHeight: 72,
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    paddingLeft: 16,
-    paddingRight: 14,
-    borderWidth: 2,
-    borderColor: '#16181D',
+    borderRadius: 20,
+    paddingLeft: 14,
+    paddingRight: 12,
+    borderWidth: 1.5,
+    borderColor: '#D7DCE6',
     position: 'relative' as const,
-    gap: 12,
+    gap: 10,
+    shadowColor: '#111827',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.05,
+    shadowRadius: 16,
+    elevation: 3,
   },
   routeComposerSearchIconWrap: {
-    width: 38,
+    width: 32,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
+  },
+  routeComposerDestinationTextWrap: {
+    flex: 1,
+    paddingVertical: 10,
   },
   routeComposerDestinationInput: {
-    flex: 1,
-    minHeight: 70,
-    fontSize: 18,
+    fontSize: 16,
     color: '#111111',
-    fontWeight: '500' as const,
+    fontWeight: '600' as const,
     paddingRight: 8,
+    paddingVertical: 0,
   },
   routeComposerMapButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: '#F3F4F7',
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    backgroundColor: '#F5F7FB',
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
+    borderWidth: 1,
+    borderColor: '#ECEEF3',
   },
   routeComposerSpinner: {
     position: 'absolute' as const,
-    right: 62,
-    top: 31,
+    right: 56,
+    top: 26,
   },
   routeComposerActions: {
-    gap: 12,
-    paddingTop: 6,
+    gap: 10,
+    paddingTop: 2,
   },
   routeComposerActionButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 14,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
-    backgroundColor: '#F3F4F7',
+    backgroundColor: '#F5F7FB',
+    borderWidth: 1,
+    borderColor: '#ECEEF3',
   },
   routePickerList: {
     flex: 1,
@@ -5976,15 +6053,16 @@ const styles = StyleSheet.create({
     paddingBottom: 18,
   },
   routePickerSectionLabel: {
-    fontSize: 13,
-    fontWeight: '700' as const,
+    fontSize: 12,
+    fontWeight: '800' as const,
     color: '#8A8FA0',
     marginBottom: 10,
-    letterSpacing: 0.2,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase' as const,
   },
   routePickerRecentList: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 22,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: '#ECEEF3',
     overflow: 'hidden' as const,
@@ -5994,34 +6072,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     paddingHorizontal: 12,
-    paddingVertical: 14,
+    paddingVertical: 13,
     gap: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F1F4',
   },
   routePickerRecentIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
-    backgroundColor: '#F3F4F7',
+    backgroundColor: '#F5F7FB',
   },
   routePickerRecentContent: {
     flex: 1,
   },
   routePickerRecentTitle: {
-    fontSize: 16,
-    fontWeight: '600' as const,
+    fontSize: 15,
+    fontWeight: '700' as const,
     color: '#111111',
   },
   routePickerRecentSubtitle: {
-    marginTop: 3,
-    fontSize: 13,
+    marginTop: 2,
+    fontSize: 12,
     color: '#7B8192',
   },
   routePickerRecentTrailing: {
-    width: 32,
+    width: 28,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
   },
@@ -6032,43 +6110,73 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 18,
     paddingHorizontal: 14,
-    paddingVertical: 16,
+    paddingVertical: 14,
     borderWidth: 1,
     borderColor: '#ECEEF3',
     marginBottom: 14,
   },
   routePickerMapRowIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#F3F4F7',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#F5F7FB',
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
   },
+  routePickerMapRowTextWrap: {
+    flex: 1,
+  },
   routePickerMapRowText: {
-    fontSize: 16,
-    fontWeight: '600' as const,
+    fontSize: 15,
+    fontWeight: '700' as const,
     color: '#111111',
   },
+  routePickerMapRowSubtext: {
+    marginTop: 2,
+    fontSize: 12,
+    color: '#8A8FA0',
+  },
   routePickerSelectedCard: {
+    backgroundColor: '#FFF9EF',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.2)',
+    marginBottom: 14,
+  },
+  routePickerSelectedCardTopRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    marginBottom: 10,
+    gap: 12,
+  },
+  routePickerSelectedBadge: {
+    backgroundColor: 'rgba(245,166,35,0.14)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  routePickerSelectedBadgeText: {
+    fontSize: 11,
+    color: '#A56A00',
+    fontWeight: '800' as const,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase' as const,
+  },
+  routePickerSelectedCardBottomRow: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     justifyContent: 'space-between' as const,
     gap: 12,
-    backgroundColor: '#FFF8EC',
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(245,166,35,0.18)',
-    marginBottom: 14,
   },
   routePickerSelectedInfo: {
     flex: 1,
   },
   routePickerSelectedTitle: {
     fontSize: 16,
-    fontWeight: '700' as const,
+    fontWeight: '800' as const,
     color: '#1A1A2E',
   },
   routePickerSelectedMeta: {
@@ -6078,21 +6186,27 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   routePickerSelectedMetaText: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#7B8192',
-    fontWeight: '500' as const,
+    fontWeight: '600' as const,
   },
   routePickerSelectedMetaDot: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#B6BAC7',
   },
   routePickerSelectedPriceWrap: {
     alignItems: 'flex-end' as const,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.18)',
   },
   routePickerSelectedPriceLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#9AA0AE',
-    fontWeight: '600' as const,
+    fontWeight: '700' as const,
   },
   routePickerSelectedPrice: {
     marginTop: 2,
@@ -7844,10 +7958,10 @@ const styles = StyleSheet.create({
     color: '#888',
   },
   vehicleSelectInlineTitle: {
-    fontSize: 14,
-    fontWeight: '700' as const,
+    fontSize: 15,
+    fontWeight: '800' as const,
     color: '#1A1A2E',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   vehicleSelectInlineRow: {
     flexDirection: 'row' as const,
@@ -7857,12 +7971,12 @@ const styles = StyleSheet.create({
   vehicleSelectInlineCard: {
     flex: 1,
     alignItems: 'center' as const,
-    paddingVertical: 12,
+    paddingVertical: 13,
     paddingHorizontal: 6,
-    borderRadius: 14,
-    backgroundColor: '#F5F5F8',
-    borderWidth: 2,
-    borderColor: 'transparent',
+    borderRadius: 16,
+    backgroundColor: '#F8F9FC',
+    borderWidth: 1.5,
+    borderColor: '#E3E7EF',
     position: 'relative' as const,
   },
   vehicleSelectInlineCardActive: {
