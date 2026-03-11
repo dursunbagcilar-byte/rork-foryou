@@ -1930,14 +1930,27 @@ app.post("/auth/update-phone-direct", async (c) => {
 
 app.post("/auth/logout", async (c) => {
   try {
-    const body = await c.req.json();
-    if (body.token) {
-      db.sessions.delete(body.token);
-      console.log('[REST] Session invalidated');
+    const dbEp = c.req.header('x-db-endpoint');
+    const dbNs = c.req.header('x-db-namespace');
+    const dbTk = c.req.header('x-db-token');
+    await recoverAuthStoreForRequest('logout', dbEp, dbNs, dbTk);
+
+    const authHeader = c.req.header('authorization');
+    const body = await c.req.json().catch((): Record<string, unknown> => ({}));
+    const tokenFromBody = typeof body.token === 'string' ? body.token.trim() : '';
+    const tokenFromHeader = authHeader?.replace('Bearer ', '').trim() ?? '';
+    const sessionToken = tokenFromBody || tokenFromHeader;
+
+    if (sessionToken) {
+      db.sessions.delete(sessionToken);
+      console.log('[REST] Session invalidated for current token only');
+    } else {
+      console.log('[REST] Logout called without a session token');
     }
+
     return c.json({ success: true });
   } catch (err: any) {
-    console.log('[REST] logout error:', err?.message);
+    console.log('[REST] logout error:', err?.message ?? err);
     return c.json({ success: true });
   }
 });
