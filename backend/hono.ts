@@ -306,6 +306,180 @@ async function loadAuthAccountByEmail(email: string): Promise<LoadedAuthAccount>
   return { emailKey: cleanEmail, user, driver, passwordHash, source };
 }
 
+function generateReferralCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let nextCode = 'FY';
+
+  for (let index = 0; index < 5; index += 1) {
+    nextCode += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+
+  return nextCode;
+}
+
+function sanitizeRepairAccountInput(
+  accountInput: Record<string, unknown>,
+  email: string,
+  fallbackType: 'customer' | 'driver',
+): User | Driver {
+  const now = new Date().toISOString();
+  const cleanId = sanitizeInput(typeof accountInput.id === 'string' ? accountInput.id : '').trim();
+  const accountId = cleanId || `${fallbackType === 'driver' ? 'd' : 'c'}_repair_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const cleanName = sanitizeInput(typeof accountInput.name === 'string' ? accountInput.name : '').trim() || (fallbackType === 'driver' ? 'Şoför' : 'Müşteri');
+  const cleanPhone = normalizeTurkishPhone(typeof accountInput.phone === 'string' ? accountInput.phone : '');
+  const cleanCity = sanitizeInput(typeof accountInput.city === 'string' ? accountInput.city : '').trim();
+  const cleanDistrict = sanitizeInput(typeof accountInput.district === 'string' ? accountInput.district : '').trim();
+  const cleanAvatar = sanitizeInput(typeof accountInput.avatar === 'string' ? accountInput.avatar : '').trim() || undefined;
+  const cleanCreatedAt = typeof accountInput.createdAt === 'string' && accountInput.createdAt.trim()
+    ? accountInput.createdAt
+    : now;
+
+  if (fallbackType === 'driver') {
+    const requestedDriverCategory = typeof accountInput.driverCategory === 'string' ? accountInput.driverCategory : '';
+    const driverCategory = requestedDriverCategory === 'courier' || requestedDriverCategory === 'scooter' || requestedDriverCategory === 'driver'
+      ? requestedDriverCategory
+      : 'driver';
+    const rating = typeof accountInput.rating === 'number' ? accountInput.rating : 5;
+    const totalRides = typeof accountInput.totalRides === 'number' ? accountInput.totalRides : 0;
+    const dailyEarnings = typeof accountInput.dailyEarnings === 'number' ? accountInput.dailyEarnings : 0;
+    const weeklyEarnings = typeof accountInput.weeklyEarnings === 'number' ? accountInput.weeklyEarnings : 0;
+    const monthlyEarnings = typeof accountInput.monthlyEarnings === 'number' ? accountInput.monthlyEarnings : 0;
+    const vehiclePlate = sanitizeInput(typeof accountInput.vehiclePlate === 'string' ? accountInput.vehiclePlate : '').trim().toUpperCase();
+    const vehicleModel = sanitizeInput(typeof accountInput.vehicleModel === 'string' ? accountInput.vehicleModel : '').trim() || 'Araç';
+    const vehicleColor = sanitizeInput(typeof accountInput.vehicleColor === 'string' ? accountInput.vehicleColor : '').trim() || 'Belirtilmedi';
+    const approvedAt = typeof accountInput.approvedAt === 'string' && accountInput.approvedAt.trim()
+      ? accountInput.approvedAt
+      : now;
+
+    return {
+      id: accountId,
+      name: cleanName,
+      phone: cleanPhone,
+      email,
+      type: 'driver',
+      driverCategory,
+      vehiclePlate,
+      vehicleModel,
+      vehicleColor,
+      rating,
+      totalRides,
+      isOnline: Boolean(accountInput.isOnline),
+      isSuspended: Boolean(accountInput.isSuspended),
+      isApproved: typeof accountInput.isApproved === 'boolean' ? accountInput.isApproved : true,
+      approvedAt,
+      licenseIssueDate: typeof accountInput.licenseIssueDate === 'string' ? accountInput.licenseIssueDate : undefined,
+      partnerDriverName: typeof accountInput.partnerDriverName === 'string' ? sanitizeInput(accountInput.partnerDriverName) : undefined,
+      dailyEarnings,
+      weeklyEarnings,
+      monthlyEarnings,
+      city: cleanCity,
+      district: cleanDistrict,
+      avatar: cleanAvatar,
+      createdAt: cleanCreatedAt,
+    };
+  }
+
+  const gender = accountInput.gender === 'female' ? 'female' : 'male';
+  const freeRidesRemaining = typeof accountInput.freeRidesRemaining === 'number' ? accountInput.freeRidesRemaining : 0;
+  const referralCode = typeof accountInput.referralCode === 'string' && accountInput.referralCode.trim()
+    ? sanitizeInput(accountInput.referralCode).trim().toUpperCase()
+    : generateReferralCode();
+
+  return {
+    id: accountId,
+    name: cleanName,
+    phone: cleanPhone,
+    email,
+    type: 'customer',
+    gender,
+    city: cleanCity,
+    district: cleanDistrict,
+    avatar: cleanAvatar,
+    referralCode,
+    referredBy: typeof accountInput.referredBy === 'string' ? sanitizeInput(accountInput.referredBy) : undefined,
+    freeRidesRemaining,
+    createdAt: cleanCreatedAt,
+  };
+}
+
+async function repairAuthAccountFromBackup(input: {
+  email: string;
+  password: string;
+  type: 'customer' | 'driver';
+  account: Record<string, unknown>;
+}): Promise<{ account: User | Driver; accountType: 'customer' | 'driver'; token: string; repaired: boolean }> {
+  const cleanEmail = input.email.toLowerCase().trim();
+  const resolvedType: 'customer' | 'driver' = input.type === 'driver' ? 'driver' : 'customer';
+  const loadedAccount = await loadAuthAccountByEmail(cleanEmail);
+  const matchingExistingAccount = resolvedType === 'driver' ? loadedAccount.driver : loadedAccount.user;
+  const conflictingAccount = resolvedType === 'driver' ? loadedAccount.user : loadedAccount.driver;
+
+  if (conflictingAccount && !matchingExistingAccount) {
+    throw new Error('Bu e-posta farklı bir hesap türünde kayıtlı');
+  }
+
+  let accountToPersist = matchingExistingAccount;
+  let repaired = false;
+
+  if (!accountToPersist) {
+    accountToPersist = sanitizeRepairAccountInput(input.account, cleanEmail, resolvedType);
+    repaired = true;
+  }
+
+  if (accountToPersist.phone) {
+    const phoneValidationError = getTurkishPhoneValidationError(accountToPersist.phone);
+    if (phoneValidationError) {
+      throw new Error(phoneValidationError);
+    }
+
+    if (isPhoneTakenByAnotherAccount(accountToPersist.phone, accountToPersist.id)) {
+      throw new Error('Bu telefon numarası başka bir hesapta kullanılıyor');
+    }
+  }
+
+  if (resolvedType === 'driver') {
+    await db.drivers.setSync(accountToPersist.id, accountToPersist as Driver);
+    await persistAccountDirect(accountToPersist as Driver, 'driver');
+  } else {
+    await db.users.setSync(accountToPersist.id, accountToPersist as User);
+    await persistAccountDirect(accountToPersist as User, 'customer');
+  }
+
+  let passwordHash = loadedAccount.passwordHash;
+  if (passwordHash) {
+    const passwordMatches = await verifyPassword(input.password, passwordHash);
+    if (!passwordMatches) {
+      throw new Error('Şifre hatalı');
+    }
+  } else {
+    passwordHash = await hashPassword(input.password);
+    await db.passwords.setSync(cleanEmail, passwordHash);
+    await persistPasswordHashDirect(cleanEmail, passwordHash);
+    repaired = true;
+  }
+
+  const sessionToken = generateSecureToken(64);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const sessionRecord: Session = {
+    token: sessionToken,
+    userId: accountToPersist.id,
+    userType: resolvedType,
+    createdAt: now.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+  };
+
+  await db.sessions.setSync(sessionToken, sessionRecord);
+  await persistSessionDirect(sessionRecord);
+
+  return {
+    account: accountToPersist,
+    accountType: resolvedType,
+    token: sessionToken,
+    repaired,
+  };
+}
+
 async function persistPasswordHashDirect(email: string, passwordHash: string): Promise<void> {
   if (!isDbConfigured()) {
     console.log('[SERVER] persistPasswordHashDirect skipped - db not configured for:', email);
@@ -1324,6 +1498,46 @@ app.post("/auth/login", async (c) => {
   } catch (err: any) {
     console.log('[REST] login error:', err?.message);
     return c.json({ success: false, error: 'Giriş hatası. Tekrar deneyin.', user: null, token: null }, 500);
+  }
+});
+
+app.post("/auth/repair-account", async (c) => {
+  try {
+    const dbEp = c.req.header('x-db-endpoint');
+    const dbNs = c.req.header('x-db-namespace');
+    const dbTk = c.req.header('x-db-token');
+    await recoverAuthStoreForRequest('repair-account', dbEp, dbNs, dbTk);
+
+    const body = await c.req.json().catch((): Record<string, unknown> => ({}));
+    const cleanEmail = typeof body.email === 'string' ? body.email.toLowerCase().trim() : '';
+    const password = typeof body.password === 'string' ? body.password : '';
+    const accountType: 'customer' | 'driver' = body.type === 'driver' ? 'driver' : 'customer';
+    const accountPayload = typeof body.account === 'object' && body.account !== null
+      ? body.account as Record<string, unknown>
+      : null;
+
+    if (!cleanEmail || !password || !accountPayload) {
+      return c.json({ success: false, error: 'Hesap onarımı için kayıtlı bilgiler eksik', user: null, token: null }, 400);
+    }
+
+    const repairedAccount = await repairAuthAccountFromBackup({
+      email: cleanEmail,
+      password,
+      type: accountType,
+      account: accountPayload,
+    });
+
+    console.log('[REST] repair-account OK:', cleanEmail, 'type:', repairedAccount.accountType, 'repaired:', repairedAccount.repaired);
+    return c.json({
+      success: true,
+      error: null,
+      user: { ...repairedAccount.account, type: repairedAccount.accountType },
+      token: repairedAccount.token,
+      repaired: repairedAccount.repaired,
+    });
+  } catch (err: any) {
+    console.log('[REST] repair-account error:', err?.message ?? err);
+    return c.json({ success: false, error: err?.message || 'Hesap onarılamadı', user: null, token: null }, 400);
   }
 });
 

@@ -966,6 +966,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       lowerMessage.includes('oturum kalıcı olarak oluşturulamadı');
   }, []);
 
+  const shouldTryRemoteAccountRepair = useCallback((message: string): boolean => {
+    const lowerMessage = (message || '').toLowerCase();
+    return lowerMessage.includes('kullanıcı bulunamadı') ||
+      lowerMessage.includes('hesap bulundu ancak şifre kaydı eksik') ||
+      lowerMessage.includes('kayıt olduğunuz e-posta adresini kontrol edin') ||
+      lowerMessage.includes('bu e-posta adresiyle kayıtlı hesap bulunamadı');
+  }, []);
+
   const tryLocalLogin = useCallback(async (
     email: string,
     password: string,
@@ -1230,6 +1238,44 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     throw new Error(result.error ?? 'Mail adresiniz veya şifreniz hatalı');
   }, [persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin]);
 
+  const repairRemoteAccountFromBackup = useCallback(async (
+    email: string,
+    password: string,
+    requestedType: Exclude<UserType, null>
+  ): Promise<UserType> => {
+    const normalizedEmail = normalizeAuthEmail(email);
+    const backup = await getLocalAuthBackup(normalizedEmail);
+
+    if (!backup) {
+      console.log('[Auth] repairRemoteAccountFromBackup - no backup for:', normalizedEmail);
+      throw new Error('Bu cihazda hesap yedeği bulunamadı');
+    }
+
+    const passwordHash = await hashLocalPassword(password);
+    if (backup.passwordHash !== passwordHash) {
+      console.log('[Auth] repairRemoteAccountFromBackup - password mismatch for:', normalizedEmail);
+      throw new Error('Şifre hatalı');
+    }
+
+    if (requestedType === 'driver' && backup.type !== 'driver') {
+      throw new Error('Bu e-posta ile kayıtlı şoför hesabı bulunamadı');
+    }
+
+    console.log('[Auth] repairRemoteAccountFromBackup start:', normalizedEmail, 'requestedType:', requestedType, 'backupType:', backup.type);
+    const result = await directFetch('/auth/repair-account', {
+      email: normalizedEmail,
+      password,
+      type: backup.type,
+      account: backup.user,
+    });
+
+    if (result && result.success === false && result.error) {
+      throw new Error(result.error);
+    }
+
+    return handleLoginSuccess(result, normalizedEmail, password, 'REMOTE_REPAIR');
+  }, [directFetch, getLocalAuthBackup, handleLoginSuccess]);
+
   const loginAsCustomer = useCallback(async (email?: string, password?: string) => {
     if (!email || !password) {
       throw new Error('E-posta ve şifre gerekli');
@@ -1246,6 +1292,24 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     } catch (err: any) {
       console.log('[Auth] loginAsCustomer error:', err?.message);
       const errorMessage = err instanceof Error ? err.message : '';
+
+      if (shouldTryRemoteAccountRepair(errorMessage)) {
+        const hasLocalBackup = await hasLocalLoginBackup(email);
+        console.log('[Auth] loginAsCustomer remote repair availability:', hasLocalBackup, 'email:', email);
+        if (hasLocalBackup) {
+          try {
+            return await repairRemoteAccountFromBackup(email, password, 'customer');
+          } catch (repairError) {
+            console.log('[Auth] loginAsCustomer remote repair error:', repairError);
+            const repairMessage = repairError instanceof Error ? repairError.message : '';
+            if (shouldTryLocalAuthFallback(repairMessage)) {
+              return tryLocalLogin(email, password, 'customer');
+            }
+            if (repairError instanceof Error) throw repairError;
+          }
+        }
+      }
+
       if (shouldTryLocalAuthFallback(errorMessage)) {
         const hasLocalBackup = await hasLocalLoginBackup(email);
         console.log('[Auth] loginAsCustomer local fallback availability:', hasLocalBackup, 'email:', email);
@@ -1256,7 +1320,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
-  }, [directFetch, ensureBackendAuthReady, handleLoginSuccess, hasLocalLoginBackup, shouldTryLocalAuthFallback, tryLocalLogin]);
+  }, [directFetch, ensureBackendAuthReady, handleLoginSuccess, hasLocalLoginBackup, repairRemoteAccountFromBackup, shouldTryLocalAuthFallback, shouldTryRemoteAccountRepair, tryLocalLogin]);
 
   const loginAsDriver = useCallback(async (email?: string, password?: string) => {
     if (!email || !password) {
@@ -1277,6 +1341,24 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     } catch (err: any) {
       console.log('[Auth] loginAsDriver error:', err?.message);
       const errorMessage = err instanceof Error ? err.message : '';
+
+      if (shouldTryRemoteAccountRepair(errorMessage)) {
+        const hasLocalBackup = await hasLocalLoginBackup(email);
+        console.log('[Auth] loginAsDriver remote repair availability:', hasLocalBackup, 'email:', email);
+        if (hasLocalBackup) {
+          try {
+            return await repairRemoteAccountFromBackup(email, password, 'driver');
+          } catch (repairError) {
+            console.log('[Auth] loginAsDriver remote repair error:', repairError);
+            const repairMessage = repairError instanceof Error ? repairError.message : '';
+            if (shouldTryLocalAuthFallback(repairMessage)) {
+              return tryLocalLogin(email, password, 'driver');
+            }
+            if (repairError instanceof Error) throw repairError;
+          }
+        }
+      }
+
       if (shouldTryLocalAuthFallback(errorMessage)) {
         const hasLocalBackup = await hasLocalLoginBackup(email);
         console.log('[Auth] loginAsDriver local fallback availability:', hasLocalBackup, 'email:', email);
@@ -1287,7 +1369,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
-  }, [directFetch, ensureBackendAuthReady, handleLoginSuccess, hasLocalLoginBackup, shouldTryLocalAuthFallback, tryLocalLogin]);
+  }, [directFetch, ensureBackendAuthReady, handleLoginSuccess, hasLocalLoginBackup, repairRemoteAccountFromBackup, shouldTryLocalAuthFallback, shouldTryRemoteAccountRepair, tryLocalLogin]);
 
   const registerCustomer = useCallback(async (name: string, phone: string, email: string, password: string, gender: 'male' | 'female', city: string, district: string, vehiclePlate?: string, referralCode?: string) => {
     const normalizedPhone = normalizeTurkishPhone(phone);
