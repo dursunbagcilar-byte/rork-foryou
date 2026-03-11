@@ -752,16 +752,48 @@ function resolveBootstrapDbConfig(c: Context, body: unknown): { ep: string; ns: 
   const bodyRecord = typeof body === 'object' && body !== null
     ? body as Record<string, unknown>
     : null;
+  const nestedDbConfig = typeof bodyRecord?.dbConfig === 'object' && bodyRecord.dbConfig !== null
+    ? bodyRecord.dbConfig as Record<string, unknown>
+    : null;
 
-  const ep = normalizeOptionalString(bodyRecord?.endpoint) || headerConfig.ep;
-  const ns = normalizeOptionalString(bodyRecord?.namespace) || headerConfig.ns;
-  const tk = normalizeOptionalString(bodyRecord?.token) || headerConfig.tk;
+  const ep = normalizeOptionalString(bodyRecord?.endpoint)
+    || normalizeOptionalString(bodyRecord?.dbEndpoint)
+    || normalizeOptionalString(nestedDbConfig?.endpoint)
+    || headerConfig.ep;
+  const ns = normalizeOptionalString(bodyRecord?.namespace)
+    || normalizeOptionalString(bodyRecord?.dbNamespace)
+    || normalizeOptionalString(nestedDbConfig?.namespace)
+    || headerConfig.ns;
+  const tk = normalizeOptionalString(bodyRecord?.token)
+    || normalizeOptionalString(bodyRecord?.dbToken)
+    || normalizeOptionalString(nestedDbConfig?.token)
+    || headerConfig.tk;
 
   return { ep, ns, tk };
 }
 
+async function readBootstrapBodyFromClone(c: Context): Promise<unknown> {
+  const method = c.req.method.toUpperCase();
+  if (method !== 'POST' && method !== 'PUT' && method !== 'PATCH') {
+    return null;
+  }
+
+  const contentType = c.req.header('content-type') || '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    return null;
+  }
+
+  try {
+    return await c.req.raw.clone().json();
+  } catch (error) {
+    console.log('[SERVER] readBootstrapBodyFromClone parse error:', error);
+    return null;
+  }
+}
+
 app.use("*", async (c, next) => {
-  const { ep, ns, tk } = resolveDbHeaders(c);
+  const bootstrapBody = await readBootstrapBodyFromClone(c);
+  const { ep, ns, tk } = resolveBootstrapDbConfig(c, bootstrapBody);
   if (ep && ns && tk) {
     await ensureDbReady(ep, ns, tk);
   }

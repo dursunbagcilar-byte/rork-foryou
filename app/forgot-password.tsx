@@ -11,7 +11,7 @@ import { ArrowLeft, Mail, Lock, CheckCircle, KeyRound, Phone } from 'lucide-reac
 import { getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl } from '@/lib/trpc';
 import { APP_BRAND } from '@/constants/branding';
 import { useAuth } from '@/contexts/AuthContext';
-import { getDbHeaders } from '@/utils/db';
+import { getDbHeaders, getDbRequestConfigPayload } from '@/utils/db';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 
 async function resolveApiBase(): Promise<string> {
@@ -34,10 +34,14 @@ async function restCall<T>(path: string, input: Record<string, unknown>, retryCo
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000);
   try {
+    const requestBody = {
+      ...input,
+      ...getDbRequestConfigPayload(),
+    };
     const response = await fetch(url, {
       method: 'POST',
       headers: getDbHeaders(),
-      body: JSON.stringify(input),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
     clearTimeout(timeoutId);

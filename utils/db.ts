@@ -58,3 +58,16 @@ export function getDbBootstrapPayload(): Record<string, string> {
     token: dbConfig.token,
   };
 }
+
+export function getDbRequestConfigPayload(): Record<string, string> {
+  const dbConfig = getOptionalDbConfig();
+  if (!dbConfig) {
+    return {};
+  }
+
+  return {
+    dbEndpoint: dbConfig.endpoint,
+    dbNamespace: dbConfig.namespace,
+    dbToken: dbConfig.token,
+  };
+}
