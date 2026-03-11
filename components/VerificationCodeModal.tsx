@@ -26,6 +26,7 @@ interface VerificationCodeModalProps {
   isResending: boolean;
   maskedPhone?: string | null;
   deliveryNote?: string | null;
+  providerName?: string | null;
   confirmLabel?: string;
   resendLabel?: string;
   testIDPrefix?: string;
@@ -44,6 +45,7 @@ export function VerificationCodeModal({
   isResending,
   maskedPhone,
   deliveryNote,
+  providerName,
   confirmLabel = 'Kodu Onayla',
   resendLabel = 'Kodu Tekrar Gönder',
   testIDPrefix = 'verification-modal',
@@ -78,6 +80,7 @@ export function VerificationCodeModal({
               </View>
               <View style={styles.deliveryCopy}>
                 <Text style={styles.deliveryTitle}>SMS gönderildi</Text>
+                {providerName ? <Text style={styles.deliveryProvider}>{providerName} ile gönderildi</Text> : null}
                 <Text style={styles.deliveryText}>
                   {maskedPhone ? `${maskedPhone} numarasına 6 haneli kod yollandı.` : 'Telefon numaranıza 6 haneli kod yollandı.'}
                 </Text>
@@ -221,6 +224,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: Colors.dark.text,
+  },
+  deliveryProvider: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.dark.success,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
   deliveryText: {
     fontSize: 13,

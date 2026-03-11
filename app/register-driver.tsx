@@ -19,7 +19,7 @@ import { getGoogleMapsApiKey } from '@/utils/maps';
 import { getDbHeaders } from '@/utils/db';
 import { VerificationCodeModal } from '@/components/VerificationCodeModal';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
-import { sendRegistrationVerificationCode, verifyRegistrationVerificationCode } from '@/utils/authVerification';
+import { sendRegistrationVerificationCode, type VerificationSmsProvider, verifyRegistrationVerificationCode } from '@/utils/authVerification';
 
 type DriverCategory = 'driver' | 'scooter' | 'courier';
 type RegistrationCategory = DriverCategory | 'business';
@@ -168,6 +168,7 @@ export default function RegisterDriverScreen() {
   const [verificationConfirming, setVerificationConfirming] = useState<boolean>(false);
   const [verificationMaskedPhone, setVerificationMaskedPhone] = useState<string | null>(null);
   const [verificationDeliveryNote, setVerificationDeliveryNote] = useState<string | null>(null);
+  const [verificationProvider, setVerificationProvider] = useState<VerificationSmsProvider | null>(null);
   const [verifiedContactSnapshot, setVerifiedContactSnapshot] = useState<VerifiedContactSnapshot | null>(null);
 
   const [licenseFront, setLicenseFront] = useState<string>('');
@@ -408,6 +409,7 @@ export default function RegisterDriverScreen() {
     setShowVerificationModal(false);
     setVerificationMaskedPhone(null);
     setVerificationDeliveryNote(null);
+    setVerificationProvider(null);
     setVerifiedContactSnapshot(null);
   };
 
@@ -612,8 +614,9 @@ export default function RegisterDriverScreen() {
       setVerificationCode('');
       setVerificationMaskedPhone(result.maskedPhone ?? sanitizedPhone);
       setVerificationDeliveryNote(result.deliveryNote ?? null);
+      setVerificationProvider(result.smsProvider ?? null);
       setShowVerificationModal(true);
-      console.log('[RegisterDriver] Verification code sent for:', normalizedEmail, 'maskedPhone:', result.maskedPhone ?? 'none');
+      console.log('[RegisterDriver] Verification code sent for:', normalizedEmail, 'maskedPhone:', result.maskedPhone ?? 'none', 'provider:', result.smsProvider ?? 'unknown');
     } catch (error: unknown) {
       console.log('[RegisterDriver] Verification send error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Doğrulama kodu gönderilemedi. Lütfen tekrar deneyin.';
@@ -1355,6 +1358,7 @@ export default function RegisterDriverScreen() {
         isResending={verificationBusy}
         maskedPhone={verificationMaskedPhone}
         deliveryNote={verificationDeliveryNote}
+        providerName={verificationProvider === 'netgsm' ? 'NetGSM' : null}
         confirmLabel="Telefonu Onayla"
         resendLabel="Kodu Yeniden Gönder"
         testIDPrefix="register-driver-verification"

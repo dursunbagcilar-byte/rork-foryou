@@ -808,6 +808,7 @@ app.post("/auth/send-verification-code", async (c) => {
         deliveryChannel: 'sms',
         maskedPhone: null,
         deliveryNote: getSmsDeliveryNote(null),
+        smsProvider: AUTH_SMS_PROVIDER,
       });
     }
 
@@ -831,6 +832,7 @@ app.post("/auth/send-verification-code", async (c) => {
         deliveryChannel: 'sms',
         maskedPhone,
         deliveryNote: getSmsDeliveryNote(maskedPhone),
+        smsProvider: AUTH_SMS_PROVIDER,
       });
     }
 
@@ -850,6 +852,7 @@ app.post("/auth/send-verification-code", async (c) => {
         deliveryChannel: 'sms',
         maskedPhone,
         deliveryNote: directDeliveryNote,
+        smsProvider: AUTH_SMS_PROVIDER,
       });
     }
 
@@ -867,6 +870,7 @@ app.post("/auth/send-verification-code", async (c) => {
         deliveryChannel: 'sms',
         maskedPhone,
         deliveryNote: directDeliveryNote,
+        smsProvider: AUTH_SMS_PROVIDER,
       });
     }
 
@@ -879,6 +883,7 @@ app.post("/auth/send-verification-code", async (c) => {
       deliveryChannel: 'sms',
       maskedPhone,
       deliveryNote: directDeliveryNote,
+      smsProvider: AUTH_SMS_PROVIDER,
     });
   } catch (err: unknown) {
     console.log('[REST] send-verification-code error:', err instanceof Error ? err.message : err);

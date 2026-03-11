@@ -14,7 +14,7 @@ import type { City } from '@/constants/cities';
 import { usePrivacy } from '@/contexts/PrivacyContext';
 import { VerificationCodeModal } from '@/components/VerificationCodeModal';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
-import { sendRegistrationVerificationCode, verifyRegistrationVerificationCode } from '@/utils/authVerification';
+import { sendRegistrationVerificationCode, type VerificationSmsProvider, verifyRegistrationVerificationCode } from '@/utils/authVerification';
 
 interface VerifiedContactSnapshot {
   email: string;
@@ -73,6 +73,7 @@ export default function RegisterCustomerScreen() {
   const [verificationConfirming, setVerificationConfirming] = useState<boolean>(false);
   const [verificationMaskedPhone, setVerificationMaskedPhone] = useState<string | null>(null);
   const [verificationDeliveryNote, setVerificationDeliveryNote] = useState<string | null>(null);
+  const [verificationProvider, setVerificationProvider] = useState<VerificationSmsProvider | null>(null);
   const [verifiedContactSnapshot, setVerifiedContactSnapshot] = useState<VerifiedContactSnapshot | null>(null);
   const { acceptAllConsents } = usePrivacy();
 
@@ -119,6 +120,7 @@ export default function RegisterCustomerScreen() {
     setShowVerificationModal(false);
     setVerificationMaskedPhone(null);
     setVerificationDeliveryNote(null);
+    setVerificationProvider(null);
     setVerifiedContactSnapshot(null);
   };
 
@@ -176,8 +178,9 @@ export default function RegisterCustomerScreen() {
       setVerificationCode('');
       setVerificationMaskedPhone(result.maskedPhone ?? sanitizedPhone);
       setVerificationDeliveryNote(result.deliveryNote ?? null);
+      setVerificationProvider(result.smsProvider ?? null);
       setShowVerificationModal(true);
-      console.log('[RegisterCustomer] Verification code sent for:', normalizedEmail, 'maskedPhone:', result.maskedPhone ?? 'none');
+      console.log('[RegisterCustomer] Verification code sent for:', normalizedEmail, 'maskedPhone:', result.maskedPhone ?? 'none', 'provider:', result.smsProvider ?? 'unknown');
     } catch (error: unknown) {
       console.log('[RegisterCustomer] Verification send error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Doğrulama kodu gönderilemedi. Lütfen tekrar deneyin.';
@@ -429,6 +432,7 @@ export default function RegisterCustomerScreen() {
         isResending={verificationBusy}
         maskedPhone={verificationMaskedPhone}
         deliveryNote={verificationDeliveryNote}
+        providerName={verificationProvider === 'netgsm' ? 'NetGSM' : null}
         confirmLabel="Telefonu Onayla"
         resendLabel="Kodu Yeniden Gönder"
         testIDPrefix="register-customer-verification"
