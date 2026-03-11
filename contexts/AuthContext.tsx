@@ -5,7 +5,7 @@ import createContextHook from '@nkzw/create-context-hook';
 import type { User, Driver, Ride, DriverDocuments } from '@/constants/mockData';
 import { PRICING } from '@/constants/pricing';
 import { setSessionToken, getSessionToken, getBaseUrl, normalizeApiBaseUrl, waitForBaseUrl, trpcClient } from '@/lib/trpc';
-import { getDbHeaders as buildDbHeaders } from '@/utils/db';
+import { getDbHeaders as buildDbHeaders, getDbBootstrapPayload } from '@/utils/db';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 
 type UserType = 'customer' | 'driver' | null;
@@ -236,10 +236,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       const timeoutId = setTimeout(() => controller.abort(), 15000);
 
       try {
+        const bootstrapBody = getDbBootstrapPayload();
         const response = await fetch(`${normalizeApiBaseUrl(apiBase)}/api/bootstrap-db`, {
           method: 'POST',
           headers: getDbHeaders(),
-          body: JSON.stringify({}),
+          body: JSON.stringify(bootstrapBody),
           signal: controller.signal,
         });
         clearTimeout(timeoutId);

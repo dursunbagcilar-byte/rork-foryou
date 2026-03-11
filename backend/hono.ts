@@ -523,6 +523,11 @@ async function recoverAuthStoreForRequest(
 
   console.log('[SERVER] recoverAuthStoreForRequest start:', reason, 'dbReady:', dbReady, 'storageMode:', getCurrentStorageMode(), 'snapshotAvailable:', initialPersistentStore.available, 'users:', initialUsers, 'drivers:', initialDrivers);
 
+  if (initialUsers > 0 || initialDrivers > 0) {
+    console.log('[SERVER] recoverAuthStoreForRequest: data already loaded, skipping recovery for:', reason);
+    return;
+  }
+
   try {
     await initializeStore();
   } catch (error) {
@@ -533,7 +538,12 @@ async function recoverAuthStoreForRequest(
   const afterInitDrivers = db.drivers.getAll().length;
   const afterInitPersistentStore = getPersistentStoreStatus();
 
-  if (afterInitPersistentStore.available && afterInitUsers === 0 && afterInitDrivers === 0) {
+  if (afterInitUsers > 0 || afterInitDrivers > 0) {
+    console.log('[SERVER] recoverAuthStoreForRequest: data loaded after init, users:', afterInitUsers, 'drivers:', afterInitDrivers);
+    return;
+  }
+
+  if (afterInitPersistentStore.available) {
     try {
       console.log('[SERVER] recoverAuthStoreForRequest reinitialize from snapshot:', reason);
       await reinitializeStore();
@@ -1945,10 +1955,18 @@ app.post("/bootstrap-db", async (c) => {
     const { ep, ns, tk } = resolveBootstrapDbConfig(c, body);
 
     if (!ep || !ns || !tk) {
-      console.log('[SERVER] bootstrap-db skipped - DB config unavailable from body, headers, env, or cache');
+      console.log('[SERVER] bootstrap-db: no config from body/headers/env, trying snapshot recovery...');
       const persistentStore = getPersistentStoreStatus();
+      if (persistentStore.available && db.users.getAll().length === 0 && db.drivers.getAll().length === 0) {
+        try {
+          await reinitializeStore();
+          console.log('[SERVER] bootstrap-db: snapshot recovery attempted, users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
+        } catch (e) {
+          console.log('[SERVER] bootstrap-db: snapshot recovery error:', e);
+        }
+      }
       return c.json({
-        success: false,
+        success: isDbConfigured() || db.users.getAll().length > 0 || db.drivers.getAll().length > 0,
         configured: isDbConfigured(),
         storageMode: getCurrentStorageMode(),
         persistentStoreAvailable: persistentStore.available,

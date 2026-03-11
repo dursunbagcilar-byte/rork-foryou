@@ -349,6 +349,25 @@ function buildStoreSnapshot(): StoreSnapshot {
 
 async function persistSnapshotNow(reason: string): Promise<void> {
   const snapshot = buildStoreSnapshot();
+  const newUserCount = snapshot.users.length;
+  const newDriverCount = snapshot.drivers.length;
+  const newPasswordCount = snapshot.passwords.length;
+
+  if (newUserCount === 0 && newDriverCount === 0 && newPasswordCount === 0) {
+    const existingFile = await readStoreSnapshot();
+    if (existingFile) {
+      try {
+        const existing = JSON.parse(existingFile.text) as Partial<StoreSnapshot>;
+        const existingUsers = Array.isArray(existing.users) ? existing.users.length : 0;
+        const existingDrivers = Array.isArray(existing.drivers) ? existing.drivers.length : 0;
+        if (existingUsers > 0 || existingDrivers > 0) {
+          console.log('[STORE] Snapshot persist BLOCKED - would overwrite', existingUsers, 'users and', existingDrivers, 'drivers with empty data, reason:', reason);
+          return;
+        }
+      } catch {}
+    }
+  }
+
   const ok = await writeStoreSnapshot(JSON.stringify(snapshot));
 
   if (ok) {
@@ -729,8 +748,10 @@ export async function initializeStore(): Promise<void> {
     try {
       tryRecoverDbConfig();
       const snapshotLoaded = await loadFromSnapshot();
+      const snapshotUserCount = users.size;
+      const snapshotDriverCount = drivers.size;
       if (snapshotLoaded) {
-        console.log('[STORE] Startup restored from local snapshot before DB sync');
+        console.log('[STORE] Startup restored from local snapshot before DB sync, users:', snapshotUserCount, 'drivers:', snapshotDriverCount);
       }
       await loadFromDb();
       _dbWasConfigured = isDbConfigured();
@@ -744,13 +765,19 @@ export async function initializeStore(): Promise<void> {
           await flushPendingOps();
         }
       }
-      await persistSnapshotNow('initialize-store');
+      if (users.size > 0 || drivers.size > 0) {
+        await persistSnapshotNow('initialize-store');
+      } else {
+        console.log('[STORE] Skipping snapshot persist during init - no data loaded');
+      }
       console.log('[STORE] Initialization complete, dbConfigured:', _dbWasConfigured, 'snapshotAvailable:', _snapshotAvailable, 'drivers:', drivers.size, 'users:', users.size);
     } catch (err) {
       await seedAdminAccount();
       _initialized = true;
       _lastDbCheckTime = Date.now();
-      await persistSnapshotNow('initialize-store-fallback');
+      if (users.size > 0 || drivers.size > 0) {
+        await persistSnapshotNow('initialize-store-fallback');
+      }
       console.log('[STORE] Initialization failed, using in-memory snapshot fallback:', err);
     }
   })();
