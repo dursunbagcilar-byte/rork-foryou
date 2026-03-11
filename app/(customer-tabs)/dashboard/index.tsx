@@ -1847,9 +1847,9 @@ export default function CustomerHomeScreen() {
 
   const handleOpenRideForOther = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    console.log('[RideForOther] Navigating to ride-for-someone');
-    router.push('/(customer-tabs)/dashboard/ride-for-someone' as any);
-  }, [router]);
+    console.log('[RideForOther] Coming soon alert shown');
+    Alert.alert('Yakında!', 'Başkasına çağır özelliği çok yakında aktif olacak.');
+  }, []);
 
   return (
     <View style={styles.container}>
