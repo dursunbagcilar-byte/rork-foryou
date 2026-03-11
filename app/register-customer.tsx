@@ -147,9 +147,11 @@ export default function RegisterCustomerScreen() {
   const submitRegistration = async (sanitizedPhone: string) => {
     setLoading(true);
     try {
-      await acceptAllConsents();
       console.log('[RegisterCustomer] Starting registration for:', normalizedEmail, 'verified:', isRegistrationVerified);
-      await registerCustomer(name, sanitizedPhone, normalizedEmail, password, gender as 'male' | 'female', selectedCity, selectedDistrict, vehiclePlate || undefined, referralCode || undefined);
+      await Promise.all([
+        acceptAllConsents(),
+        registerCustomer(name, sanitizedPhone, normalizedEmail, password, gender as 'male' | 'female', selectedCity, selectedDistrict, vehiclePlate || undefined, referralCode || undefined),
+      ]);
       console.log('[RegisterCustomer] Registration successful');
       router.replace('/(customer-tabs)/dashboard');
     } catch (e: unknown) {

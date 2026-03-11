@@ -37,8 +37,10 @@ export default function LoginScreen() {
 
     const restoreLastUsedMode = async () => {
       try {
-        const customerRemembered = await getRememberedLogin('customer');
-        const driverRemembered = await getRememberedLogin('driver');
+        const [customerRemembered, driverRemembered] = await Promise.all([
+          getRememberedLogin('customer'),
+          getRememberedLogin('driver'),
+        ]);
         if (!isMounted) {
           return;
         }

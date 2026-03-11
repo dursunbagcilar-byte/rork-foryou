@@ -250,6 +250,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     return authBootstrapPromiseRef.current;
   }, [getApiBase, getDbHeaders]);
 
+  const queueAuthPersistence = useCallback((label: string, tasks: Promise<unknown>[]): void => {
+    void Promise.all(tasks)
+      .then(() => {
+        console.log('[Auth] Background persistence completed for:', label);
+      })
+      .catch((error) => {
+        console.log('[Auth] Background persistence error for:', label, error);
+      });
+  }, []);
+
   const directFetch = useCallback(async (
     path: string,
     body: Record<string, any>,
@@ -1118,21 +1128,27 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         } catch {}
       }
 
-      if (result.token) {
-        await setSessionToken(result.token);
-      }
       returnedUser.type = actualType;
       setUser(returnedUser);
       setUserType(actualType);
       setIsAuthenticated(true);
-      await AsyncStorage.setItem('auth_user', JSON.stringify(returnedUser));
-      await persistLocalAuthBackup(returnedUser as User | Driver, password);
-      await saveRememberedLogin(email, password, actualType);
+
+      const persistenceTasks: Promise<unknown>[] = [
+        AsyncStorage.setItem('auth_user', JSON.stringify(returnedUser)),
+        persistLocalAuthBackup(returnedUser as User | Driver, password),
+        saveRememberedLogin(email, password, actualType),
+      ];
+
+      if (result.token) {
+        persistenceTasks.unshift(setSessionToken(result.token));
+      }
+
+      queueAuthPersistence(`login:${actualType}:${email}`, persistenceTasks);
       console.log('[Auth] Logged in as', actualType, ':', returnedUser.id, returnedUser.name);
       return actualType;
     }
     throw new Error(result.error ?? 'Mail adresiniz veya şifreniz hatalı');
-  }, [persistLocalAuthBackup, saveRememberedLogin]);
+  }, [persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin]);
 
   const loginAsCustomer = useCallback(async (email?: string, password?: string) => {
     if (!email || !password) {
@@ -1140,10 +1156,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
 
     try {
-      const backendReady = await ensureBackendAuthReady('customer-login', true);
-      if (!backendReady) {
-        console.log('[Auth] customer-login bootstrap not confirmed, trying direct login anyway');
-      }
+      void ensureBackendAuthReady('customer-login');
       console.log('[Auth] loginAsCustomer called for:', email, '(REST)');
       const result = await directFetch('/auth/login', { email, password, type: 'customer' });
       if (result && result.success === false && result.error) {
@@ -1221,18 +1234,24 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           referralCode: result.user.referralCode,
           freeRidesRemaining: result.user.freeRidesRemaining || 0,
         };
-        if (result.token) {
-          await setSessionToken(result.token);
-        }
         setUser(customer);
         setUserType('customer');
         setIsAuthenticated(true);
-        await AsyncStorage.setItem('auth_user', JSON.stringify(customer));
-        await AsyncStorage.setItem('auth_credentials', JSON.stringify({
-          type: 'customer', name, phone: normalizedPhone, email, gender, city, district, vehiclePlate,
-        }));
-        await persistLocalAuthBackup(customer, password);
-        await saveRememberedLogin(email, password, 'customer');
+
+        const persistenceTasks: Promise<unknown>[] = [
+          AsyncStorage.setItem('auth_user', JSON.stringify(customer)),
+          AsyncStorage.setItem('auth_credentials', JSON.stringify({
+            type: 'customer', name, phone: normalizedPhone, email, gender, city, district, vehiclePlate,
+          })),
+          persistLocalAuthBackup(customer, password),
+          saveRememberedLogin(email, password, 'customer'),
+        ];
+
+        if (result.token) {
+          persistenceTasks.unshift(setSessionToken(result.token));
+        }
+
+        queueAuthPersistence(`register-customer:${email}`, persistenceTasks);
         console.log('[Auth] Registered customer:', customer.id);
         return;
       }
@@ -1240,10 +1259,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     };
 
     try {
-      const backendReady = await ensureBackendAuthReady('customer-register', true);
-      if (!backendReady) {
-        console.log('[Auth] customer-register bootstrap not confirmed, trying direct registration anyway');
-      }
+      void ensureBackendAuthReady('customer-register');
       console.log('[Auth] registerCustomer called for:', email, '(REST)');
       const result = await directFetch('/auth/register-customer', payload);
       console.log('[Auth] REST register result:', JSON.stringify(result).substring(0, 500));
@@ -1257,7 +1273,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen tekrar deneyin.');
     }
-  }, [directFetch, ensureBackendAuthReady, persistLocalAuthBackup, saveRememberedLogin]);
+  }, [directFetch, ensureBackendAuthReady, persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin]);
 
   const registerDriver = useCallback(async (
     name: string,
@@ -1320,20 +1336,26 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           city: result.driver.city,
           district: result.driver.district,
         };
-        if (result.token) {
-          await setSessionToken(result.token);
-        }
         setUser(driver);
         setUserType('driver');
         setIsAuthenticated(true);
-        await AsyncStorage.setItem('auth_user', JSON.stringify(driver));
-        await AsyncStorage.setItem('auth_credentials', JSON.stringify({
-          type: 'driver', name, phone: normalizedPhone, email,
-          vehiclePlate, vehicleModel, vehicleColor,
-          partnerDriverName: partnerName, licenseIssueDate, driverCategory, city, district,
-        }));
-        await persistLocalAuthBackup(driver, password);
-        await saveRememberedLogin(email, password, 'driver');
+
+        const persistenceTasks: Promise<unknown>[] = [
+          AsyncStorage.setItem('auth_user', JSON.stringify(driver)),
+          AsyncStorage.setItem('auth_credentials', JSON.stringify({
+            type: 'driver', name, phone: normalizedPhone, email,
+            vehiclePlate, vehicleModel, vehicleColor,
+            partnerDriverName: partnerName, licenseIssueDate, driverCategory, city, district,
+          })),
+          persistLocalAuthBackup(driver, password),
+          saveRememberedLogin(email, password, 'driver'),
+        ];
+
+        if (result.token) {
+          persistenceTasks.unshift(setSessionToken(result.token));
+        }
+
+        queueAuthPersistence(`register-driver:${email}`, persistenceTasks);
         console.log('[Auth] Registered driver:', driver.id);
         return;
       }
@@ -1341,10 +1363,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     };
 
     try {
-      const backendReady = await ensureBackendAuthReady('driver-register', true);
-      if (!backendReady) {
-        console.log('[Auth] driver-register bootstrap not confirmed, trying direct registration anyway');
-      }
+      void ensureBackendAuthReady('driver-register');
       console.log('[Auth] registerDriver called for:', email, '(REST)');
       const result = await directFetch('/auth/register-driver', payload);
       if (result && result.success === false && result.error) {
@@ -1357,7 +1376,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen tekrar deneyin.');
     }
-  }, [directFetch, ensureBackendAuthReady, persistLocalAuthBackup, saveRememberedLogin]);
+  }, [directFetch, ensureBackendAuthReady, persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin]);
 
   const applyPromoCode = useCallback(async (code: string): Promise<boolean> => {
     if (code.toUpperCase() === PRICING.promoCode && !promoApplied) {

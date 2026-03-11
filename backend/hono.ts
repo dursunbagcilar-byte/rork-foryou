@@ -7,7 +7,21 @@ import { createContext } from "./trpc/create-context";
 import { db, initializeStore, bootstrapDbConfig, reinitializeStore, forceReloadStore, getPersistentStoreStatus } from "./db/store";
 import { setDbConfig, isDbConfigured, getCachedDbConfig, dbGet } from "./db/rork-db";
 import type { User, Driver, Business, BusinessMenuItem, Session } from "./db/types";
-import { checkRateLimit, getClientIP, isIPBlocked, trackSuspiciousActivity, sanitizeInput } from "./utils/security";
+import {
+  checkRateLimit,
+  getClientIP,
+  isIPBlocked,
+  trackSuspiciousActivity,
+  sanitizeInput,
+  validateEmail,
+  validatePassword,
+  hashPassword,
+  generateSecureToken,
+  verifyPassword,
+  checkLoginAttempt,
+  recordLoginFailure,
+  recordLoginSuccess,
+} from "./utils/security";
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from "../utils/phone";
 import { getSmsDeliveryNote, normalizePhoneForSms } from "../constants/support";
 import { AUTH_SMS_PROVIDER, generateAuthCode } from "./utils/auth-code";
@@ -783,7 +797,6 @@ app.post("/auth/send-verification-code", async (c) => {
     await ensureDbReady(dbEp, dbNs, dbTk);
 
     const body = await c.req.json();
-    const { sanitizeInput, validateEmail, checkLoginAttempt, recordLoginSuccess } = await import('./utils/security');
     const cleanEmail = typeof body.email === 'string' ? body.email.toLowerCase().trim() : '';
     const cleanName = sanitizeInput(typeof body.name === 'string' ? body.name : '');
     const cleanPhone = normalizeTurkishPhone(typeof body.phone === 'string' ? body.phone : '');
@@ -946,7 +959,6 @@ app.post("/auth/register-customer", async (c) => {
 
     const body = await c.req.json();
     console.log('[REST] register-customer start:', body.email, 'dbReady:', _dbReady, 'dbConfigured:', isDbConfigured());
-    const { sanitizeInput, validateEmail, validatePassword, hashPassword, generateSecureToken } = await import('./utils/security');
 
     const cleanName = sanitizeInput(body.name || '');
     const cleanPhone = normalizeTurkishPhone(body.phone || '');
@@ -1067,7 +1079,6 @@ app.post("/auth/register-driver", async (c) => {
 
     const body = await c.req.json();
     console.log('[REST] register-driver start:', body.email, 'dbReady:', _dbReady, 'dbConfigured:', isDbConfigured());
-    const { sanitizeInput, validateEmail, validatePassword, hashPassword, generateSecureToken } = await import('./utils/security');
 
     const cleanName = sanitizeInput(body.name || '');
     const cleanEmail = (body.email || '').toLowerCase().trim();
@@ -1175,7 +1186,6 @@ app.post("/auth/login", async (c) => {
 
     const body = await c.req.json();
     console.log('[REST] login:', body.email, 'type:', body.type, 'dbReady:', _dbReady, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
-    const { verifyPassword, generateSecureToken, checkLoginAttempt, recordLoginFailure, recordLoginSuccess } = await import('./utils/security');
 
     const cleanEmail = (body.email || '').toLowerCase().trim();
     if (!cleanEmail || !body.password) return c.json({ success: false, error: 'E-posta ve şifre gerekli', user: null, token: null });
