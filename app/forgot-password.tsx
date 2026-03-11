@@ -26,10 +26,11 @@ async function resolveApiBase(): Promise<string> {
   return normalizeApiBaseUrl(base);
 }
 
-async function restCall<T>(path: string, input: Record<string, unknown>): Promise<T> {
+async function restCall<T>(path: string, input: Record<string, unknown>, retryCount = 0): Promise<T> {
+  const MAX_RETRIES = 2;
   const apiBase = await resolveApiBase();
   const url = `${apiBase}${path}`;
-  console.log('[ForgotPwd] POST', url);
+  console.log('[ForgotPwd] POST', url, 'retry:', retryCount);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000);
   try {
@@ -41,19 +42,62 @@ async function restCall<T>(path: string, input: Record<string, unknown>): Promis
     });
     clearTimeout(timeoutId);
     const text = await response.text();
-    console.log('[ForgotPwd] Response status:', response.status, 'len:', text.length);
+    console.log('[ForgotPwd] Response status:', response.status, 'len:', text.length, 'retry:', retryCount);
+
+    const isHtmlFallback = text.includes('<!DOCTYPE html>') || text.includes('<html');
+    if (isHtmlFallback) {
+      if (retryCount < MAX_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, 1200 + (retryCount * 600)));
+        return restCall<T>(path, input, retryCount + 1);
+      }
+      throw new Error('Sunucu geçici olarak kullanılamıyor. Lütfen tekrar deneyin.');
+    }
+
     if (!response.ok) {
       let errorMsg = `HTTP ${response.status}`;
       try {
         const errData = JSON.parse(text);
-        if (errData?.error) errorMsg = typeof errData.error === 'string' ? errData.error : errData.error.message || errorMsg;
-      } catch {}
+        if (errData?.error) {
+          errorMsg = typeof errData.error === 'string' ? errData.error : errData.error.message || errorMsg;
+        }
+      } catch {
+        console.log('[ForgotPwd] Non-JSON error body:', text.substring(0, 180));
+      }
+
+      if ((response.status === 502 || response.status === 503 || response.status === 504) && retryCount < MAX_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, 1200 + (retryCount * 800)));
+        return restCall<T>(path, input, retryCount + 1);
+      }
+
       throw new Error(errorMsg);
     }
-    return JSON.parse(text) as T;
+
+    try {
+      return JSON.parse(text) as T;
+    } catch (parseError) {
+      console.log('[ForgotPwd] JSON parse error:', parseError, text.substring(0, 180));
+      if (retryCount < MAX_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, 1200 + (retryCount * 600)));
+        return restCall<T>(path, input, retryCount + 1);
+      }
+      throw new Error('Sunucu geçersiz bir yanıt döndürdü. Lütfen tekrar deneyin.');
+    }
   } catch (err: any) {
     clearTimeout(timeoutId);
-    if (err?.name === 'AbortError') throw new Error('Sunucu yanıt vermedi. Lütfen tekrar deneyin.');
+    if (err?.name === 'AbortError') {
+      if (retryCount < MAX_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, 1200 + (retryCount * 600)));
+        return restCall<T>(path, input, retryCount + 1);
+      }
+      throw new Error('Sunucu yanıt vermedi. Lütfen tekrar deneyin.');
+    }
+
+    const errorMessage = err instanceof Error ? err.message : '';
+    if ((errorMessage === 'Failed to fetch' || errorMessage === 'Network request failed') && retryCount < MAX_RETRIES) {
+      await new Promise((resolve) => setTimeout(resolve, 1200 + (retryCount * 600)));
+      return restCall<T>(path, input, retryCount + 1);
+    }
+
     throw err;
   }
 }
@@ -533,7 +577,7 @@ export default function ForgotPasswordScreen() {
       <View style={styles.resendRow}>
         <Text style={styles.resendLabel}>Kod gelmedi mi? </Text>
         <TouchableOpacity onPress={handleResendCode} disabled={loading}>
-          <Text style={styles.resendLink}>SMS'i Tekrar Gönder</Text>
+          <Text style={styles.resendLink}>SMS&apos;i Tekrar Gönder</Text>
         </TouchableOpacity>
       </View>
       <TouchableOpacity style={styles.backStepButton} onPress={() => animateTransition(() => setStep('email'))}>

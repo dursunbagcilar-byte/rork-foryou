@@ -510,6 +510,51 @@ function getCurrentStorageMode(): 'database' | 'snapshot' | 'memory' {
   return persistentStore.available ? 'snapshot' : 'memory';
 }
 
+async function recoverAuthStoreForRequest(
+  reason: string,
+  dbEp?: string,
+  dbNs?: string,
+  dbTk?: string,
+): Promise<void> {
+  const dbReady = await ensureDbReady(dbEp, dbNs, dbTk);
+  const initialPersistentStore = getPersistentStoreStatus();
+  const initialUsers = db.users.getAll().length;
+  const initialDrivers = db.drivers.getAll().length;
+
+  console.log('[SERVER] recoverAuthStoreForRequest start:', reason, 'dbReady:', dbReady, 'storageMode:', getCurrentStorageMode(), 'snapshotAvailable:', initialPersistentStore.available, 'users:', initialUsers, 'drivers:', initialDrivers);
+
+  try {
+    await initializeStore();
+  } catch (error) {
+    console.log('[SERVER] recoverAuthStoreForRequest initializeStore error:', reason, error);
+  }
+
+  const afterInitUsers = db.users.getAll().length;
+  const afterInitDrivers = db.drivers.getAll().length;
+  const afterInitPersistentStore = getPersistentStoreStatus();
+
+  if (afterInitPersistentStore.available && afterInitUsers === 0 && afterInitDrivers === 0) {
+    try {
+      console.log('[SERVER] recoverAuthStoreForRequest reinitialize from snapshot:', reason);
+      await reinitializeStore();
+    } catch (error) {
+      console.log('[SERVER] recoverAuthStoreForRequest reinitialize error:', reason, error);
+    }
+  }
+
+  if (dbReady && db.users.getAll().length === 0 && db.drivers.getAll().length === 0) {
+    try {
+      console.log('[SERVER] recoverAuthStoreForRequest force reload from DB:', reason);
+      await forceReloadStore();
+    } catch (error) {
+      console.log('[SERVER] recoverAuthStoreForRequest force reload error:', reason, error);
+    }
+  }
+
+  const finalPersistentStore = getPersistentStoreStatus();
+  console.log('[SERVER] recoverAuthStoreForRequest done:', reason, 'storageMode:', getCurrentStorageMode(), 'snapshotAvailable:', finalPersistentStore.available, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
+}
+
 async function loadSessionFromDb(sessionToken: string): Promise<Session | null> {
   try {
     const directSession = await dbGet<Record<string, unknown>>('sessions', buildSessionRecordId(sessionToken));
@@ -1177,15 +1222,11 @@ app.post("/auth/login", async (c) => {
     const dbEp = c.req.header('x-db-endpoint');
     const dbNs = c.req.header('x-db-namespace');
     const dbTk = c.req.header('x-db-token');
-    const dbReady = await ensureDbReady(dbEp, dbNs, dbTk);
+    await recoverAuthStoreForRequest('login', dbEp, dbNs, dbTk);
     const storageMode = getCurrentStorageMode();
-    if (!dbReady && storageMode === 'memory') {
-      console.log('[REST] login blocked - auth store unavailable, storageMode:', storageMode, 'dbConfigured:', isDbConfigured());
-      return c.json({ success: false, error: 'Giriş sistemi şu anda hazır değil. Lütfen biraz sonra tekrar deneyin.', user: null, token: null }, 503);
-    }
 
     const body = await c.req.json();
-    console.log('[REST] login:', body.email, 'type:', body.type, 'dbReady:', _dbReady, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
+    console.log('[REST] login:', body.email, 'type:', body.type, 'dbReady:', _dbReady, 'storageMode:', storageMode, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
 
     const cleanEmail = (body.email || '').toLowerCase().trim();
     if (!cleanEmail || !body.password) return c.json({ success: false, error: 'E-posta ve şifre gerekli', user: null, token: null });
@@ -1249,7 +1290,7 @@ app.post("/auth/session", async (c) => {
     const dbEp = c.req.header('x-db-endpoint');
     const dbNs = c.req.header('x-db-namespace');
     const dbTk = c.req.header('x-db-token');
-    await ensureDbReady(dbEp, dbNs, dbTk);
+    await recoverAuthStoreForRequest('session', dbEp, dbNs, dbTk);
 
     const authHeader = c.req.header('authorization');
     const body = await c.req.json().catch((): Record<string, unknown> => ({}));
@@ -1293,7 +1334,7 @@ app.post("/auth/send-reset-code", async (c) => {
     const dbEp = c.req.header('x-db-endpoint');
     const dbNs = c.req.header('x-db-namespace');
     const dbTk = c.req.header('x-db-token');
-    await ensureDbReady(dbEp, dbNs, dbTk);
+    await recoverAuthStoreForRequest('send-reset-code', dbEp, dbNs, dbTk);
 
     const body = await c.req.json();
     const rawIdentifier = typeof body.contact === 'string' && body.contact.trim()
@@ -1405,7 +1446,7 @@ app.post("/auth/verify-reset-code", async (c) => {
     const dbEp = c.req.header('x-db-endpoint');
     const dbNs = c.req.header('x-db-namespace');
     const dbTk = c.req.header('x-db-token');
-    await ensureDbReady(dbEp, dbNs, dbTk);
+    await recoverAuthStoreForRequest('verify-reset-code', dbEp, dbNs, dbTk);
 
     const body = await c.req.json();
     const rawIdentifier = typeof body.contact === 'string' && body.contact.trim()
@@ -1459,7 +1500,7 @@ app.post("/auth/reset-password", async (c) => {
     const dbEp = c.req.header('x-db-endpoint');
     const dbNs = c.req.header('x-db-namespace');
     const dbTk = c.req.header('x-db-token');
-    await ensureDbReady(dbEp, dbNs, dbTk);
+    await recoverAuthStoreForRequest('reset-password', dbEp, dbNs, dbTk);
 
     const body = await c.req.json();
     const rawIdentifier = typeof body.contact === 'string' && body.contact.trim()
