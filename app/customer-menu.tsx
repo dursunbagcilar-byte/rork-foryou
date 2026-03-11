@@ -8,6 +8,7 @@ import {
   StatusBar,
   Animated,
   Alert,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -67,6 +68,7 @@ export default function CustomerMenuScreen() {
   const { language, setLanguage, t } = useLanguage();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -139,6 +141,7 @@ export default function CustomerMenuScreen() {
   }, [setLanguage]);
 
   const bgColor = isDark ? colors.background : '#FFFFFF';
+  const shellBgColor = width > 430 ? (isDark ? '#0B1020' : '#EEF2F7') : bgColor;
   const textColor = isDark ? colors.text : '#1A1A1A';
   const textSecondary = isDark ? colors.textSecondary : '#666';
   const iconColor = isDark ? '#C9B8FF' : '#3D2C8D';
@@ -147,9 +150,18 @@ export default function CustomerMenuScreen() {
   const langBtnBg = isDark ? colors.card : '#F0F0F0';
   const langBtnActiveBg = isDark ? '#F5A623' : '#1A1A1A';
   const themeBtnBg = isDark ? colors.card : '#F0F0F0';
+  const usePhoneFrame = width > 430;
 
   return (
-    <View style={[styles.container, { backgroundColor: bgColor }]}>
+    <View style={[styles.container, { backgroundColor: shellBgColor }]}>
+      <View
+        style={[
+          styles.phoneFrame,
+          { backgroundColor: bgColor },
+          usePhoneFrame && styles.phoneFrameFloating,
+        ]}
+        testID="customer-menu-frame"
+      >
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
       <View style={[styles.inner, { paddingTop: Math.max(insets.top, 20) }]}>
         <Animated.View style={[styles.headerSection, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
@@ -280,6 +292,7 @@ export default function CustomerMenuScreen() {
           </TouchableOpacity>
         </View>
       </View>
+      </View>
     </View>
   );
 }
@@ -287,6 +300,27 @@ export default function CustomerMenuScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  phoneFrame: {
+    flex: 1,
+    width: '100%',
+    maxWidth: 430,
+    alignSelf: 'center' as const,
+    overflow: 'hidden' as const,
+  },
+  phoneFrameFloating: {
+    borderRadius: 30,
+    marginVertical: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(17, 24, 39, 0.08)',
+    shadowColor: '#0F172A',
+    shadowOffset: {
+      width: 0,
+      height: 12,
+    },
+    shadowOpacity: 0.14,
+    shadowRadius: 28,
+    elevation: 14,
   },
   inner: {
     flex: 1,
