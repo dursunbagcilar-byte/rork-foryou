@@ -319,19 +319,68 @@ async function loadAuthAccountByPhone(phone: string): Promise<LoadedPhoneAuthAcc
   let driver = normalizedPhone ? db.drivers.getByPhone(normalizedPhone) ?? null : null;
   let source: LoadedPhoneAuthAccount['source'] = 'memory';
 
-  console.log('[SERVER] loadAuthAccountByPhone initial:', normalizedPhone, 'user:', !!user, 'driver:', !!driver);
+  console.log('[SERVER] loadAuthAccountByPhone initial:', normalizedPhone, 'user:', !!user, 'driver:', !!driver, 'totalUsers:', db.users.getAll().length, 'totalDrivers:', db.drivers.getAll().length);
 
-  if (!normalizedPhone || user || driver) {
+  if (!normalizedPhone) {
+    return { normalizedPhone, user, driver, source };
+  }
+
+  if (user || driver) {
+    return { normalizedPhone, user, driver, source };
+  }
+
+  if (!user && !driver) {
+    const allUsers = db.users.getAll();
+    const allDrivers = db.drivers.getAll();
+    console.log('[SERVER] loadAuthAccountByPhone brute-force scan, users:', allUsers.length, 'drivers:', allDrivers.length);
+    for (const u of allUsers) {
+      const uPhone = normalizeTurkishPhone(u.phone);
+      if (uPhone === normalizedPhone) {
+        user = u;
+        console.log('[SERVER] loadAuthAccountByPhone found user via brute-force:', u.id, u.phone);
+        break;
+      }
+    }
+    for (const d of allDrivers) {
+      const dPhone = normalizeTurkishPhone(d.phone);
+      if (dPhone === normalizedPhone) {
+        driver = d;
+        console.log('[SERVER] loadAuthAccountByPhone found driver via brute-force:', d.id, d.phone);
+        break;
+      }
+    }
+  }
+
+  if (user || driver) {
     return { normalizedPhone, user, driver, source };
   }
 
   try {
     await initializeStore();
     await forceReloadStore();
-    user = db.users.getByPhone(normalizedPhone) ?? user;
-    driver = db.drivers.getByPhone(normalizedPhone) ?? driver;
+    user = db.users.getByPhone(normalizedPhone) ?? null;
+    driver = db.drivers.getByPhone(normalizedPhone) ?? null;
     source = 'reload';
-    console.log('[SERVER] loadAuthAccountByPhone after reload:', normalizedPhone, 'user:', !!user, 'driver:', !!driver);
+    console.log('[SERVER] loadAuthAccountByPhone after reload:', normalizedPhone, 'user:', !!user, 'driver:', !!driver, 'totalUsers:', db.users.getAll().length, 'totalDrivers:', db.drivers.getAll().length);
+
+    if (!user && !driver) {
+      const allUsers = db.users.getAll();
+      const allDrivers = db.drivers.getAll();
+      for (const u of allUsers) {
+        if (normalizeTurkishPhone(u.phone) === normalizedPhone) {
+          user = u;
+          console.log('[SERVER] loadAuthAccountByPhone found user after reload brute-force:', u.id);
+          break;
+        }
+      }
+      for (const d of allDrivers) {
+        if (normalizeTurkishPhone(d.phone) === normalizedPhone) {
+          driver = d;
+          console.log('[SERVER] loadAuthAccountByPhone found driver after reload brute-force:', d.id);
+          break;
+        }
+      }
+    }
   } catch (error) {
     console.log('[SERVER] loadAuthAccountByPhone reload error:', error);
   }
@@ -341,7 +390,7 @@ async function loadAuthAccountByPhone(phone: string): Promise<LoadedPhoneAuthAcc
   }
 
   try {
-    const { dbFindByPhone } = await import('./db/rork-db');
+    const { dbFindByPhone, dbLoadAll } = await import('./db/rork-db');
 
     const dbUser = await dbFindByPhone<Record<string, unknown>>('users', normalizedPhone);
     if (dbUser) {
@@ -353,14 +402,48 @@ async function loadAuthAccountByPhone(phone: string): Promise<LoadedPhoneAuthAcc
       }
     }
 
-    if (!user) {
-      const dbDriver = await dbFindByPhone<Record<string, unknown>>('drivers', normalizedPhone);
-      if (dbDriver) {
-        const driverId = dbDriver.rorkId || dbDriver._originalId || dbDriver.id;
-        if (typeof driverId === 'string') {
-          const hydratedDriver = { ...dbDriver, id: driverId } as Driver;
-          driver = hydratedDriver;
-          db.drivers.set(driverId, hydratedDriver);
+    const dbDriver = await dbFindByPhone<Record<string, unknown>>('drivers', normalizedPhone);
+    if (dbDriver) {
+      const driverId = dbDriver.rorkId || dbDriver._originalId || dbDriver.id;
+      if (typeof driverId === 'string') {
+        const hydratedDriver = { ...dbDriver, id: driverId } as Driver;
+        driver = hydratedDriver;
+        db.drivers.set(driverId, hydratedDriver);
+      }
+    }
+
+    if (!user && !driver) {
+      console.log('[SERVER] loadAuthAccountByPhone: direct query failed, trying full table scan from DB...');
+      const [allDbUsers, allDbDrivers] = await Promise.all([
+        dbLoadAll<Record<string, unknown>>('users'),
+        dbLoadAll<Record<string, unknown>>('drivers'),
+      ]);
+
+      for (const u of allDbUsers) {
+        const uPhone = normalizeTurkishPhone(typeof u.phone === 'string' ? u.phone : '');
+        if (uPhone === normalizedPhone) {
+          const userId = (u.rorkId || u._originalId || u.id) as string;
+          if (userId) {
+            const hydratedUser = { ...u, id: userId } as User;
+            user = hydratedUser;
+            db.users.set(userId, hydratedUser);
+            console.log('[SERVER] loadAuthAccountByPhone found user via DB full scan:', userId);
+          }
+          break;
+        }
+      }
+
+      for (const d of allDbDrivers) {
+        const dPhone = normalizeTurkishPhone(typeof d.phone === 'string' ? d.phone : '');
+        if (dPhone === normalizedPhone) {
+          const driverId = (d.rorkId || d._originalId || d.id) as string;
+          if (driverId) {
+            const hydratedDriver = { ...d, id: driverId } as Driver;
+            driver = hydratedDriver;
+            db.drivers.set(driverId, hydratedDriver);
+            console.log('[SERVER] loadAuthAccountByPhone found driver via DB full scan:', driverId);
+          }
+          break;
         }
       }
     }
@@ -1559,26 +1642,33 @@ app.post("/auth/send-login-code", async (c) => {
     const { user, driver, source } = await loadAuthAccountByPhone(cleanPhone);
     console.log('[REST] send-login-code account resolution:', cleanPhone, 'type:', requestedType, 'source:', source, 'user:', !!user, 'driver:', !!driver);
 
-    const account = requestedType === 'driver' ? driver : user;
+    let account = requestedType === 'driver' ? driver : user;
+    let actualType = requestedType;
+    if (!account) {
+      const crossTypeAccount = requestedType === 'driver' ? user : driver;
+      if (crossTypeAccount) {
+        account = crossTypeAccount;
+        actualType = requestedType === 'driver' ? 'customer' : 'driver';
+        console.log('[REST] send-login-code cross-type fallback:', cleanPhone, 'requested:', requestedType, 'found:', actualType);
+      }
+    }
     if (!account) {
       recordLoginFailure(lookupKey);
       return c.json({
         success: false,
-        error: requestedType === 'driver'
-          ? 'Bu telefon numarasıyla kayıtlı şoför hesabı bulunamadı.'
-          : 'Bu telefon numarasıyla kayıtlı müşteri hesabı bulunamadı.',
+        error: 'Bu telefon numarasıyla kayıtlı hesap bulunamadı. Lütfen kayıt olduğunuz telefon numarasını kontrol edin.',
         maskedPhone: maskPhoneNumber(cleanPhone),
         deliveryNote: getSmsDeliveryNote(maskPhoneNumber(cleanPhone)),
         smsProvider: AUTH_SMS_PROVIDER,
       });
     }
 
-    if (requestedType === 'driver' && driver?.isSuspended) {
+    if (actualType === 'driver' && driver?.isSuspended) {
       return c.json({ success: false, error: 'Hesabınız askıya alınmıştır. Yönetici ile iletişime geçin.', maskedPhone: maskPhoneNumber(cleanPhone), deliveryNote: getSmsDeliveryNote(maskPhoneNumber(cleanPhone)), smsProvider: AUTH_SMS_PROVIDER }, 403);
     }
 
     const code = generateAuthCode();
-    const codeKey = `login_${requestedType}_${cleanPhone}`;
+    const codeKey = `login_${actualType}_${cleanPhone}`;
     db.resetCodes.set(codeKey, code);
 
     const maskedPhone = maskPhoneNumber(cleanPhone);
@@ -1599,8 +1689,8 @@ app.post("/auth/send-login-code", async (c) => {
     }
 
     recordLoginSuccess(lookupKey);
-    console.log('[REST] send-login-code success:', cleanPhone, 'type:', requestedType, 'maskedPhone:', maskedPhone, 'messageId:', smsResult.messageId);
-    return c.json({ success: true, error: null, maskedPhone, deliveryNote, smsProvider: AUTH_SMS_PROVIDER });
+    console.log('[REST] send-login-code success:', cleanPhone, 'type:', actualType, 'requestedType:', requestedType, 'maskedPhone:', maskedPhone, 'messageId:', smsResult.messageId);
+    return c.json({ success: true, error: null, maskedPhone, deliveryNote, smsProvider: AUTH_SMS_PROVIDER, actualType });
   } catch (err: any) {
     console.log('[REST] send-login-code error:', err?.message ?? err);
     return c.json({ success: false, error: 'SMS kodu gönderilemedi. Lütfen tekrar deneyin.', maskedPhone: null, deliveryNote: getSmsDeliveryNote(null), smsProvider: AUTH_SMS_PROVIDER }, 500);
@@ -1629,25 +1719,43 @@ app.post("/auth/verify-login-code", async (c) => {
     const { user, driver, source } = await loadAuthAccountByPhone(cleanPhone);
     console.log('[REST] verify-login-code account resolution:', cleanPhone, 'type:', requestedType, 'source:', source, 'user:', !!user, 'driver:', !!driver);
 
-    const account = requestedType === 'driver' ? driver : user;
+    let account = requestedType === 'driver' ? driver : user;
+    let actualType = requestedType;
+    if (!account) {
+      const crossTypeAccount = requestedType === 'driver' ? user : driver;
+      if (crossTypeAccount) {
+        account = crossTypeAccount;
+        actualType = requestedType === 'driver' ? 'customer' : 'driver';
+        console.log('[REST] verify-login-code cross-type fallback:', cleanPhone, 'requested:', requestedType, 'found:', actualType);
+      }
+    }
     if (!account) {
       return c.json({
         success: false,
-        error: requestedType === 'driver'
-          ? 'Bu telefon numarasıyla kayıtlı şoför hesabı bulunamadı.'
-          : 'Bu telefon numarasıyla kayıtlı müşteri hesabı bulunamadı.',
+        error: 'Bu telefon numarasıyla kayıtlı hesap bulunamadı. Lütfen kayıt olduğunuz telefon numarasını kontrol edin.',
         user: null,
         token: null,
       });
     }
 
-    if (requestedType === 'driver' && driver?.isSuspended) {
+    if (actualType === 'driver' && driver?.isSuspended) {
       return c.json({ success: false, error: 'Hesabınız askıya alınmıştır. Yönetici ile iletişime geçin.', user: null, token: null }, 403);
     }
 
-    const codeKey = `login_${requestedType}_${cleanPhone}`;
-    const stored = await db.resetCodes.getAsync(codeKey);
+    const codeKey = `login_${actualType}_${cleanPhone}`;
+    let stored = await db.resetCodes.getAsync(codeKey);
     console.log('[REST] verify-login-code lookup:', codeKey, 'found:', !!stored);
+
+    if (!stored && actualType !== requestedType) {
+      const altCodeKey = `login_${requestedType}_${cleanPhone}`;
+      stored = await db.resetCodes.getAsync(altCodeKey);
+      console.log('[REST] verify-login-code alt lookup:', altCodeKey, 'found:', !!stored);
+      if (stored) {
+        db.resetCodes.delete(altCodeKey);
+        db.resetCodes.set(codeKey, stored.code);
+        stored = await db.resetCodes.getAsync(codeKey);
+      }
+    }
 
     if (!stored) {
       return c.json({ success: false, error: 'Doğrulama kodu bulunamadı veya süresi dolmuş.', user: null, token: null });
@@ -1671,15 +1779,15 @@ app.post("/auth/verify-login-code", async (c) => {
     const sessionRecord: Session = {
       token: sessionToken,
       userId: account.id,
-      userType: requestedType,
+      userType: actualType,
       createdAt: now.toISOString(),
       expiresAt: expiresAt.toISOString(),
     };
     await db.sessions.setSync(sessionToken, sessionRecord);
     await persistSessionDirect(sessionRecord);
 
-    console.log('[REST] verify-login-code success:', account.id, requestedType, 'phone:', cleanPhone);
-    return c.json({ success: true, error: null, user: { ...account, type: requestedType }, token: sessionToken });
+    console.log('[REST] verify-login-code success:', account.id, actualType, 'phone:', cleanPhone);
+    return c.json({ success: true, error: null, user: { ...account, type: actualType }, token: sessionToken });
   } catch (err: any) {
     console.log('[REST] verify-login-code error:', err?.message ?? err);
     return c.json({ success: false, error: 'Giriş doğrulanamadı. Lütfen tekrar deneyin.', user: null, token: null }, 500);

@@ -322,14 +322,43 @@ export async function dbFindByPhone<T>(table: string, phone: string): Promise<T 
     const trimmedPhone = phone.trim();
     const safeNormalizedPhone = escapeValue(normalizedPhone);
     const safeTrimmedPhone = escapeValue(trimmedPhone);
-    const whereClause = trimmedPhone && trimmedPhone !== normalizedPhone
-      ? `phone = '${safeNormalizedPhone}' OR phone = '${safeTrimmedPhone}'`
-      : `phone = '${safeNormalizedPhone}'`;
+
+    const withoutLeadingZero = normalizedPhone.startsWith('0') ? normalizedPhone.slice(1) : '';
+    const with90Prefix = normalizedPhone.startsWith('0') ? '90' + normalizedPhone.slice(1) : '';
+    const withPlus90 = with90Prefix ? '+' + with90Prefix : '';
+
+    let whereClause = `phone = '${safeNormalizedPhone}'`;
+    if (trimmedPhone && trimmedPhone !== normalizedPhone) {
+      whereClause += ` OR phone = '${safeTrimmedPhone}'`;
+    }
+    if (withoutLeadingZero) {
+      whereClause += ` OR phone = '${escapeValue(withoutLeadingZero)}'`;
+    }
+    if (with90Prefix) {
+      whereClause += ` OR phone = '${escapeValue(with90Prefix)}'`;
+    }
+    if (withPlus90) {
+      whereClause += ` OR phone = '${escapeValue(withPlus90)}'`;
+    }
+    whereClause += ` OR phone CONTAINS '${safeNormalizedPhone}'`;
 
     const results = await executeSql(`SELECT * FROM ${table} WHERE ${whereClause};`);
     if (results.length > 0 && results[0].result && results[0].result.length > 0) {
       console.log(`[RORK-DB] dbFindByPhone found record in ${table} for phone: ${normalizedPhone}`);
       return results[0].result[0] as T;
+    }
+
+    const fallbackResults = await executeSql(`SELECT * FROM ${table};`);
+    if (fallbackResults.length > 0 && Array.isArray(fallbackResults[0].result)) {
+      const matchedRecord = fallbackResults[0].result.find((record: any) => {
+        const recordPhone = typeof record?.phone === 'string' ? normalizeTurkishPhone(record.phone) : '';
+        return recordPhone === normalizedPhone;
+      });
+
+      if (matchedRecord) {
+        console.log(`[RORK-DB] dbFindByPhone found fallback record in ${table} for phone: ${normalizedPhone}`);
+        return matchedRecord as T;
+      }
     }
 
     console.log(`[RORK-DB] dbFindByPhone: no record in ${table} for phone: ${normalizedPhone}`);

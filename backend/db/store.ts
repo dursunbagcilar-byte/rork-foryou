@@ -1189,7 +1189,10 @@ export const db = {
     },
     getByPhone: (phone: string) => {
       const normalizedPhone = normalizeTurkishPhone(phone);
-      return Array.from(users.values()).find((u) => normalizeTurkishPhone(u.phone) === normalizedPhone);
+      if (!normalizedPhone) return undefined;
+      const found = Array.from(users.values()).find((u) => normalizeTurkishPhone(u.phone) === normalizedPhone);
+      console.log('[STORE] users.getByPhone lookup:', normalizedPhone, 'found:', found ? found.id : 'NOT FOUND', 'total users:', users.size);
+      return found;
     },
     getByEmail: (email: string) => {
       const lower = email.toLowerCase().trim();
@@ -1224,7 +1227,10 @@ export const db = {
     },
     getByPhone: (phone: string) => {
       const normalizedPhone = normalizeTurkishPhone(phone);
-      return Array.from(drivers.values()).find((d) => normalizeTurkishPhone(d.phone) === normalizedPhone);
+      if (!normalizedPhone) return undefined;
+      const found = Array.from(drivers.values()).find((d) => normalizeTurkishPhone(d.phone) === normalizedPhone);
+      console.log('[STORE] drivers.getByPhone lookup:', normalizedPhone, 'found:', found ? found.id : 'NOT FOUND', 'total drivers:', drivers.size);
+      return found;
     },
     getByEmail: (email: string) => {
       const indexed = driverEmailIndex.get(email.toLowerCase());
