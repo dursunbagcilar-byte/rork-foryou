@@ -406,10 +406,18 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
       if (res.status === 404) {
         let notFoundError = '';
+        let isApiResponse = false;
         try {
-          const errData = await res.json();
-          if (typeof errData?.error === 'string' && errData.error.trim()) {
-            notFoundError = errData.error;
+          const errText = await res.text();
+          console.log('[Auth] directFetch 404 body:', errText.substring(0, 300));
+          if (errText.trim().startsWith('{')) {
+            const errData = JSON.parse(errText);
+            isApiResponse = true;
+            if (typeof errData?.error === 'string' && errData.error.trim()) {
+              notFoundError = errData.error;
+            } else if (errData?.success === false) {
+              notFoundError = 'İşlem başarısız oldu.';
+            }
           }
         } catch (parseError) {
           console.log('[Auth] directFetch 404 parse error:', parseError);
@@ -418,6 +426,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         if (notFoundError) {
           console.log('[Auth] directFetch 404 with API error:', notFoundError);
           throw new Error(notFoundError);
+        }
+
+        if (isApiResponse) {
+          throw new Error('Sunucudan beklenmeyen yanıt alındı. Lütfen tekrar deneyin.');
         }
 
         if (retryCount < MAX_RETRIES) {

@@ -1570,7 +1570,7 @@ app.post("/auth/send-login-code", async (c) => {
         maskedPhone: maskPhoneNumber(cleanPhone),
         deliveryNote: getSmsDeliveryNote(maskPhoneNumber(cleanPhone)),
         smsProvider: AUTH_SMS_PROVIDER,
-      }, 404);
+      });
     }
 
     if (requestedType === 'driver' && driver?.isSuspended) {
@@ -1638,7 +1638,7 @@ app.post("/auth/verify-login-code", async (c) => {
           : 'Bu telefon numarasıyla kayıtlı müşteri hesabı bulunamadı.',
         user: null,
         token: null,
-      }, 404);
+      });
     }
 
     if (requestedType === 'driver' && driver?.isSuspended) {
@@ -1650,7 +1650,7 @@ app.post("/auth/verify-login-code", async (c) => {
     console.log('[REST] verify-login-code lookup:', codeKey, 'found:', !!stored);
 
     if (!stored) {
-      return c.json({ success: false, error: 'Doğrulama kodu bulunamadı veya süresi dolmuş.', user: null, token: null }, 404);
+      return c.json({ success: false, error: 'Doğrulama kodu bulunamadı veya süresi dolmuş.', user: null, token: null });
     }
 
     if (stored.attempts >= 5) {
