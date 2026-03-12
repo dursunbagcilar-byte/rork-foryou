@@ -2213,7 +2213,7 @@ export default function CustomerHomeScreen() {
               testID="ride-for-other-entry"
             >
               <View style={styles.rideForOtherEntryIcon}>
-                <Share2 size={16} color={rideForOtherDraft.enabled && rideForOtherDraft.recipient ? '#FFF' : Colors.dark.primary} />
+                <Share2 size={15} color="#16A34A" />
               </View>
               <View style={styles.rideForOtherEntryContent}>
                 <Text style={[styles.rideForOtherEntryTitle, rideForOtherDraft.enabled && rideForOtherDraft.recipient && styles.rideForOtherEntryTitleActive]}>Başkasına çağır</Text>
@@ -5824,16 +5824,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    gap: 12,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    gap: 10,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#E9EAF1',
   },
   rideForOtherEntryTop: {
-    marginTop: 16,
+    marginTop: 14,
     marginBottom: 0,
     shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 8 },
@@ -5846,10 +5846,10 @@ const styles = StyleSheet.create({
     borderColor: '#1E1671',
   },
   rideForOtherEntryIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: 'rgba(245,166,35,0.12)',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#EAF8EF',
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
   },
@@ -5857,7 +5857,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   rideForOtherEntryTitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800' as const,
     color: '#1A1A2E',
   },
@@ -5865,8 +5865,8 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   rideForOtherEntrySubtitle: {
-    marginTop: 3,
-    fontSize: 12,
+    marginTop: 2,
+    fontSize: 11,
     color: '#7A7A93',
   },
   rideForOtherEntrySubtitleActive: {
