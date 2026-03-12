@@ -2274,14 +2274,6 @@ export default function CustomerHomeScreen() {
                     </TouchableOpacity>
                   </View>
                 )}
-                {freeRidesLeft > 0 && (
-                  <View style={styles.freeRidesBannerNew}>
-                    <Gift size={18} color="#2ECC71" />
-                    <Text style={styles.freeRidesBannerTextNew}>
-                      {freeRidesLeft} ücretsiz sürüş hakkınız var!
-                    </Text>
-                  </View>
-                )}
                 <TouchableOpacity
                   style={styles.searchBarNew}
                   onPress={() => toggleSearch(true)}
