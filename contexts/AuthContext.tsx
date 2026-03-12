@@ -971,7 +971,28 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     return lowerMessage.includes('kullanıcı bulunamadı') ||
       lowerMessage.includes('hesap bulundu ancak şifre kaydı eksik') ||
       lowerMessage.includes('kayıt olduğunuz e-posta adresini kontrol edin') ||
-      lowerMessage.includes('bu e-posta adresiyle kayıtlı hesap bulunamadı');
+      lowerMessage.includes('bu e-posta adresiyle kayıtlı hesap bulunamadı') ||
+      lowerMessage.includes('noprocedurefound') ||
+      lowerMessage.includes('no procedure found on path') ||
+      (lowerMessage.includes('trpc') && lowerMessage.includes('loginbyemail'));
+  }, []);
+
+  const resolveRemoteRepairErrorMessage = useCallback((primaryMessage: string, fallbackMessage: string): string => {
+    const normalizedPrimary = (primaryMessage || '').trim();
+    const normalizedFallback = (fallbackMessage || '').trim();
+    const lowerPrimary = normalizedPrimary.toLowerCase();
+
+    if (
+      lowerPrimary.includes('noprocedurefound') ||
+      lowerPrimary.includes('no procedure found on path') ||
+      (lowerPrimary.includes('trpc') && lowerPrimary.includes('loginbyemail'))
+    ) {
+      const safeFallback = normalizedFallback || 'Kullanıcı bulunamadı. Lütfen kayıt olduğunuz e-posta adresini kontrol edin.';
+      console.log('[Auth] Replacing raw tRPC login route error with fallback message:', safeFallback);
+      return safeFallback;
+    }
+
+    return normalizedPrimary || normalizedFallback;
   }, []);
 
   const tryLocalLogin = useCallback(async (
@@ -1323,7 +1344,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           return await tryTrpcLogin(email, password, 'customer');
         } catch (trpcError) {
           console.log('[Auth] loginAsCustomer TRPC fallback error:', trpcError);
-          resolvedErrorMessage = trpcError instanceof Error ? trpcError.message : errorMessage;
+          const trpcErrorMessage = trpcError instanceof Error ? trpcError.message : errorMessage;
+          resolvedErrorMessage = resolveRemoteRepairErrorMessage(trpcErrorMessage, errorMessage);
         }
 
         if (shouldTryRemoteAccountRepair(resolvedErrorMessage)) {
@@ -1357,7 +1379,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
-  }, [directFetch, ensureBackendAuthReady, handleLoginSuccess, hasLocalLoginBackup, repairRemoteAccountFromBackup, shouldTryLocalAuthFallback, shouldTryRemoteAccountRepair, tryLocalLogin, tryTrpcLogin]);
+  }, [directFetch, ensureBackendAuthReady, handleLoginSuccess, hasLocalLoginBackup, repairRemoteAccountFromBackup, resolveRemoteRepairErrorMessage, shouldTryLocalAuthFallback, shouldTryRemoteAccountRepair, tryLocalLogin, tryTrpcLogin]);
 
   const loginAsDriver = useCallback(async (email?: string, password?: string) => {
     if (!email || !password) {
@@ -1385,7 +1407,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           return await tryTrpcLogin(email, password, 'driver');
         } catch (trpcError) {
           console.log('[Auth] loginAsDriver TRPC fallback error:', trpcError);
-          resolvedErrorMessage = trpcError instanceof Error ? trpcError.message : errorMessage;
+          const trpcErrorMessage = trpcError instanceof Error ? trpcError.message : errorMessage;
+          resolvedErrorMessage = resolveRemoteRepairErrorMessage(trpcErrorMessage, errorMessage);
         }
 
         if (shouldTryRemoteAccountRepair(resolvedErrorMessage)) {
@@ -1419,7 +1442,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
-  }, [directFetch, ensureBackendAuthReady, handleLoginSuccess, hasLocalLoginBackup, repairRemoteAccountFromBackup, shouldTryLocalAuthFallback, shouldTryRemoteAccountRepair, tryLocalLogin, tryTrpcLogin]);
+  }, [directFetch, ensureBackendAuthReady, handleLoginSuccess, hasLocalLoginBackup, repairRemoteAccountFromBackup, resolveRemoteRepairErrorMessage, shouldTryLocalAuthFallback, shouldTryRemoteAccountRepair, tryLocalLogin, tryTrpcLogin]);
 
   const registerCustomer = useCallback(async (name: string, phone: string, email: string, password: string, gender: 'male' | 'female', city: string, district: string, vehiclePlate?: string, referralCode?: string) => {
     const normalizedPhone = normalizeTurkishPhone(phone);
