@@ -38,6 +38,19 @@ interface ParsedResponse<T> {
   isInvalid: boolean;
 }
 
+function getApiPathVariants(path: string): string[] {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const variants = [normalizedPath];
+
+  if (normalizedPath.startsWith('/api/')) {
+    variants.push(normalizedPath.replace(/^\/api(?=\/)/, ''));
+  } else {
+    variants.push(`/api${normalizedPath}`);
+  }
+
+  return Array.from(new Set(variants.filter(Boolean)));
+}
+
 function getProjectFallbackBase(): string {
   const projectId = process.env.EXPO_PUBLIC_PROJECT_ID;
   const teamId = process.env.EXPO_PUBLIC_TEAM_ID;
@@ -61,6 +74,7 @@ function getWindowOriginBase(): string {
 
 async function resolveApiCandidates(path: string): Promise<string[]> {
   const candidates: string[] = [];
+  const pathVariants = getApiPathVariants(path);
 
   const pushCandidate = (value: string | null | undefined) => {
     const trimmedValue = value?.trim() ?? '';
@@ -73,28 +87,41 @@ async function resolveApiCandidates(path: string): Promise<string[]> {
     }
   };
 
+  const pushBaseCandidates = (base: string | null | undefined) => {
+    const normalizedBase = normalizeApiBaseUrl(base);
+    if (!normalizedBase) {
+      return;
+    }
+
+    pathVariants.forEach((variant) => {
+      pushCandidate(`${normalizedBase}${variant}`);
+    });
+  };
+
   const currentBase = normalizeApiBaseUrl(getBaseUrl());
   if (currentBase) {
-    pushCandidate(`${currentBase}${path}`);
+    pushBaseCandidates(currentBase);
   }
 
   if (!currentBase) {
     const awaitedBase = normalizeApiBaseUrl(await waitForBaseUrl(8000));
     if (awaitedBase) {
-      pushCandidate(`${awaitedBase}${path}`);
+      pushBaseCandidates(awaitedBase);
     }
   }
 
   const projectFallbackBase = getProjectFallbackBase();
   if (projectFallbackBase) {
-    pushCandidate(`${projectFallbackBase}${path}`);
+    pushBaseCandidates(projectFallbackBase);
   }
 
-  pushCandidate(buildApiUrl(path));
+  pathVariants.forEach((variant) => {
+    pushCandidate(buildApiUrl(variant));
+  });
 
   const windowOriginBase = getWindowOriginBase();
   if (windowOriginBase) {
-    pushCandidate(`${windowOriginBase}${path}`);
+    pushBaseCandidates(windowOriginBase);
   }
 
   if (candidates.length === 0) {
