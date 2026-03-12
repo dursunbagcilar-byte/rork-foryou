@@ -2213,7 +2213,7 @@ export default function CustomerHomeScreen() {
               testID="ride-for-other-entry"
             >
               <View style={styles.rideForOtherEntryIcon}>
-                <Share2 size={15} color="#16A34A" />
+                <Share2 size={14} color="#16A34A" />
               </View>
               <View style={styles.rideForOtherEntryContent}>
                 <Text style={[styles.rideForOtherEntryTitle, rideForOtherDraft.enabled && rideForOtherDraft.recipient && styles.rideForOtherEntryTitleActive]}>Başkasına çağır</Text>
@@ -2223,7 +2223,7 @@ export default function CustomerHomeScreen() {
                     : 'Bir yakınınız için yolculuk oluşturun'}
                 </Text>
               </View>
-              <ChevronRight size={18} color={rideForOtherDraft.enabled && rideForOtherDraft.recipient ? '#FFF' : '#7A7A93'} />
+              <ChevronRight size={16} color={rideForOtherDraft.enabled && rideForOtherDraft.recipient ? '#FFF' : '#7A7A93'} />
             </TouchableOpacity>
           </View>
         </View>
@@ -5816,10 +5816,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    gap: 10,
+    borderRadius: 15,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    gap: 8,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#E9EAF1',
@@ -5838,9 +5838,9 @@ const styles = StyleSheet.create({
     borderColor: '#1E1671',
   },
   rideForOtherEntryIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: '#EAF8EF',
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
@@ -5849,7 +5849,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   rideForOtherEntryTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '800' as const,
     color: '#1A1A2E',
   },
@@ -5857,8 +5857,8 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   rideForOtherEntrySubtitle: {
-    marginTop: 2,
-    fontSize: 11,
+    marginTop: 1,
+    fontSize: 10,
     color: '#7A7A93',
   },
   rideForOtherEntrySubtitleActive: {
