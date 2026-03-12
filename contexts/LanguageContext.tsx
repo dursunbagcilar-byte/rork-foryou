@@ -32,6 +32,10 @@ const translations = {
     earn_points_desc: 'dönüşsün',
     earn_points_link: 'Detaya git',
     support_link: 'Detaya git',
+    invite_friends_subtitle: 'Arkadaşını davet et',
+    invite_friends_title: 'Davet et\n2 ücretsiz',
+    invite_friends_desc: 'sürüş kazanın',
+    invite_friends_link: 'Davet ekranını aç',
     theme: 'Tema',
     dark_mode: 'Karanlık Mod',
     light_mode: 'Aydınlık Mod',
@@ -63,6 +67,10 @@ const translations = {
     earn_points_desc: 'start earning',
     earn_points_link: 'Details',
     support_link: 'Details',
+    invite_friends_subtitle: 'Invite your friends',
+    invite_friends_title: 'Invite & earn\n2 free rides',
+    invite_friends_desc: 'for both of you',
+    invite_friends_link: 'Open invite screen',
     theme: 'Theme',
     dark_mode: 'Dark Mode',
     light_mode: 'Light Mode',
@@ -98,5 +106,10 @@ export const [LanguageProvider, useLanguage] = createContextHook(() => {
     return translations[language][key] ?? key;
   }, [language]);
 
-  return { language, setLanguage, t, isLoading };
+  return useMemo(() => ({
+    language,
+    setLanguage,
+    t,
+    isLoading,
+  }), [isLoading, language, setLanguage, t]);
 });

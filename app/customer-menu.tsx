@@ -123,6 +123,7 @@ export default function CustomerMenuScreen() {
       );
       return;
     }
+    console.log('[CustomerMenu] Navigating to route:', route);
     router.back();
     setTimeout(() => {
       router.push(route as any);
@@ -227,15 +228,18 @@ export default function CustomerMenuScreen() {
                 <Text style={styles.miniCardLink}>{t('support_link')}</Text>
               </TouchableOpacity>
             </View>
-            <View style={[styles.miniCard, { backgroundColor: isDark ? '#1E1A2E' : '#F3EEFF' }]}>
+            <TouchableOpacity
+              style={[styles.miniCard, { backgroundColor: isDark ? '#1E1A2E' : '#F3EEFF' }]}
+              activeOpacity={0.82}
+              onPress={() => handleMenuPress('/(customer-tabs)/dashboard/invite')}
+              testID="customer-menu-invite-card"
+            >
               <Award size={20} color={isDark ? '#C9B8FF' : '#6B4EAE'} strokeWidth={2} />
-              <Text style={[styles.miniCardSubtitle, { color: isDark ? '#C9B8FF' : '#6B4EAE' }]}>{t('earn_points_subtitle')}</Text>
-              <Text style={[styles.miniCardTitle, { color: isDark ? '#FFFFFF' : '#3D2C8D' }]}>{t('earn_points_title')}</Text>
-              <Text style={[styles.miniCardDesc, { color: isDark ? '#9595A8' : '#6B4EAE' }]}>{t('earn_points_desc')}</Text>
-              <TouchableOpacity activeOpacity={0.7} onPress={() => handleMenuPress('/(customer-tabs)/profile/campaigns')}>
-                <Text style={[styles.miniCardLink, { color: isDark ? '#F5A623' : '#3D2C8D' }]}>{t('earn_points_link')}</Text>
-              </TouchableOpacity>
-            </View>
+              <Text style={[styles.miniCardSubtitle, { color: isDark ? '#C9B8FF' : '#6B4EAE' }]}>{t('invite_friends_subtitle' as TranslationKey)}</Text>
+              <Text style={[styles.miniCardTitle, { color: isDark ? '#FFFFFF' : '#3D2C8D' }]}>{t('invite_friends_title' as TranslationKey)}</Text>
+              <Text style={[styles.miniCardDesc, { color: isDark ? '#9595A8' : '#6B4EAE' }]}>{t('invite_friends_desc' as TranslationKey)}</Text>
+              <Text style={[styles.miniCardLink, { color: isDark ? '#F5A623' : '#3D2C8D' }]}>{t('invite_friends_link' as TranslationKey)}</Text>
+            </TouchableOpacity>
           </View>
 
           <View style={styles.themeSection}>
