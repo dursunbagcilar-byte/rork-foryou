@@ -8,6 +8,12 @@ interface ManifestWithExtra {
   extra?: Record<string, unknown>;
 }
 
+interface ConstantsWithExtraSources {
+  manifest2?: ManifestWithExtra | null;
+  manifest?: ManifestWithExtra | null;
+  __unsafeNoLongerMutatedManifest?: ManifestWithExtra | null;
+}
+
 function normalizeEnvValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -34,15 +40,23 @@ function readExpoConfigExtra(key: string): string {
   }
 
   try {
-    const constantsWithManifest = Constants as unknown as {
-      manifest2?: ManifestWithExtra | null;
-    };
-    const manifestValue = normalizeEnvValue(constantsWithManifest.manifest2?.extra?.[key]);
+    const constantsWithExtras = Constants as unknown as ConstantsWithExtraSources;
+    const manifest2Value = normalizeEnvValue(constantsWithExtras.manifest2?.extra?.[key]);
+    if (manifest2Value) {
+      return manifest2Value;
+    }
+
+    const manifestValue = normalizeEnvValue(constantsWithExtras.manifest?.extra?.[key]);
     if (manifestValue) {
       return manifestValue;
     }
+
+    const unsafeManifestValue = normalizeEnvValue(constantsWithExtras.__unsafeNoLongerMutatedManifest?.extra?.[key]);
+    if (unsafeManifestValue) {
+      return unsafeManifestValue;
+    }
   } catch (error) {
-    console.log('[Env] Constants.manifest2 read error for key:', key, error);
+    console.log('[Env] Constants manifest read error for key:', key, error);
   }
 
   return '';
