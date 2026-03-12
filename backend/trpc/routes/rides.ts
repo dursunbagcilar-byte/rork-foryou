@@ -122,8 +122,11 @@ export const ridesRouter = createTRPCRouter({
       }, 5 * 60 * 1000);
 
       const onlineDrivers = db.drivers.getOnlineByCity(input.city);
+      const driverRideInfo = input.isFreeRide
+        ? `Ücretsiz sürüş • ${input.pickupAddress} → ${input.dropoffAddress}`
+        : `₺${input.price.toFixed(0)} • ${input.pickupAddress} → ${input.dropoffAddress}`;
       for (const driver of onlineDrivers) {
-        void sendPushToUser(driver.id, '🔔 Yeni Yolculuk Talebi!', `${input.pickupAddress} → ${input.dropoffAddress}`, { type: 'new_ride_request', rideId: id });
+        void sendPushToUser(driver.id, '🔔 Yeni Yolculuk Talebi!', driverRideInfo, { type: 'new_ride_request', rideId: id, isFreeRide: input.isFreeRide ? 'true' : 'false' });
       }
 
       return { success: true, ride };

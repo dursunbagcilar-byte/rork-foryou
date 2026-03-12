@@ -23,8 +23,7 @@ import { useLocation } from '@/hooks/useLocation';
 import { ISTANBUL_REGION, generateHeatPoints } from '@/constants/mockData';
 import type { HeatPoint } from '@/constants/mockData';
 import { getCityByName, getCityRegion } from '@/constants/cities';
-import { calculatePrice, calculateDistance, estimateDuration } from '@/constants/pricing';
-import type { VehicleType } from '@/constants/pricing';
+import { calculateDistance, estimateDuration } from '@/constants/pricing';
 import { getVehicleImageUrl } from '@/constants/vehicleImages';
 import type { Driver } from '@/constants/mockData';
 import { buildApiUrl, getSessionToken, trpc } from '@/lib/trpc';
@@ -313,11 +312,14 @@ export default function DriverHomeScreen() {
 
   const activeOrPendingRide = activeRideQuery.data ?? pendingRide;
   const isBusinessDelivery = activeOrPendingRide?.orderType === 'business_delivery' || activeOrPendingRide?.orderType === 'custom_delivery';
+  const currentRideIsFree = activeOrPendingRide?.isFreeRide ?? false;
+  const currentRidePrice = activeOrPendingRide?.price ?? _currentRidePrice;
   const pickupLocationTitle = isBusinessDelivery ? 'İşletme Noktası' : 'Müşteri Konumu';
   const inlineRequestTitle = isBusinessDelivery ? 'Yeni İşletme Siparişi!' : 'Yeni Yolculuk Talebi!';
   const pickupActionLabel = isBusinessDelivery ? 'Siparişi Aldım' : 'Müşteriyi Aldım';
   const pickupWaitingLabel = isBusinessDelivery ? 'Sipariş sizi bekliyor' : 'Müşteri sizi bekliyor';
   const pickupTravellingLabel = isBusinessDelivery ? 'İşletmeye gidiliyor' : 'Müşteriye gidiliyor';
+  const safeDrivingReminder = 'Müşterimizi en güvenli şekilde evine ulaştır. Trafikte son derece dikkatli ol, unutma: acelen yok.';
 
   const pickupCoord = React.useMemo(() => {
     if (pendingRide?.pickupLat && pendingRide?.pickupLng) {
@@ -474,8 +476,12 @@ export default function DriverHomeScreen() {
     return () => clearInterval(locationInterval);
   }, [isOnline, driver?.id, gpsLocation, fallbackRegion.latitude, fallbackRegion.longitude, locationSendInterval, updateLocationMutation]);
 
-  const pickupAddress = pickupAddressResolved || pendingRide?.pickupAddress || (driver?.district ? `${driver.district} Merkez` : (isBusinessDelivery ? 'İşletme Adresi' : 'Alış Noktası'));
-  const dropoffAddress = dropoffAddressResolved || pendingRide?.dropoffAddress || 'Varış Noktası';
+  const pickupAddress = pickupAddressResolved || pendingRide?.pickupAddress || activeRideQuery.data?.pickupAddress || (driver?.district ? `${driver.district} Merkez` : (isBusinessDelivery ? 'İşletme Adresi' : 'Alış Noktası'));
+  const dropoffAddress = dropoffAddressResolved || pendingRide?.dropoffAddress || activeRideQuery.data?.dropoffAddress || 'Varış Noktası';
+  const fallbackDistanceKm = calculateDistance(pickupCoord.latitude, pickupCoord.longitude, dropoffCoord.latitude, dropoffCoord.longitude);
+  const currentRideDistanceLabel = activeOrPendingRide?.distance ?? `${fallbackDistanceKm} km`;
+  const currentRideDurationLabel = activeOrPendingRide?.duration ?? `~${estimateDuration(fallbackDistanceKm)} dk`;
+  const currentRidePriceLabel = currentRideIsFree ? 'Ücretsiz' : `₺${currentRidePrice.toFixed(0)}`;
 
   useEffect(() => {
     if (dropoffCoord) {
@@ -960,13 +966,6 @@ export default function DriverHomeScreen() {
   }, [voiceEnabled, voiceDisclaimerShown, speakInstruction, safeSpeechStop]);
 
   const handleAcceptRide = useCallback(async () => {
-    setHasRideRequest(false);
-    setShowCourteousWarning(true);
-  }, []);
-
-  const handleCourteousWarningOk = useCallback(async () => {
-    setShowCourteousWarning(false);
-
     if (!currentRideId || !driver) {
       Alert.alert('Hata', 'Sipariş bilgisi bulunamadı.');
       return;
@@ -988,7 +987,7 @@ export default function DriverHomeScreen() {
         return;
       }
 
-      console.log('[Driver] Ride accepted on backend:', currentRideId);
+      console.log('[Driver] Ride accepted on backend:', currentRideId, 'isFreeRide:', currentRideIsFree);
     } catch (err) {
       console.log('[Driver] Accept ride backend error:', err);
       Alert.alert('Sipariş alınamadı', 'Sipariş başka bir kuryeye geçti veya süresi doldu.');
@@ -998,10 +997,21 @@ export default function DriverHomeScreen() {
       return;
     }
 
+    setHasRideRequest(false);
     setRideAccepted(true);
     setArrivedAtPickup(false);
+    setShowCourteousWarning(true);
     spokenStepsRef.current = new Set();
     Animated.timing(requestAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+  }, [currentRideId, driver, acceptRideMutation, requestAnim, currentRideIsFree]);
+
+  const handleCourteousWarningOk = useCallback(async () => {
+    setShowCourteousWarning(false);
+
+    if (!currentRideId) {
+      Alert.alert('Hata', 'Sipariş bilgisi bulunamadı.');
+      return;
+    }
 
     const driverOrigin = { latitude: mapRegion.latitude, longitude: mapRegion.longitude };
     const path = await fetchDirections(driverOrigin, pickupCoord);
@@ -1014,7 +1024,7 @@ export default function DriverHomeScreen() {
       };
       speakInstruction(isBusinessDelivery ? 'Sipariş kabul edildi. İşletmeye doğru yola çıkılıyor.' : 'Yolculuk kabul edildi. Müşteriye doğru yola çıkılıyor.');
     }
-  }, [requestAnim, fetchDirections, speakInstruction, mapRegion.latitude, mapRegion.longitude, pickupCoord, currentRideId, driver, acceptRideMutation, isBusinessDelivery]);
+  }, [fetchDirections, speakInstruction, mapRegion.latitude, mapRegion.longitude, pickupCoord, currentRideId, isBusinessDelivery]);
 
   const handleDeclineRide = useCallback(async () => {
     if (currentRideId && driver?.id && isBusinessDelivery) {
@@ -1752,40 +1762,40 @@ export default function DriverHomeScreen() {
                         </TouchableOpacity>
                       </View>
                     </View>
-                    {(() => {
-                      const dist = calculateDistance(pickupCoord.latitude, pickupCoord.longitude, dropoffCoord.latitude, dropoffCoord.longitude);
-                      const vehicleType: VehicleType = driver?.driverCategory === 'scooter' ? 'scooter' : driver?.driverCategory === 'driver' ? 'car' : 'motorcycle';
-                      const price = calculatePrice(dist, vehicleType);
-                      const duration = estimateDuration(dist);
-                      return (
-                        <>
-                          <View style={styles.inlineFareRow}>
-                            <View style={styles.inlineFareItem}>
-                              <Banknote size={16} color={Colors.dark.primary} />
-                              <Text style={styles.inlineFareValue}>₺{price}</Text>
-                            </View>
-                            <View style={styles.inlineFareDivider} />
-                            <View style={styles.inlineFareItem}>
-                              <Route size={14} color="#2ECC71" />
-                              <Text style={styles.inlineFareSmall}>{dist} km</Text>
-                            </View>
-                            <View style={styles.inlineFareDivider} />
-                            <View style={styles.inlineFareItem}>
-                              <Clock size={14} color="#3498DB" />
-                              <Text style={styles.inlineFareSmall}>~{duration} dk</Text>
-                            </View>
-                          </View>
-                          <View style={styles.inlineRequestButtons}>
-                            <TouchableOpacity style={styles.inlineDeclineBtn} onPress={handleDeclineRide} activeOpacity={0.7}>
-                              <Text style={styles.inlineDeclineBtnText}>Reddet</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.inlineAcceptBtn} onPress={handleAcceptRide} activeOpacity={0.85}>
-                              <Text style={styles.inlineAcceptBtnText}>Kabul Et</Text>
-                            </TouchableOpacity>
-                          </View>
-                        </>
-                      );
-                    })()}
+                    {currentRideIsFree && (
+                      <View style={styles.freeRideDriverBanner} testID="driver-free-ride-banner">
+                        <View style={styles.freeRideDriverBadge}>
+                          <Text style={styles.freeRideDriverBadgeText}>ÜCRETSİZ SÜRÜŞ</Text>
+                        </View>
+                        <Text style={styles.freeRideDriverBannerText}>
+                          Bu yolculuk promosyon kapsamında. Ücret müşteriye yansıtılmayacak.
+                        </Text>
+                      </View>
+                    )}
+                    <View style={styles.inlineFareRow}>
+                      <View style={styles.inlineFareItem}>
+                        <Banknote size={16} color={currentRideIsFree ? Colors.dark.success : Colors.dark.primary} />
+                        <Text style={[styles.inlineFareValue, currentRideIsFree && styles.inlineFareValueFree]}>{currentRidePriceLabel}</Text>
+                      </View>
+                      <View style={styles.inlineFareDivider} />
+                      <View style={styles.inlineFareItem}>
+                        <Route size={14} color="#2ECC71" />
+                        <Text style={styles.inlineFareSmall}>{currentRideDistanceLabel}</Text>
+                      </View>
+                      <View style={styles.inlineFareDivider} />
+                      <View style={styles.inlineFareItem}>
+                        <Clock size={14} color="#3498DB" />
+                        <Text style={styles.inlineFareSmall}>{currentRideDurationLabel}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.inlineRequestButtons}>
+                      <TouchableOpacity style={styles.inlineDeclineBtn} onPress={handleDeclineRide} activeOpacity={0.7}>
+                        <Text style={styles.inlineDeclineBtnText}>Reddet</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.inlineAcceptBtn} onPress={handleAcceptRide} activeOpacity={0.85}>
+                        <Text style={styles.inlineAcceptBtnText}>Kabul Et</Text>
+                      </TouchableOpacity>
+                    </View>
                   </Animated.View>
                 )}
 
@@ -1922,6 +1932,22 @@ export default function DriverHomeScreen() {
               <View style={styles.arrivedBanner}>
                 <Text style={styles.arrivedEmoji}>🏁</Text>
                 <Text style={styles.arrivedText}>Varış noktasına ulaştınız!</Text>
+              </View>
+            )}
+
+            <View style={styles.safeDriveBanner} testID="driver-safe-drive-banner">
+              <AlertTriangle size={16} color="#C96A00" />
+              <Text style={styles.safeDriveBannerText}>{safeDrivingReminder}</Text>
+            </View>
+
+            {currentRideIsFree && (
+              <View style={styles.freeRideDriverBanner}>
+                <View style={styles.freeRideDriverBadge}>
+                  <Text style={styles.freeRideDriverBadgeText}>ÜCRETSİZ SÜRÜŞ</Text>
+                </View>
+                <Text style={styles.freeRideDriverBannerText}>
+                  Bu yolculuk promosyon kapsamında. Müşteriye ücret yansıtılmaz.
+                </Text>
               </View>
             )}
 
@@ -2106,9 +2132,9 @@ export default function DriverHomeScreen() {
             <View style={styles.courteousIconRow}>
               <AlertTriangle size={32} color="#FF9500" />
             </View>
-            <Text style={styles.courteousTitle}>Değerli Şoförümüz</Text>
+            <Text style={styles.courteousTitle}>Güvenli Sürüş Uyarısı</Text>
             <Text style={styles.courteousMessage}>
-              Müşterilerimiz bizim için çok kıymetli. Eğer bir beyefendi ile hanımefendi araca biniyorsa araç içi dikiz aynasını yukarı kaldırın!
+              {safeDrivingReminder}
             </Text>
             <TouchableOpacity
               style={styles.courteousButton}
@@ -2611,6 +2637,35 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#1A1A2E',
   },
+  freeRideDriverBanner: {
+    backgroundColor: '#ECFDF3',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(46,204,113,0.2)',
+    gap: 8,
+  },
+  freeRideDriverBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#16A34A',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  freeRideDriverBadgeText: {
+    fontSize: 11,
+    fontWeight: '800' as const,
+    color: '#FFFFFF',
+    letterSpacing: 0.6,
+  },
+  freeRideDriverBannerText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#166534',
+    fontWeight: '600' as const,
+  },
   inlineFareRow: {
     flexDirection: 'row',
     backgroundColor: '#FFF',
@@ -2631,6 +2686,9 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800' as const,
     color: Colors.dark.primary,
+  },
+  inlineFareValueFree: {
+    color: '#16A34A',
   },
   inlineFareSmall: {
     fontSize: 14,
@@ -2755,6 +2813,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20, paddingTop: 12, paddingBottom: 30, alignItems: 'center',
     shadowColor: '#000', shadowOffset: { width: 0, height: -6 },
     shadowOpacity: 0.12, shadowRadius: 16, elevation: 12,
+  },
+  safeDriveBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    width: '100%',
+    backgroundColor: '#FFF7ED',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(249,115,22,0.18)',
+  },
+  safeDriveBannerText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#9A3412',
+    fontWeight: '700' as const,
   },
   activeRideHeader: {
     flexDirection: 'row', alignItems: 'center', gap: 14, width: '100%', marginBottom: 16,
