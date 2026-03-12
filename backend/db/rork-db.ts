@@ -269,13 +269,31 @@ export async function dbGet<T>(table: string, id: string): Promise<T | null> {
 export async function dbFindByEmail<T>(table: string, email: string): Promise<T | null> {
   if (!isConfigured()) return null;
   try {
-    const safeEmail = escapeValue(email.toLowerCase().trim());
-    const results = await executeSql(`SELECT * FROM ${table} WHERE email = '${safeEmail}';`);
+    const normalizedEmail = email.toLowerCase().trim();
+    const safeEmail = escapeValue(normalizedEmail);
+    const results = await executeSql(
+      `SELECT * FROM ${table} WHERE email = '${safeEmail}' OR _originalEmail = '${safeEmail}';`
+    );
     if (results.length > 0 && results[0].result && results[0].result.length > 0) {
-      console.log(`[RORK-DB] dbFindByEmail found record in ${table} for email: ${email}`);
+      console.log(`[RORK-DB] dbFindByEmail found exact record in ${table} for email: ${normalizedEmail}`);
       return results[0].result[0] as T;
     }
-    console.log(`[RORK-DB] dbFindByEmail: no record in ${table} for email: ${email}`);
+
+    const fallbackResults = await executeSql(`SELECT * FROM ${table};`);
+    if (fallbackResults.length > 0 && Array.isArray(fallbackResults[0].result)) {
+      const matchedRecord = fallbackResults[0].result.find((record: any) => {
+        const recordEmail = typeof record?.email === 'string' ? record.email.toLowerCase().trim() : '';
+        const originalEmail = typeof record?._originalEmail === 'string' ? record._originalEmail.toLowerCase().trim() : '';
+        return recordEmail === normalizedEmail || originalEmail === normalizedEmail;
+      });
+
+      if (matchedRecord) {
+        console.log(`[RORK-DB] dbFindByEmail found fallback record in ${table} for email: ${normalizedEmail}`);
+        return matchedRecord as T;
+      }
+    }
+
+    console.log(`[RORK-DB] dbFindByEmail: no record in ${table} for email: ${normalizedEmail}`);
     return null;
   } catch (err) {
     console.log(`[RORK-DB] dbFindByEmail error for ${table}/${email}:`, err);

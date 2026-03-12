@@ -1276,6 +1276,27 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     return handleLoginSuccess(result, normalizedEmail, password, 'REMOTE_REPAIR');
   }, [directFetch, getLocalAuthBackup, handleLoginSuccess]);
 
+  const tryTrpcLogin = useCallback(async (
+    email: string,
+    password: string,
+    requestedType: Exclude<UserType, null>
+  ): Promise<UserType> => {
+    const normalizedEmail = normalizeAuthEmail(email);
+    console.log('[Auth] tryTrpcLogin start:', normalizedEmail, 'type:', requestedType);
+
+    const result = await trpcClient.auth.loginByEmail.mutate({
+      email: normalizedEmail,
+      password,
+      type: requestedType,
+    });
+
+    if (result && result.success === false && result.error) {
+      throw new Error(result.error);
+    }
+
+    return handleLoginSuccess(result, normalizedEmail, password, 'TRPC');
+  }, [handleLoginSuccess]);
+
   const loginAsCustomer = useCallback(async (email?: string, password?: string) => {
     if (!email || !password) {
       throw new Error('E-posta ve şifre gerekli');
@@ -1295,35 +1316,48 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     } catch (err: any) {
       console.log('[Auth] loginAsCustomer error:', err?.message);
       const errorMessage = err instanceof Error ? err.message : '';
+      let resolvedErrorMessage = errorMessage;
 
       if (shouldTryRemoteAccountRepair(errorMessage)) {
-        const hasLocalBackup = await hasLocalLoginBackup(email);
-        console.log('[Auth] loginAsCustomer remote repair availability:', hasLocalBackup, 'email:', email);
-        if (hasLocalBackup) {
-          try {
-            return await repairRemoteAccountFromBackup(email, password, 'customer');
-          } catch (repairError) {
-            console.log('[Auth] loginAsCustomer remote repair error:', repairError);
-            const repairMessage = repairError instanceof Error ? repairError.message : '';
-            if (shouldTryLocalAuthFallback(repairMessage)) {
-              return tryLocalLogin(email, password, 'customer');
+        try {
+          return await tryTrpcLogin(email, password, 'customer');
+        } catch (trpcError) {
+          console.log('[Auth] loginAsCustomer TRPC fallback error:', trpcError);
+          resolvedErrorMessage = trpcError instanceof Error ? trpcError.message : errorMessage;
+        }
+
+        if (shouldTryRemoteAccountRepair(resolvedErrorMessage)) {
+          const hasLocalBackup = await hasLocalLoginBackup(email);
+          console.log('[Auth] loginAsCustomer remote repair availability:', hasLocalBackup, 'email:', email);
+          if (hasLocalBackup) {
+            try {
+              return await repairRemoteAccountFromBackup(email, password, 'customer');
+            } catch (repairError) {
+              console.log('[Auth] loginAsCustomer remote repair error:', repairError);
+              const repairMessage = repairError instanceof Error ? repairError.message : '';
+              if (shouldTryLocalAuthFallback(repairMessage)) {
+                return tryLocalLogin(email, password, 'customer');
+              }
+              if (repairError instanceof Error) throw repairError;
             }
-            if (repairError instanceof Error) throw repairError;
           }
         }
       }
 
-      if (shouldTryLocalAuthFallback(errorMessage)) {
+      if (shouldTryLocalAuthFallback(resolvedErrorMessage)) {
         const hasLocalBackup = await hasLocalLoginBackup(email);
         console.log('[Auth] loginAsCustomer local fallback availability:', hasLocalBackup, 'email:', email);
         if (hasLocalBackup) {
           return tryLocalLogin(email, password, 'customer');
         }
       }
+      if (resolvedErrorMessage && resolvedErrorMessage !== errorMessage) {
+        throw new Error(resolvedErrorMessage);
+      }
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
-  }, [directFetch, ensureBackendAuthReady, handleLoginSuccess, hasLocalLoginBackup, repairRemoteAccountFromBackup, shouldTryLocalAuthFallback, shouldTryRemoteAccountRepair, tryLocalLogin]);
+  }, [directFetch, ensureBackendAuthReady, handleLoginSuccess, hasLocalLoginBackup, repairRemoteAccountFromBackup, shouldTryLocalAuthFallback, shouldTryRemoteAccountRepair, tryLocalLogin, tryTrpcLogin]);
 
   const loginAsDriver = useCallback(async (email?: string, password?: string) => {
     if (!email || !password) {
@@ -1344,35 +1378,48 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     } catch (err: any) {
       console.log('[Auth] loginAsDriver error:', err?.message);
       const errorMessage = err instanceof Error ? err.message : '';
+      let resolvedErrorMessage = errorMessage;
 
       if (shouldTryRemoteAccountRepair(errorMessage)) {
-        const hasLocalBackup = await hasLocalLoginBackup(email);
-        console.log('[Auth] loginAsDriver remote repair availability:', hasLocalBackup, 'email:', email);
-        if (hasLocalBackup) {
-          try {
-            return await repairRemoteAccountFromBackup(email, password, 'driver');
-          } catch (repairError) {
-            console.log('[Auth] loginAsDriver remote repair error:', repairError);
-            const repairMessage = repairError instanceof Error ? repairError.message : '';
-            if (shouldTryLocalAuthFallback(repairMessage)) {
-              return tryLocalLogin(email, password, 'driver');
+        try {
+          return await tryTrpcLogin(email, password, 'driver');
+        } catch (trpcError) {
+          console.log('[Auth] loginAsDriver TRPC fallback error:', trpcError);
+          resolvedErrorMessage = trpcError instanceof Error ? trpcError.message : errorMessage;
+        }
+
+        if (shouldTryRemoteAccountRepair(resolvedErrorMessage)) {
+          const hasLocalBackup = await hasLocalLoginBackup(email);
+          console.log('[Auth] loginAsDriver remote repair availability:', hasLocalBackup, 'email:', email);
+          if (hasLocalBackup) {
+            try {
+              return await repairRemoteAccountFromBackup(email, password, 'driver');
+            } catch (repairError) {
+              console.log('[Auth] loginAsDriver remote repair error:', repairError);
+              const repairMessage = repairError instanceof Error ? repairError.message : '';
+              if (shouldTryLocalAuthFallback(repairMessage)) {
+                return tryLocalLogin(email, password, 'driver');
+              }
+              if (repairError instanceof Error) throw repairError;
             }
-            if (repairError instanceof Error) throw repairError;
           }
         }
       }
 
-      if (shouldTryLocalAuthFallback(errorMessage)) {
+      if (shouldTryLocalAuthFallback(resolvedErrorMessage)) {
         const hasLocalBackup = await hasLocalLoginBackup(email);
         console.log('[Auth] loginAsDriver local fallback availability:', hasLocalBackup, 'email:', email);
         if (hasLocalBackup) {
           return tryLocalLogin(email, password, 'driver');
         }
       }
+      if (resolvedErrorMessage && resolvedErrorMessage !== errorMessage) {
+        throw new Error(resolvedErrorMessage);
+      }
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
-  }, [directFetch, ensureBackendAuthReady, handleLoginSuccess, hasLocalLoginBackup, repairRemoteAccountFromBackup, shouldTryLocalAuthFallback, shouldTryRemoteAccountRepair, tryLocalLogin]);
+  }, [directFetch, ensureBackendAuthReady, handleLoginSuccess, hasLocalLoginBackup, repairRemoteAccountFromBackup, shouldTryLocalAuthFallback, shouldTryRemoteAccountRepair, tryLocalLogin, tryTrpcLogin]);
 
   const registerCustomer = useCallback(async (name: string, phone: string, email: string, password: string, gender: 'male' | 'female', city: string, district: string, vehiclePlate?: string, referralCode?: string) => {
     const normalizedPhone = normalizeTurkishPhone(phone);
