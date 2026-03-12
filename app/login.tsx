@@ -1,36 +1,84 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, TextInput,
-  KeyboardAvoidingView, Platform, ScrollView, Animated, Alert,
-  Image, StatusBar, useWindowDimensions,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Animated,
+  Alert,
+  Image,
+  StatusBar,
+  useWindowDimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, Mail, Lock, Car, User } from 'lucide-react-native';
+import { ArrowLeft, Car, ShieldCheck, Smartphone, User } from 'lucide-react-native';
 import { useMutation } from '@tanstack/react-query';
 import { APP_BRAND } from '@/constants/branding';
+import { VerificationCodeModal } from '@/components/VerificationCodeModal';
 import { useAuth } from '@/contexts/AuthContext';
+import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
+
+type LoginMode = 'customer' | 'driver';
+
+interface LoginCodeResponse {
+  maskedPhone?: string | null;
+  deliveryNote?: string | null;
+  smsProvider?: string | null;
+}
+
+function formatPhoneInput(value: string): string {
+  const digits = normalizeTurkishPhone(value);
+  const parts = [
+    digits.slice(0, 4),
+    digits.slice(4, 7),
+    digits.slice(7, 9),
+    digits.slice(9, 11),
+  ].filter(Boolean);
+
+  return parts.join(' ');
+}
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { loginAsCustomer, loginAsDriver, getRememberedLogin } = useAuth();
+  const {
+    sendCustomerLoginCode,
+    sendDriverLoginCode,
+    verifyCustomerLoginCode,
+    verifyDriverLoginCode,
+    getRememberedPhone,
+  } = useAuth();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const [mode, setMode] = useState<'customer' | 'driver'>('customer');
-  const [email, setEmail] = useState<string>('');
-  const [password, setPassword] = useState<string>('');
+  const [mode, setMode] = useState<LoginMode>('customer');
+  const [phone, setPhone] = useState<string>('');
+  const [pendingPhone, setPendingPhone] = useState<string>('');
+  const [verificationCode, setVerificationCode] = useState<string>('');
+  const [showVerificationModal, setShowVerificationModal] = useState<boolean>(false);
+  const [maskedPhone, setMaskedPhone] = useState<string | null>(null);
+  const [deliveryNote, setDeliveryNote] = useState<string | null>(null);
+  const [providerName, setProviderName] = useState<string | null>(null);
+  const [tabWidth, setTabWidth] = useState<number>(160);
   const slideAnim = useRef(new Animated.Value(0)).current;
 
   const isSmall = width < 360;
   const isTablet = width >= 600;
+  const normalizedPhone = useMemo(() => normalizeTurkishPhone(phone), [phone]);
 
-  const switchMode = (newMode: 'customer' | 'driver') => {
+  const switchMode = useCallback((newMode: LoginMode) => {
     Animated.spring(slideAnim, {
       toValue: newMode === 'customer' ? 0 : 1,
       useNativeDriver: true,
     }).start();
     setMode(newMode);
-  };
+    setVerificationCode('');
+    setPendingPhone('');
+    setShowVerificationModal(false);
+  }, [slideAnim]);
 
   useEffect(() => {
     let isMounted = true;
@@ -38,9 +86,10 @@ export default function LoginScreen() {
     const restoreLastUsedMode = async () => {
       try {
         const [customerRemembered, driverRemembered] = await Promise.all([
-          getRememberedLogin('customer'),
-          getRememberedLogin('driver'),
+          getRememberedPhone('customer'),
+          getRememberedPhone('driver'),
         ]);
+
         if (!isMounted) {
           return;
         }
@@ -52,10 +101,10 @@ export default function LoginScreen() {
           return;
         }
 
-        const nextMode: 'customer' | 'driver' = driverUpdatedAt > customerUpdatedAt ? 'driver' : 'customer';
+        const nextMode: LoginMode = driverUpdatedAt > customerUpdatedAt ? 'driver' : 'customer';
         setMode(nextMode);
         slideAnim.setValue(nextMode === 'customer' ? 0 : 1);
-        console.log('[Login] Last used mode restored:', nextMode);
+        console.log('[Login] Restored mode from remembered phone:', nextMode);
       } catch (error) {
         console.log('[Login] restoreLastUsedMode error:', error);
       }
@@ -66,91 +115,114 @@ export default function LoginScreen() {
     return () => {
       isMounted = false;
     };
-  }, [getRememberedLogin, slideAnim]);
+  }, [getRememberedPhone, slideAnim]);
 
   useEffect(() => {
     let isMounted = true;
 
-    const loadRememberedLogin = async () => {
+    const loadRememberedPhone = async () => {
       try {
-        const remembered = await getRememberedLogin(mode);
+        const remembered = await getRememberedPhone(mode);
         if (!isMounted) {
           return;
         }
 
-        if (remembered) {
-          setEmail(remembered.email);
-          setPassword(remembered.password);
-          console.log('[Login] Remembered login restored for type:', remembered.type);
+        if (remembered?.phone) {
+          setPhone(formatPhoneInput(remembered.phone));
+          console.log('[Login] Remembered phone restored for type:', remembered.type);
           return;
         }
 
-        setEmail('');
-        setPassword('');
-        console.log('[Login] No remembered login found for type:', mode);
+        setPhone('');
       } catch (error) {
-        console.log('[Login] loadRememberedLogin error:', error);
+        console.log('[Login] loadRememberedPhone error:', error);
       }
     };
 
-    void loadRememberedLogin();
+    void loadRememberedPhone();
 
     return () => {
       isMounted = false;
     };
-  }, [getRememberedLogin, mode]);
+  }, [getRememberedPhone, mode]);
 
-  const loginMutation = useMutation({
-    mutationFn: async (): Promise<string> => {
-      const trimmedEmail = email.trim();
-      let actualType: string | null | undefined;
+  const sendCodeMutation = useMutation<LoginCodeResponse, unknown, string>({
+    mutationFn: async (targetPhone: string): Promise<LoginCodeResponse> => {
       if (mode === 'customer') {
-        actualType = await loginAsCustomer(trimmedEmail, password.trim());
-      } else {
-        actualType = await loginAsDriver(trimmedEmail, password.trim());
+        return await sendCustomerLoginCode(targetPhone) as LoginCodeResponse;
       }
-      return actualType || mode;
+
+      return await sendDriverLoginCode(targetPhone) as LoginCodeResponse;
+    },
+    onSuccess: (result, targetPhone) => {
+      setPendingPhone(targetPhone);
+      setVerificationCode('');
+      setMaskedPhone(result.maskedPhone ?? targetPhone);
+      setDeliveryNote(result.deliveryNote ?? null);
+      setProviderName(result.smsProvider === 'netgsm' ? 'NetGSM' : null);
+      setShowVerificationModal(true);
+      console.log('[Login] SMS login code sent for:', targetPhone, 'type:', mode);
+    },
+    onError: (error: unknown) => {
+      const errorMessage = error instanceof Error ? error.message : 'SMS kodu gönderilemedi. Lütfen tekrar deneyin.';
+      console.log('[Login] sendCode error:', error);
+      Alert.alert('Kod Gönderilemedi', errorMessage);
+    },
+  });
+
+  const verifyCodeMutation = useMutation<string, unknown, { targetPhone: string; code: string }>({
+    mutationFn: async ({ targetPhone, code }): Promise<string> => {
+      if (mode === 'customer') {
+        return await verifyCustomerLoginCode(targetPhone, code);
+      }
+
+      return await verifyDriverLoginCode(targetPhone, code);
     },
     onSuccess: (actualType) => {
-      console.log('[Login] Login success, actual type:', actualType);
+      setShowVerificationModal(false);
+      setVerificationCode('');
+      console.log('[Login] Phone login success, actual type:', actualType);
       if (actualType === 'driver') {
         router.replace('/(driver-tabs)/map');
       } else {
         router.replace('/(customer-tabs)/dashboard');
       }
     },
-    onError: (e: unknown) => {
-      let errorMsg = 'Mail adresiniz veya şifreniz hatalı.';
-      if (e instanceof Error) {
-        const msg = e.message;
-        if (msg.includes('JSON') || msg.includes('parse') || msg.includes('unexpected')) {
-          errorMsg = 'Sunucu geçici olarak meşgul. Lütfen birkaç saniye bekleyip tekrar deneyin.';
-        } else {
-          errorMsg = msg;
-        }
-      }
-      console.log('[Login] Login error:', e);
-      Alert.alert('Giriş Başarısız', errorMsg);
+    onError: (error: unknown) => {
+      const errorMessage = error instanceof Error ? error.message : 'SMS doğrulaması başarısız oldu.';
+      console.log('[Login] verifyCode error:', error);
+      Alert.alert('Giriş Başarısız', errorMessage);
     },
   });
 
-  const { mutate: doLogin } = loginMutation;
-
-  const handleLogin = useCallback(() => {
-    if (!email.trim()) {
-      Alert.alert('Uyarı', 'Lütfen e-posta adresinizi girin');
+  const handleSendCode = useCallback(() => {
+    const phoneValidationError = getTurkishPhoneValidationError(normalizedPhone);
+    if (phoneValidationError) {
+      Alert.alert('Uyarı', phoneValidationError);
       return;
     }
-    if (!password.trim()) {
-      Alert.alert('Uyarı', 'Lütfen şifrenizi girin');
+
+    sendCodeMutation.mutate(normalizedPhone);
+  }, [normalizedPhone, sendCodeMutation]);
+
+  const handleVerifyCode = useCallback(() => {
+    const targetPhone = pendingPhone || normalizedPhone;
+    if (!targetPhone) {
+      Alert.alert('Uyarı', 'Önce telefon numaranıza kod gönderin');
       return;
     }
-    doLogin();
-  }, [email, password, doLogin]);
 
-  const loading = loginMutation.isPending;
+    if (verificationCode.trim().length !== 6) {
+      Alert.alert('Uyarı', 'Lütfen 6 haneli SMS kodunu girin');
+      return;
+    }
 
-  const [tabWidth, setTabWidth] = useState<number>(160);
+    verifyCodeMutation.mutate({
+      targetPhone,
+      code: verificationCode.trim(),
+    });
+  }, [normalizedPhone, pendingPhone, verificationCode, verifyCodeMutation]);
+
   const indicatorTranslate = slideAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0, tabWidth],
@@ -159,6 +231,8 @@ export default function LoginScreen() {
   const topBarTop = insets.top + 10;
   const heroHeight = height * (isSmall ? 0.12 : 0.15);
   const imgHeight = height * (isSmall ? 0.45 : 0.55);
+  const loading = sendCodeMutation.isPending || verifyCodeMutation.isPending;
+  const actionLabel = sendCodeMutation.isPending ? 'SMS Kodu Gönderiliyor...' : 'SMS ile Giriş Yap';
 
   return (
     <View style={styles.container}>
@@ -184,24 +258,27 @@ export default function LoginScreen() {
               <ArrowLeft size={isSmall ? 20 : 22} color="#fff" />
             </TouchableOpacity>
           </View>
+
           <View style={[styles.heroSection, { paddingHorizontal: isSmall ? 20 : isTablet ? 48 : 28, paddingTop: heroHeight }]}>
             <Text style={[styles.brand, { fontSize: isSmall ? 38 : isTablet ? 56 : 48 }]}>{APP_BRAND}</Text>
-            <Text style={[styles.tagline, { fontSize: isSmall ? 13 : isTablet ? 18 : 16 }]}>Güvenli Yolculuk</Text>
+            <Text style={[styles.tagline, { fontSize: isSmall ? 13 : isTablet ? 18 : 16 }]}>Telefonla Güvenli Giriş</Text>
           </View>
+
           <View style={[styles.formCard, {
             paddingHorizontal: isSmall ? 18 : isTablet ? 40 : 24,
             paddingTop: isSmall ? 24 : 32,
             paddingBottom: Platform.OS === 'ios' ? Math.max(insets.bottom, 30) + 16 : 36,
             maxWidth: isTablet ? 500 : undefined,
-            alignSelf: isTablet ? 'center' as const : undefined,
-            width: isTablet ? '90%' as unknown as number : undefined,
-          }]}>
+            alignSelf: isTablet ? 'center' : undefined,
+            width: isTablet ? '90%' : undefined,
+          }]}> 
             <Text style={[styles.title, { fontSize: isSmall ? 24 : isTablet ? 32 : 28 }]}>Giriş Yap</Text>
-            <Text style={[styles.subtitle, { fontSize: isSmall ? 12 : 14 }]}>Hesabınıza giriş yaparak devam edin</Text>
+            <Text style={[styles.subtitle, { fontSize: isSmall ? 12 : 14 }]}>Kayıtlı telefon numaranıza gelen SMS kodu ile devam edin</Text>
+
             <View
               style={styles.tabContainer}
-              onLayout={(e) => {
-                const containerWidth = e.nativeEvent.layout.width;
+              onLayout={(event) => {
+                const containerWidth = event.nativeEvent.layout.width;
                 const padding = 8;
                 setTabWidth((containerWidth - padding) / 2);
               }}
@@ -224,49 +301,44 @@ export default function LoginScreen() {
                 <Text style={[styles.tabText, mode === 'driver' && styles.tabTextActive, { fontSize: isSmall ? 12 : 14 }]}>Şoför</Text>
               </TouchableOpacity>
             </View>
+
             <View style={styles.inputGroup}>
               <View style={[styles.inputWrapper, { paddingHorizontal: isSmall ? 12 : 16, borderRadius: isSmall ? 12 : 14 }]}>
-                <Mail size={isSmall ? 16 : 18} color="rgba(255,255,255,0.35)" />
+                <Smartphone size={isSmall ? 16 : 18} color="rgba(255,255,255,0.35)" />
                 <TextInput
                   style={[styles.input, { paddingVertical: isSmall ? 13 : 16, fontSize: isSmall ? 14 : 16 }]}
-                  placeholder="ornek@email.com"
+                  placeholder="0555 123 45 67"
                   placeholderTextColor="rgba(255,255,255,0.3)"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  value={email}
-                  onChangeText={setEmail}
-                  testID="email-input"
+                  keyboardType="phone-pad"
+                  textContentType="telephoneNumber"
+                  autoComplete="tel"
+                  value={phone}
+                  onChangeText={(value) => setPhone(formatPhoneInput(value))}
+                  testID="phone-input"
                 />
               </View>
             </View>
-            <View style={styles.inputGroup}>
-              <View style={[styles.inputWrapper, { paddingHorizontal: isSmall ? 12 : 16, borderRadius: isSmall ? 12 : 14 }]}>
-                <Lock size={isSmall ? 16 : 18} color="rgba(255,255,255,0.35)" />
-                <TextInput
-                  style={[styles.input, { paddingVertical: isSmall ? 13 : 16, fontSize: isSmall ? 14 : 16 }]}
-                  placeholder="Şifrenizi girin"
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                  secureTextEntry
-                  value={password}
-                  onChangeText={setPassword}
-                  testID="password-input"
-                />
+
+            <View style={styles.infoCard}>
+              <View style={styles.infoIconWrap}>
+                <ShieldCheck size={18} color="#F5A623" />
+              </View>
+              <View style={styles.infoCopy}>
+                <Text style={styles.infoTitle}>Şifresiz giriş açık</Text>
+                <Text style={styles.infoText}>Kod sadece kayıtlı numaranıza gider. Başka cihazda da aynı telefon numarasıyla giriş yapabilirsiniz.</Text>
               </View>
             </View>
-            <TouchableOpacity style={styles.forgotButton} onPress={() => router.push('/forgot-password')}>
-              <Text style={[styles.forgotText, { fontSize: isSmall ? 12 : 13 }]}>Şifremi Unuttum</Text>
-            </TouchableOpacity>
+
             <TouchableOpacity
               style={[styles.loginButton, loading && styles.loginButtonDisabled, { paddingVertical: isSmall ? 15 : 18, borderRadius: isSmall ? 12 : 16 }]}
-              onPress={handleLogin}
+              onPress={handleSendCode}
               disabled={loading}
               activeOpacity={0.85}
               testID="submit-login"
             >
-              <Text style={[styles.loginButtonText, { fontSize: isSmall ? 15 : 17 }]}>
-                {loading ? 'Giriş Yapılıyor...' : 'Giriş Yap'}
-              </Text>
+              <Text style={[styles.loginButtonText, { fontSize: isSmall ? 15 : 17 }]}>{actionLabel}</Text>
             </TouchableOpacity>
+
             <View style={styles.registerRow}>
               <Text style={[styles.registerLabel, { fontSize: isSmall ? 12 : 14 }]}>Hesabınız yok mu?</Text>
               <TouchableOpacity onPress={() => router.push(mode === 'customer' ? '/register-customer' : '/register-driver')}>
@@ -276,6 +348,25 @@ export default function LoginScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <VerificationCodeModal
+        visible={showVerificationModal}
+        title="SMS ile giriş"
+        subtitle="Telefonunuza gelen 6 haneli kodu girerek hesabınıza güvenli şekilde giriş yapın."
+        code={verificationCode}
+        onCodeChange={setVerificationCode}
+        onClose={() => setShowVerificationModal(false)}
+        onConfirm={handleVerifyCode}
+        onResend={() => sendCodeMutation.mutate(pendingPhone || normalizedPhone)}
+        isConfirming={verifyCodeMutation.isPending}
+        isResending={sendCodeMutation.isPending}
+        maskedPhone={maskedPhone}
+        deliveryNote={deliveryNote}
+        providerName={providerName}
+        confirmLabel="Girişi Tamamla"
+        resendLabel="Kodu Tekrar Gönder"
+        testIDPrefix="login-verification"
+      />
     </View>
   );
 }
@@ -286,12 +377,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#0A0A12',
   },
   bgImage: {
-    position: 'absolute' as const,
+    position: 'absolute',
     top: 0,
     left: 0,
   },
   bgOverlay: {
-    position: 'absolute' as const,
+    position: 'absolute',
     top: 0,
     left: 0,
     backgroundColor: 'rgba(10,10,18,0.55)',
@@ -301,10 +392,10 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: 'flex-end' as const,
+    justifyContent: 'flex-end',
   },
   topBar: {
-    position: 'absolute' as const,
+    position: 'absolute',
     zIndex: 10,
   },
   backButton: {
@@ -312,8 +403,8 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     backgroundColor: 'rgba(255,255,255,0.15)',
-    justifyContent: 'center' as const,
-    alignItems: 'center' as const,
+    justifyContent: 'center',
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
@@ -321,7 +412,7 @@ const styles = StyleSheet.create({
     marginBottom: 30,
   },
   brand: {
-    fontWeight: '900' as const,
+    fontWeight: '900',
     color: '#FFFFFF',
     letterSpacing: -1,
     textShadowColor: 'rgba(0,0,0,0.8)',
@@ -330,10 +421,10 @@ const styles = StyleSheet.create({
   },
   tagline: {
     color: 'rgba(255,255,255,0.75)',
-    fontWeight: '500' as const,
+    fontWeight: '500',
     marginTop: 4,
     letterSpacing: 2,
-    textTransform: 'uppercase' as const,
+    textTransform: 'uppercase',
     textShadowColor: 'rgba(0,0,0,0.7)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 8,
@@ -346,7 +437,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(245,166,35,0.15)',
   },
   title: {
-    fontWeight: '800' as const,
+    fontWeight: '800',
     color: '#FFFFFF',
     letterSpacing: -0.5,
   },
@@ -356,7 +447,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   tabContainer: {
-    flexDirection: 'row' as const,
+    flexDirection: 'row',
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 14,
     padding: 4,
@@ -365,8 +456,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.06)',
   },
   tabIndicator: {
-    position: 'absolute' as const,
-    height: '100%' as unknown as number,
+    position: 'absolute',
+    height: '100%',
     backgroundColor: '#F5A623',
     borderRadius: 12,
     top: 4,
@@ -374,15 +465,15 @@ const styles = StyleSheet.create({
   },
   tab: {
     flex: 1,
-    flexDirection: 'row' as const,
-    justifyContent: 'center' as const,
-    alignItems: 'center' as const,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
     paddingVertical: 13,
     gap: 6,
     zIndex: 1,
   },
   tabText: {
-    fontWeight: '600' as const,
+    fontWeight: '600',
     color: 'rgba(255,255,255,0.5)',
   },
   tabTextActive: {
@@ -392,8 +483,8 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   inputWrapper: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
@@ -403,18 +494,41 @@ const styles = StyleSheet.create({
     flex: 1,
     color: '#FFFFFF',
   },
-  forgotButton: {
-    alignSelf: 'flex-end' as const,
+  infoCard: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 16,
+    borderRadius: 18,
     marginBottom: 24,
-    marginTop: 4,
+    backgroundColor: 'rgba(245,166,35,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,166,35,0.12)',
   },
-  forgotText: {
-    color: '#F5A623',
-    fontWeight: '600' as const,
+  infoIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(245,166,35,0.14)',
+  },
+  infoCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  infoTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  infoText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: 'rgba(255,255,255,0.58)',
   },
   loginButton: {
     backgroundColor: '#F5A623',
-    alignItems: 'center' as const,
+    alignItems: 'center',
     shadowColor: '#F5A623',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3,
@@ -425,13 +539,13 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   loginButtonText: {
-    fontWeight: '700' as const,
+    fontWeight: '700',
     color: '#0A0A12',
   },
   registerRow: {
-    flexDirection: 'row' as const,
-    justifyContent: 'center' as const,
-    alignItems: 'center' as const,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginTop: 20,
     gap: 6,
   },
@@ -439,7 +553,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.4)',
   },
   registerLink: {
-    fontWeight: '700' as const,
+    fontWeight: '700',
     color: '#F5A623',
   },
 });

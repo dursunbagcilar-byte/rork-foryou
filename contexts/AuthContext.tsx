@@ -48,8 +48,15 @@ interface RememberedLoginCredentials {
   updatedAt: string;
 }
 
+interface RememberedPhoneLogin {
+  phone: string;
+  type: Exclude<UserType, null>;
+  updatedAt: string;
+}
+
 const LOCAL_AUTH_PREFIX = 'localauthbackup';
 const REMEMBERED_LOGIN_PREFIX = 'remembered_login_credentials';
+const REMEMBERED_PHONE_LOGIN_PREFIX = 'remembered_phone_login';
 
 function normalizeAuthEmail(email: string): string {
   return email.toLowerCase().trim();
@@ -75,6 +82,10 @@ function buildRememberedLoginKey(type: Exclude<UserType, null>): string {
   return `${REMEMBERED_LOGIN_PREFIX}_${type}`;
 }
 
+function buildRememberedPhoneLoginKey(type: Exclude<UserType, null>): string {
+  return `${REMEMBERED_PHONE_LOGIN_PREFIX}_${type}`;
+}
+
 function parseRememberedLogin(raw: string): RememberedLoginCredentials | null {
   try {
     const parsed = JSON.parse(raw) as RememberedLoginCredentials;
@@ -88,6 +99,24 @@ function parseRememberedLogin(raw: string): RememberedLoginCredentials | null {
     };
   } catch (error) {
     console.log('[Auth] parseRememberedLogin error:', error);
+    return null;
+  }
+}
+
+function parseRememberedPhoneLogin(raw: string): RememberedPhoneLogin | null {
+  try {
+    const parsed = JSON.parse(raw) as RememberedPhoneLogin;
+    const normalizedPhone = normalizeTurkishPhone(parsed?.phone);
+    if (!normalizedPhone || !parsed?.type) {
+      return null;
+    }
+
+    return {
+      ...parsed,
+      phone: normalizedPhone,
+    };
+  } catch (error) {
+    console.log('[Auth] parseRememberedPhoneLogin error:', error);
     return null;
   }
 }
@@ -640,6 +669,50 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   }, []);
 
+  const saveRememberedPhone = useCallback(async (
+    phone: string,
+    type: Exclude<UserType, null>
+  ): Promise<void> => {
+    const normalizedPhone = normalizeTurkishPhone(phone);
+    if (!normalizedPhone) {
+      return;
+    }
+
+    try {
+      const payload: RememberedPhoneLogin = {
+        phone: normalizedPhone,
+        type,
+        updatedAt: new Date().toISOString(),
+      };
+      await SecureStore.setItemAsync(buildRememberedPhoneLoginKey(type), JSON.stringify(payload));
+      console.log('[Auth] Remembered phone saved for:', normalizedPhone, 'type:', type);
+    } catch (error) {
+      console.log('[Auth] saveRememberedPhone error:', error, 'phone:', normalizedPhone);
+    }
+  }, []);
+
+  const getRememberedPhone = useCallback(async (
+    type: Exclude<UserType, null>
+  ): Promise<RememberedPhoneLogin | null> => {
+    try {
+      const raw = await SecureStore.getItemAsync(buildRememberedPhoneLoginKey(type));
+      if (!raw) {
+        return null;
+      }
+
+      const parsed = parseRememberedPhoneLogin(raw);
+      if (!parsed) {
+        console.log('[Auth] getRememberedPhone invalid payload for:', type);
+        return null;
+      }
+
+      return parsed;
+    } catch (error) {
+      console.log('[Auth] getRememberedPhone error:', error, 'type:', type);
+      return null;
+    }
+  }, []);
+
   const buildLegacyLocalUser = useCallback(async (email: string): Promise<User | Driver | null> => {
     const normalizedEmail = normalizeAuthEmail(email);
     const fallbackId = normalizedEmail.replace(/[^a-zA-Z0-9]/g, '_');
@@ -1042,12 +1115,137 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
 
     await saveRememberedLogin(normalizedEmail, password, backup.type);
+    await saveRememberedPhone(backup.user.phone, backup.type);
 
     return setAuthenticatedLocalUser({
       ...backup.user,
       email: normalizedEmail,
     } as User | Driver, 'secure-backup');
-  }, [getLocalAuthBackup, saveRememberedLogin, setAuthenticatedLocalUser]);
+  }, [getLocalAuthBackup, saveRememberedLogin, saveRememberedPhone, setAuthenticatedLocalUser]);
+
+  const handlePhoneLoginSuccess = useCallback(async (
+    result: any,
+    phone: string,
+    source: string,
+  ): Promise<Exclude<UserType, null>> => {
+    console.log(`[Auth] handlePhoneLoginSuccess (${source}) result:`, JSON.stringify({ success: result?.success, error: result?.error, hasUser: !!result?.user, hasToken: !!result?.token }));
+    if (result?.success && result?.user) {
+      const returnedUser = { ...result.user } as User | Driver;
+      const actualType: Exclude<UserType, null> = returnedUser.type === 'driver' ? 'driver' : 'customer';
+      returnedUser.type = actualType;
+      setUser(returnedUser);
+      setUserType(actualType);
+      setIsAuthenticated(true);
+
+      const normalizedPhone = normalizeTurkishPhone(phone || returnedUser.phone);
+      const persistenceTasks: Promise<unknown>[] = [
+        AsyncStorage.setItem('auth_user', JSON.stringify(returnedUser)),
+        saveRememberedPhone(normalizedPhone, actualType),
+      ];
+
+      if (result?.token) {
+        persistenceTasks.unshift(setSessionToken(result.token));
+      }
+
+      queueAuthPersistence(`phone-login:${actualType}:${normalizedPhone}`, persistenceTasks);
+      console.log('[Auth] Phone login success for:', normalizedPhone, 'type:', actualType);
+      return actualType;
+    }
+
+    throw new Error(result?.error ?? 'Giriş doğrulanamadı');
+  }, [queueAuthPersistence, saveRememberedPhone]);
+
+  const sendCustomerLoginCode = useCallback(async (phone: string) => {
+    const normalizedPhone = normalizeTurkishPhone(phone);
+    const phoneValidationError = getTurkishPhoneValidationError(normalizedPhone);
+    if (phoneValidationError) {
+      throw new Error(phoneValidationError);
+    }
+
+    const backendReady = await ensureBackendAuthReady('customer-send-login-code', true);
+    if (!backendReady) {
+      console.log('[Auth] customer-send-login-code bootstrap not confirmed, trying direct request anyway');
+    }
+
+    const result = await directFetch('/auth/send-login-code', {
+      phone: normalizedPhone,
+      type: 'customer',
+    });
+
+    if (result?.success === false) {
+      throw new Error(result.error ?? 'SMS kodu gönderilemedi');
+    }
+
+    console.log('[Auth] Customer login code sent for:', normalizedPhone);
+    return result;
+  }, [directFetch, ensureBackendAuthReady]);
+
+  const sendDriverLoginCode = useCallback(async (phone: string) => {
+    const normalizedPhone = normalizeTurkishPhone(phone);
+    const phoneValidationError = getTurkishPhoneValidationError(normalizedPhone);
+    if (phoneValidationError) {
+      throw new Error(phoneValidationError);
+    }
+
+    const backendReady = await ensureBackendAuthReady('driver-send-login-code', true);
+    if (!backendReady) {
+      console.log('[Auth] driver-send-login-code bootstrap not confirmed, trying direct request anyway');
+    }
+
+    const result = await directFetch('/auth/send-login-code', {
+      phone: normalizedPhone,
+      type: 'driver',
+    });
+
+    if (result?.success === false) {
+      throw new Error(result.error ?? 'SMS kodu gönderilemedi');
+    }
+
+    console.log('[Auth] Driver login code sent for:', normalizedPhone);
+    return result;
+  }, [directFetch, ensureBackendAuthReady]);
+
+  const verifyCustomerLoginCode = useCallback(async (phone: string, code: string) => {
+    const normalizedPhone = normalizeTurkishPhone(phone);
+    const phoneValidationError = getTurkishPhoneValidationError(normalizedPhone);
+    if (phoneValidationError) {
+      throw new Error(phoneValidationError);
+    }
+
+    const trimmedCode = code.trim();
+    if (trimmedCode.length !== 6) {
+      throw new Error('Lütfen 6 haneli SMS kodunu girin');
+    }
+
+    const result = await directFetch('/auth/verify-login-code', {
+      phone: normalizedPhone,
+      code: trimmedCode,
+      type: 'customer',
+    });
+
+    return handlePhoneLoginSuccess(result, normalizedPhone, 'PHONE_LOGIN_CUSTOMER');
+  }, [directFetch, handlePhoneLoginSuccess]);
+
+  const verifyDriverLoginCode = useCallback(async (phone: string, code: string) => {
+    const normalizedPhone = normalizeTurkishPhone(phone);
+    const phoneValidationError = getTurkishPhoneValidationError(normalizedPhone);
+    if (phoneValidationError) {
+      throw new Error(phoneValidationError);
+    }
+
+    const trimmedCode = code.trim();
+    if (trimmedCode.length !== 6) {
+      throw new Error('Lütfen 6 haneli SMS kodunu girin');
+    }
+
+    const result = await directFetch('/auth/verify-login-code', {
+      phone: normalizedPhone,
+      code: trimmedCode,
+      type: 'driver',
+    });
+
+    return handlePhoneLoginSuccess(result, normalizedPhone, 'PHONE_LOGIN_DRIVER');
+  }, [directFetch, handlePhoneLoginSuccess]);
 
   const handleSessionInvalid = useCallback(async () => {
     console.log('[Auth] Session invalid, logging out...');
@@ -1503,6 +1701,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           })),
           persistLocalAuthBackup(customer, password),
           saveRememberedLogin(email, password, 'customer'),
+          saveRememberedPhone(normalizedPhone, 'customer'),
         ];
 
         if (result.token) {
@@ -1534,7 +1733,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen tekrar deneyin.');
     }
-  }, [directFetch, ensureBackendAuthReady, persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin]);
+  }, [directFetch, ensureBackendAuthReady, persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin, saveRememberedPhone]);
 
   const registerDriver = useCallback(async (
     name: string,
@@ -1610,6 +1809,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           })),
           persistLocalAuthBackup(driver, password),
           saveRememberedLogin(email, password, 'driver'),
+          saveRememberedPhone(normalizedPhone, 'driver'),
         ];
 
         if (result.token) {
@@ -1640,7 +1840,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen tekrar deneyin.');
     }
-  }, [directFetch, ensureBackendAuthReady, persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin]);
+  }, [directFetch, ensureBackendAuthReady, persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin, saveRememberedPhone]);
 
   const applyPromoCode = useCallback(async (code: string): Promise<boolean> => {
     if (code.toUpperCase() === PRICING.promoCode && !promoApplied) {
@@ -1951,6 +2151,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     rideHistory,
     loginAsCustomer,
     loginAsDriver,
+    sendCustomerLoginCode,
+    sendDriverLoginCode,
+    verifyCustomerLoginCode,
+    verifyDriverLoginCode,
     registerCustomer,
     registerDriver,
     applyPromoCode,
@@ -1976,6 +2180,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     hasLocalRecoveryAccount,
     recoverLocalPassword,
     getRememberedLogin,
+    getRememberedPhone,
     updateAccountPhone,
     logout,
   }), [
@@ -1988,6 +2193,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     rideHistory,
     loginAsCustomer,
     loginAsDriver,
+    sendCustomerLoginCode,
+    sendDriverLoginCode,
+    verifyCustomerLoginCode,
+    verifyDriverLoginCode,
     registerCustomer,
     registerDriver,
     applyPromoCode,
@@ -2013,6 +2222,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     hasLocalRecoveryAccount,
     recoverLocalPassword,
     getRememberedLogin,
+    getRememberedPhone,
     updateAccountPhone,
     logout,
   ]);

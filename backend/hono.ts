@@ -306,6 +306,74 @@ async function loadAuthAccountByEmail(email: string): Promise<LoadedAuthAccount>
   return { emailKey: cleanEmail, user, driver, passwordHash, source };
 }
 
+interface LoadedPhoneAuthAccount {
+  normalizedPhone: string;
+  user: User | null;
+  driver: Driver | null;
+  source: 'memory' | 'reload' | 'direct-db';
+}
+
+async function loadAuthAccountByPhone(phone: string): Promise<LoadedPhoneAuthAccount> {
+  const normalizedPhone = normalizeTurkishPhone(phone);
+  let user = normalizedPhone ? db.users.getByPhone(normalizedPhone) ?? null : null;
+  let driver = normalizedPhone ? db.drivers.getByPhone(normalizedPhone) ?? null : null;
+  let source: LoadedPhoneAuthAccount['source'] = 'memory';
+
+  console.log('[SERVER] loadAuthAccountByPhone initial:', normalizedPhone, 'user:', !!user, 'driver:', !!driver);
+
+  if (!normalizedPhone || user || driver) {
+    return { normalizedPhone, user, driver, source };
+  }
+
+  try {
+    await initializeStore();
+    await forceReloadStore();
+    user = db.users.getByPhone(normalizedPhone) ?? user;
+    driver = db.drivers.getByPhone(normalizedPhone) ?? driver;
+    source = 'reload';
+    console.log('[SERVER] loadAuthAccountByPhone after reload:', normalizedPhone, 'user:', !!user, 'driver:', !!driver);
+  } catch (error) {
+    console.log('[SERVER] loadAuthAccountByPhone reload error:', error);
+  }
+
+  if (user || driver) {
+    return { normalizedPhone, user, driver, source };
+  }
+
+  try {
+    const { dbFindByPhone } = await import('./db/rork-db');
+
+    const dbUser = await dbFindByPhone<Record<string, unknown>>('users', normalizedPhone);
+    if (dbUser) {
+      const userId = dbUser.rorkId || dbUser._originalId || dbUser.id;
+      if (typeof userId === 'string') {
+        const hydratedUser = { ...dbUser, id: userId } as User;
+        user = hydratedUser;
+        db.users.set(userId, hydratedUser);
+      }
+    }
+
+    if (!user) {
+      const dbDriver = await dbFindByPhone<Record<string, unknown>>('drivers', normalizedPhone);
+      if (dbDriver) {
+        const driverId = dbDriver.rorkId || dbDriver._originalId || dbDriver.id;
+        if (typeof driverId === 'string') {
+          const hydratedDriver = { ...dbDriver, id: driverId } as Driver;
+          driver = hydratedDriver;
+          db.drivers.set(driverId, hydratedDriver);
+        }
+      }
+    }
+
+    source = 'direct-db';
+    console.log('[SERVER] loadAuthAccountByPhone direct-db:', normalizedPhone, 'user:', !!user, 'driver:', !!driver);
+  } catch (error) {
+    console.log('[SERVER] loadAuthAccountByPhone direct-db error:', error);
+  }
+
+  return { normalizedPhone, user, driver, source };
+}
+
 function generateReferralCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let nextCode = 'FY';
@@ -1466,6 +1534,155 @@ app.post("/auth/register-driver", async (c) => {
     const msg = err?.message || '';
     if (msg.includes('zaten') || msg.includes('Geçersiz') || msg.includes('Şifre')) return c.json({ success: false, error: msg, driver: null, token: null });
     return c.json({ success: false, error: 'Kayıt hatası oluştu. Lütfen tekrar deneyin.', driver: null, token: null }, 500);
+  }
+});
+
+app.post("/auth/send-login-code", async (c) => {
+  try {
+    const body = await c.req.json().catch((): Record<string, unknown> => ({})) as Record<string, any>;
+    const requestDbConfig = resolveRequestDbConfig(c, body);
+    await recoverAuthStoreForRequest('send-login-code', requestDbConfig.endpoint, requestDbConfig.namespace, requestDbConfig.token);
+
+    const requestedType: 'customer' | 'driver' = body.type === 'driver' ? 'driver' : 'customer';
+    const cleanPhone = normalizeTurkishPhone(typeof body.phone === 'string' ? body.phone : '');
+    const phoneValidationError = getTurkishPhoneValidationError(cleanPhone);
+    if (phoneValidationError) {
+      return c.json({ success: false, error: phoneValidationError, maskedPhone: null, deliveryNote: getSmsDeliveryNote(null), smsProvider: AUTH_SMS_PROVIDER }, 400);
+    }
+
+    const lookupKey = `logincode_${requestedType}_${cleanPhone}`;
+    const loginCheck = checkLoginAttempt(lookupKey);
+    if (!loginCheck.allowed) {
+      return c.json({ success: false, error: 'Çok fazla deneme. Lütfen biraz sonra tekrar deneyin.', maskedPhone: maskPhoneNumber(cleanPhone), deliveryNote: getSmsDeliveryNote(maskPhoneNumber(cleanPhone)), smsProvider: AUTH_SMS_PROVIDER }, 429);
+    }
+
+    const { user, driver, source } = await loadAuthAccountByPhone(cleanPhone);
+    console.log('[REST] send-login-code account resolution:', cleanPhone, 'type:', requestedType, 'source:', source, 'user:', !!user, 'driver:', !!driver);
+
+    const account = requestedType === 'driver' ? driver : user;
+    if (!account) {
+      recordLoginFailure(lookupKey);
+      return c.json({
+        success: false,
+        error: requestedType === 'driver'
+          ? 'Bu telefon numarasıyla kayıtlı şoför hesabı bulunamadı.'
+          : 'Bu telefon numarasıyla kayıtlı müşteri hesabı bulunamadı.',
+        maskedPhone: maskPhoneNumber(cleanPhone),
+        deliveryNote: getSmsDeliveryNote(maskPhoneNumber(cleanPhone)),
+        smsProvider: AUTH_SMS_PROVIDER,
+      }, 404);
+    }
+
+    if (requestedType === 'driver' && driver?.isSuspended) {
+      return c.json({ success: false, error: 'Hesabınız askıya alınmıştır. Yönetici ile iletişime geçin.', maskedPhone: maskPhoneNumber(cleanPhone), deliveryNote: getSmsDeliveryNote(maskPhoneNumber(cleanPhone)), smsProvider: AUTH_SMS_PROVIDER }, 403);
+    }
+
+    const code = generateAuthCode();
+    const codeKey = `login_${requestedType}_${cleanPhone}`;
+    db.resetCodes.set(codeKey, code);
+
+    const maskedPhone = maskPhoneNumber(cleanPhone);
+    const deliveryNote = getSmsDeliveryNote(maskedPhone);
+    const smsTargetPhone = normalizePhoneForSms(cleanPhone);
+    if (!smsTargetPhone) {
+      return c.json({ success: false, error: 'Geçerli bir telefon numarası gerekli.', maskedPhone, deliveryNote, smsProvider: AUTH_SMS_PROVIDER }, 400);
+    }
+
+    const smsResult = await sendVerificationSmsCode({
+      toPhone: smsTargetPhone,
+      code,
+    });
+
+    if (!smsResult.success) {
+      console.log('[REST] send-login-code SMS send failed:', cleanPhone, smsResult.errorCode, smsResult.providerMessage);
+      return c.json({ success: false, error: getNetgsmSendErrorMessage(smsResult), maskedPhone, deliveryNote, smsProvider: AUTH_SMS_PROVIDER }, 502);
+    }
+
+    recordLoginSuccess(lookupKey);
+    console.log('[REST] send-login-code success:', cleanPhone, 'type:', requestedType, 'maskedPhone:', maskedPhone, 'messageId:', smsResult.messageId);
+    return c.json({ success: true, error: null, maskedPhone, deliveryNote, smsProvider: AUTH_SMS_PROVIDER });
+  } catch (err: any) {
+    console.log('[REST] send-login-code error:', err?.message ?? err);
+    return c.json({ success: false, error: 'SMS kodu gönderilemedi. Lütfen tekrar deneyin.', maskedPhone: null, deliveryNote: getSmsDeliveryNote(null), smsProvider: AUTH_SMS_PROVIDER }, 500);
+  }
+});
+
+app.post("/auth/verify-login-code", async (c) => {
+  try {
+    const body = await c.req.json().catch((): Record<string, unknown> => ({})) as Record<string, any>;
+    const requestDbConfig = resolveRequestDbConfig(c, body);
+    await recoverAuthStoreForRequest('verify-login-code', requestDbConfig.endpoint, requestDbConfig.namespace, requestDbConfig.token);
+
+    const requestedType: 'customer' | 'driver' = body.type === 'driver' ? 'driver' : 'customer';
+    const cleanPhone = normalizeTurkishPhone(typeof body.phone === 'string' ? body.phone : '');
+    const inputCode = typeof body.code === 'string' ? body.code.trim() : '';
+
+    const phoneValidationError = getTurkishPhoneValidationError(cleanPhone);
+    if (phoneValidationError) {
+      return c.json({ success: false, error: phoneValidationError, user: null, token: null }, 400);
+    }
+
+    if (!inputCode) {
+      return c.json({ success: false, error: 'Doğrulama kodu gerekli', user: null, token: null }, 400);
+    }
+
+    const { user, driver, source } = await loadAuthAccountByPhone(cleanPhone);
+    console.log('[REST] verify-login-code account resolution:', cleanPhone, 'type:', requestedType, 'source:', source, 'user:', !!user, 'driver:', !!driver);
+
+    const account = requestedType === 'driver' ? driver : user;
+    if (!account) {
+      return c.json({
+        success: false,
+        error: requestedType === 'driver'
+          ? 'Bu telefon numarasıyla kayıtlı şoför hesabı bulunamadı.'
+          : 'Bu telefon numarasıyla kayıtlı müşteri hesabı bulunamadı.',
+        user: null,
+        token: null,
+      }, 404);
+    }
+
+    if (requestedType === 'driver' && driver?.isSuspended) {
+      return c.json({ success: false, error: 'Hesabınız askıya alınmıştır. Yönetici ile iletişime geçin.', user: null, token: null }, 403);
+    }
+
+    const codeKey = `login_${requestedType}_${cleanPhone}`;
+    const stored = await db.resetCodes.getAsync(codeKey);
+    console.log('[REST] verify-login-code lookup:', codeKey, 'found:', !!stored);
+
+    if (!stored) {
+      return c.json({ success: false, error: 'Doğrulama kodu bulunamadı veya süresi dolmuş.', user: null, token: null }, 404);
+    }
+
+    if (stored.attempts >= 5) {
+      db.resetCodes.delete(codeKey);
+      return c.json({ success: false, error: 'Çok fazla hatalı deneme. Yeni kod talep edin.', user: null, token: null }, 429);
+    }
+
+    if (stored.code !== inputCode) {
+      await db.resetCodes.incrementAttemptsAsync(codeKey);
+      return c.json({ success: false, error: 'Doğrulama kodu hatalı.', user: null, token: null }, 400);
+    }
+
+    db.resetCodes.delete(codeKey);
+
+    const sessionToken = generateSecureToken(64);
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const sessionRecord: Session = {
+      token: sessionToken,
+      userId: account.id,
+      userType: requestedType,
+      createdAt: now.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    };
+    await db.sessions.setSync(sessionToken, sessionRecord);
+    await persistSessionDirect(sessionRecord);
+
+    console.log('[REST] verify-login-code success:', account.id, requestedType, 'phone:', cleanPhone);
+    return c.json({ success: true, error: null, user: { ...account, type: requestedType }, token: sessionToken });
+  } catch (err: any) {
+    console.log('[REST] verify-login-code error:', err?.message ?? err);
+    return c.json({ success: false, error: 'Giriş doğrulanamadı. Lütfen tekrar deneyin.', user: null, token: null }, 500);
   }
 });
 
