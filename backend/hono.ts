@@ -1475,8 +1475,11 @@ app.post("/auth/login", async (c) => {
     const requestDbConfig = resolveRequestDbConfig(c, body);
     await recoverAuthStoreForRequest('login', requestDbConfig.endpoint, requestDbConfig.namespace, requestDbConfig.token);
     const storageMode = getCurrentStorageMode();
+    const persistentStore = getPersistentStoreStatus();
+    const loadedUsers = db.users.getAll().length;
+    const loadedDrivers = db.drivers.getAll().length;
 
-    console.log('[REST] login:', body.email, 'type:', body.type, 'dbReady:', _dbReady, 'storageMode:', storageMode, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
+    console.log('[REST] login:', body.email, 'type:', body.type, 'dbReady:', _dbReady, 'storageMode:', storageMode, 'users:', loadedUsers, 'drivers:', loadedDrivers, 'snapshotAvailable:', persistentStore.available);
 
     const cleanEmail = (body.email || '').toLowerCase().trim();
     if (!cleanEmail || !body.password) return c.json({ success: false, error: 'E-posta ve şifre gerekli', user: null, token: null });
@@ -1491,7 +1494,12 @@ app.post("/auth/login", async (c) => {
     console.log('[REST] login account resolution:', cleanEmail, 'source:', source, 'hasHash:', !!storedHash, 'user:', !!user, 'driver:', !!driver);
 
     if (!user && !driver) {
+      const authStoreUnavailable = storageMode === 'memory' && !isDbConfigured() && !persistentStore.available && loadedUsers === 0 && loadedDrivers === 0;
       recordLoginFailure(cleanEmail);
+      if (authStoreUnavailable) {
+        console.log('[REST] login blocked - auth store unavailable for cross-device login:', cleanEmail);
+        return c.json({ success: false, error: 'Giriş sistemi şu anda hazırlanıyor. Lütfen biraz sonra tekrar deneyin.', user: null, token: null });
+      }
       return c.json({ success: false, error: 'Kullanıcı bulunamadı. Lütfen kayıt olduğunuz e-posta adresini kontrol edin.', user: null, token: null });
     }
 

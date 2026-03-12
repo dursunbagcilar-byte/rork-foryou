@@ -184,6 +184,32 @@ function isSessionAuthError(msg: string): boolean {
     lower.includes('trpc auth');
 }
 
+interface BackendBootstrapStatus {
+  success?: boolean;
+  configured?: boolean;
+  storageMode?: string;
+  persistentStoreAvailable?: boolean;
+  users?: number;
+  drivers?: number;
+  error?: string;
+}
+
+function isBackendBootstrapReady(payload: BackendBootstrapStatus | null | undefined): boolean {
+  if (!payload) {
+    return false;
+  }
+
+  const users = typeof payload.users === 'number' ? payload.users : 0;
+  const drivers = typeof payload.drivers === 'number' ? payload.drivers : 0;
+  const storageMode = payload.storageMode ?? '';
+  return payload.success === true ||
+    payload.configured === true ||
+    storageMode === 'database' ||
+    storageMode === 'snapshot' ||
+    users > 0 ||
+    drivers > 0;
+}
+
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [user, setUser] = useState<User | Driver | null>(null);
   const [userType, setUserType] = useState<UserType>(null);
@@ -245,20 +271,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         });
         clearTimeout(timeoutId);
 
-        const payload = await response.json().catch(() => null) as {
-          success?: boolean;
-          configured?: boolean;
-          storageMode?: string;
-          error?: string;
-        } | null;
+        const payload = await response.json().catch(() => null) as BackendBootstrapStatus | null;
 
-        const ready = response.ok && (
-          payload?.success === true ||
-          payload?.configured === true ||
-          payload?.storageMode === 'database'
-        );
+        const ready = response.ok && isBackendBootstrapReady(payload);
+        const users = typeof payload?.users === 'number' ? payload.users : 0;
+        const drivers = typeof payload?.drivers === 'number' ? payload.drivers : 0;
 
-        console.log('[Auth] ensureBackendAuthReady result:', reason, 'status:', response.status, 'ready:', ready, 'storageMode:', payload?.storageMode ?? 'unknown', 'error:', payload?.error ?? 'none');
+        console.log('[Auth] ensureBackendAuthReady result:', reason, 'status:', response.status, 'ready:', ready, 'storageMode:', payload?.storageMode ?? 'unknown', 'users:', users, 'drivers:', drivers, 'error:', payload?.error ?? 'none');
 
         if (ready) {
           lastAuthBootstrapAtRef.current = Date.now();
@@ -478,12 +497,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         }
         throw new Error('Sunucu yanıt vermedi (zaman aşımı). Lütfen tekrar deneyin.');
       }
-      if (isNetworkError(err?.message || '')) {
+
+      const errorMessage = err?.message || '';
+      if (isNetworkError(errorMessage)) {
         if (retryCount < MAX_RETRIES) {
           await new Promise(r => setTimeout(r, 1000));
           return directFetch(path, body, retryCount + 1, extraHeaders);
         }
+        throw new Error('Sunucuya şu an ulaşılamıyor. İnternet bağlantınızı kontrol edip tekrar deneyin.');
       }
+
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
     }
