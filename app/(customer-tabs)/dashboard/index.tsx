@@ -2201,6 +2201,30 @@ export default function CustomerHomeScreen() {
                 </View>
               )}
             </View>
+
+            <TouchableOpacity
+              style={[
+                styles.rideForOtherEntry,
+                styles.rideForOtherEntryTop,
+                rideForOtherDraft.enabled && rideForOtherDraft.recipient && styles.rideForOtherEntryActive,
+              ]}
+              onPress={handleOpenRideForOther}
+              activeOpacity={0.85}
+              testID="ride-for-other-entry"
+            >
+              <View style={styles.rideForOtherEntryIcon}>
+                <Share2 size={16} color={rideForOtherDraft.enabled && rideForOtherDraft.recipient ? '#FFF' : Colors.dark.primary} />
+              </View>
+              <View style={styles.rideForOtherEntryContent}>
+                <Text style={[styles.rideForOtherEntryTitle, rideForOtherDraft.enabled && rideForOtherDraft.recipient && styles.rideForOtherEntryTitleActive]}>Başkasına çağır</Text>
+                <Text style={[styles.rideForOtherEntrySubtitle, rideForOtherDraft.enabled && rideForOtherDraft.recipient && styles.rideForOtherEntrySubtitleActive]} numberOfLines={1}>
+                  {rideForOtherDraft.enabled && rideForOtherDraft.recipient
+                    ? `${rideForOtherDraft.recipient.name} • ${rideForOtherDraft.recipient.phone}`
+                    : 'Bir yakınınız için yolculuk oluşturun'}
+                </Text>
+              </View>
+              <ChevronRight size={18} color={rideForOtherDraft.enabled && rideForOtherDraft.recipient ? '#FFF' : '#7A7A93'} />
+            </TouchableOpacity>
           </View>
         </View>
         {!rideRequested && !isSearching && (
@@ -2258,28 +2282,6 @@ export default function CustomerHomeScreen() {
                     </Text>
                   </View>
                 )}
-                <TouchableOpacity
-                  style={[
-                    styles.rideForOtherEntry,
-                    rideForOtherDraft.enabled && rideForOtherDraft.recipient && styles.rideForOtherEntryActive,
-                  ]}
-                  onPress={handleOpenRideForOther}
-                  activeOpacity={0.85}
-                  testID="ride-for-other-entry"
-                >
-                  <View style={styles.rideForOtherEntryIcon}>
-                    <Share2 size={16} color={rideForOtherDraft.enabled && rideForOtherDraft.recipient ? '#FFF' : Colors.dark.primary} />
-                  </View>
-                  <View style={styles.rideForOtherEntryContent}>
-                    <Text style={[styles.rideForOtherEntryTitle, rideForOtherDraft.enabled && rideForOtherDraft.recipient && styles.rideForOtherEntryTitleActive]}>Başkasına çağır</Text>
-                    <Text style={[styles.rideForOtherEntrySubtitle, rideForOtherDraft.enabled && rideForOtherDraft.recipient && styles.rideForOtherEntrySubtitleActive]} numberOfLines={1}>
-                      {rideForOtherDraft.enabled && rideForOtherDraft.recipient
-                        ? `${rideForOtherDraft.recipient.name} • ${rideForOtherDraft.recipient.phone}`
-                        : 'Bir yakınınız için yolculuk oluşturun'}
-                    </Text>
-                  </View>
-                  <ChevronRight size={18} color={rideForOtherDraft.enabled && rideForOtherDraft.recipient ? '#FFF' : '#7A7A93'} />
-                </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.searchBarNew}
                   onPress={() => toggleSearch(true)}
@@ -5829,6 +5831,15 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#E9EAF1',
+  },
+  rideForOtherEntryTop: {
+    marginTop: 16,
+    marginBottom: 0,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 4,
   },
   rideForOtherEntryActive: {
     backgroundColor: '#1E1671',
