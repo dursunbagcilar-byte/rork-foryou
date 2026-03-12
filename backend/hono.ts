@@ -913,6 +913,11 @@ app.use("*", async (c, next) => {
 
 function readServerEnv(key: string): string {
   try {
+    const bunEnv = (globalThis as any).Bun?.env as Record<string, string | undefined> | undefined;
+    const bunValue = typeof bunEnv?.[key] === 'string' ? bunEnv[key]?.trim() ?? '' : '';
+    if (bunValue) return bunValue;
+  } catch {}
+  try {
     const d = (globalThis as any).Deno;
     if (d?.env?.get) {
       const val = d.env.get(key);

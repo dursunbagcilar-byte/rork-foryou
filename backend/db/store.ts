@@ -63,6 +63,43 @@ let _snapshotFilePath: string | null = null;
 let _snapshotPersistTimer: ReturnType<typeof setTimeout> | null = null;
 let _snapshotPersistInFlight: Promise<void> | null = null;
 
+function readRuntimeEnv(key: string): string {
+  try {
+    const bunEnv = (globalThis as any).Bun?.env as Record<string, string | undefined> | undefined;
+    const bunValue = typeof bunEnv?.[key] === 'string' ? bunEnv[key]?.trim() ?? '' : '';
+    if (bunValue) {
+      return bunValue;
+    }
+  } catch (error) {
+    console.log('[STORE] Bun env read failed:', key, error);
+  }
+
+  try {
+    const d = (globalThis as any).Deno;
+    if (d?.env?.get) {
+      const value = d.env.get(key);
+      if (value) {
+        return value;
+      }
+    }
+  } catch (error) {
+    console.log('[STORE] Deno env read failed:', key, error);
+  }
+
+  try {
+    if (typeof process !== 'undefined' && process.env) {
+      const value = (process.env as Record<string, string | undefined>)[key];
+      if (value) {
+        return value;
+      }
+    }
+  } catch (error) {
+    console.log('[STORE] process env read failed:', key, error);
+  }
+
+  return '';
+}
+
 function cleanSurrealId(raw: any, fallbackField?: string): string {
   if (!raw) return '';
   
@@ -670,31 +707,14 @@ function tryRecoverDbConfig(): boolean {
     }
   }
   
-  try {
-    const d = (globalThis as any).Deno;
-    if (d?.env?.get) {
-      const ep = d.env.get('EXPO_PUBLIC_RORK_DB_ENDPOINT') || d.env.get('RORK_DB_ENDPOINT') || '';
-      const ns = d.env.get('EXPO_PUBLIC_RORK_DB_NAMESPACE') || d.env.get('RORK_DB_NAMESPACE') || '';
-      const tk = d.env.get('EXPO_PUBLIC_RORK_DB_TOKEN') || d.env.get('RORK_DB_TOKEN') || '';
-      if (ep && ns && tk) {
-        setDbConfig(ep, ns, tk);
-        console.log('[STORE] DB config recovered from Deno.env');
-        return true;
-      }
-    }
-  } catch {}
-  try {
-    if (typeof process !== 'undefined' && process.env) {
-      const ep = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT || '';
-      const ns = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE || '';
-      const tk = process.env.EXPO_PUBLIC_RORK_DB_TOKEN || '';
-      if (ep && ns && tk) {
-        setDbConfig(ep, ns, tk);
-        console.log('[STORE] DB config recovered from process.env');
-        return true;
-      }
-    }
-  } catch {}
+  const ep = readRuntimeEnv('EXPO_PUBLIC_RORK_DB_ENDPOINT') || readRuntimeEnv('RORK_DB_ENDPOINT');
+  const ns = readRuntimeEnv('EXPO_PUBLIC_RORK_DB_NAMESPACE') || readRuntimeEnv('RORK_DB_NAMESPACE');
+  const tk = readRuntimeEnv('EXPO_PUBLIC_RORK_DB_TOKEN') || readRuntimeEnv('RORK_DB_TOKEN');
+  if (ep && ns && tk) {
+    setDbConfig(ep, ns, tk);
+    console.log('[STORE] DB config recovered from runtime env');
+    return true;
+  }
   return isDbConfigured();
 }
 
@@ -828,30 +848,12 @@ export async function forceReloadStore(): Promise<void> {
         setDbConfig(cached.endpoint, cached.namespace, cached.token);
         console.log('[STORE] DB config set from getCachedDbConfig');
       } else {
-        try {
-          const d = (globalThis as any).Deno;
-          if (d?.env?.get) {
-            const dEndpoint = d.env.get('EXPO_PUBLIC_RORK_DB_ENDPOINT') || d.env.get('RORK_DB_ENDPOINT') || '';
-            const dNamespace = d.env.get('EXPO_PUBLIC_RORK_DB_NAMESPACE') || d.env.get('RORK_DB_NAMESPACE') || '';
-            const dToken = d.env.get('EXPO_PUBLIC_RORK_DB_TOKEN') || d.env.get('RORK_DB_TOKEN') || '';
-            if (dEndpoint && dNamespace && dToken) {
-              setDbConfig(dEndpoint, dNamespace, dToken);
-              console.log('[STORE] DB config recovered from Deno.env');
-            }
-          }
-        } catch (e) {
-          console.log('[STORE] Deno env read failed:', e);
-        }
-        try {
-          const endpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT || '';
-          const namespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE || '';
-          const token = process.env.EXPO_PUBLIC_RORK_DB_TOKEN || '';
-          if (endpoint && namespace && token) {
-            setDbConfig(endpoint, namespace, token);
-            console.log('[STORE] DB config recovered from process.env');
-          }
-        } catch (e) {
-          console.log('[STORE] process.env read failed:', e);
+        const endpoint = readRuntimeEnv('EXPO_PUBLIC_RORK_DB_ENDPOINT') || readRuntimeEnv('RORK_DB_ENDPOINT');
+        const namespace = readRuntimeEnv('EXPO_PUBLIC_RORK_DB_NAMESPACE') || readRuntimeEnv('RORK_DB_NAMESPACE');
+        const token = readRuntimeEnv('EXPO_PUBLIC_RORK_DB_TOKEN') || readRuntimeEnv('RORK_DB_TOKEN');
+        if (endpoint && namespace && token) {
+          setDbConfig(endpoint, namespace, token);
+          console.log('[STORE] DB config recovered from runtime env');
         }
       }
     }

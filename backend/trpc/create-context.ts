@@ -14,6 +14,15 @@ let _lastDbBootstrapAt = 0;
 
 function readServerEnv(key: string): string {
   try {
+    const bunEnv = (globalThis as any).Bun?.env as Record<string, string | undefined> | undefined;
+    if (typeof bunEnv?.[key] === "string") {
+      return bunEnv[key]?.trim() ?? "";
+    }
+  } catch (error) {
+    console.log("[CONTEXT] Bun.env read error:", key, error);
+  }
+
+  try {
     if (typeof process !== "undefined" && typeof process.env?.[key] === "string") {
       return process.env[key]?.trim() ?? "";
     }

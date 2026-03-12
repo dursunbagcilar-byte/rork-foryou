@@ -23,6 +23,11 @@ let _flushingPending = false;
 
 function findSingleEnvValue(key: string): string {
   try {
+    const bunEnv = (globalThis as any).Bun?.env as Record<string, string | undefined> | undefined;
+    const bunValue = typeof bunEnv?.[key] === 'string' ? bunEnv[key]?.trim() ?? '' : '';
+    if (bunValue) return bunValue;
+  } catch {}
+  try {
     const d = (globalThis as any).Deno;
     if (d?.env?.get) {
       const val = d.env.get(key);
@@ -72,6 +77,11 @@ try {
 console.log('[RORK-DB] v13 init - endpoint:', STATIC_ENDPOINT ? 'YES' : 'NO', 'ns:', STATIC_NAMESPACE ? 'YES' : 'NO', 'token:', STATIC_TOKEN ? 'YES' : 'NO');
 
 function readEnvDirect(key: string): string {
+  try {
+    const bunEnv = (globalThis as any).Bun?.env as Record<string, string | undefined> | undefined;
+    const bunValue = typeof bunEnv?.[key] === 'string' ? bunEnv[key]?.trim() ?? '' : '';
+    if (bunValue) return bunValue;
+  } catch {}
   try {
     const d = (globalThis as any).Deno;
     if (d?.env?.get) {
