@@ -1166,10 +1166,6 @@ export default function CustomerHomeScreen() {
       setPaymentLoading(false);
     }
 
-    setRideRequested(true);
-    setFindingDriver(true);
-    toggleSearch(false);
-
     try {
       const result = await createRideMutation.mutateAsync({
         customerId: user?.id ?? '',
@@ -1193,12 +1189,31 @@ export default function CustomerHomeScreen() {
         guestPaymentMode: rideForOtherDraft.paymentMode,
         guestTrackingEnabled: rideForOtherDraft.liveTrackingEnabled,
       });
-      if (result.success && result.ride) {
-        setCurrentBackendRideId(result.ride.id);
-        console.log('[Customer] Ride created on backend:', result.ride.id);
+
+      if (!result?.success || !result.ride) {
+        const backendError = 'error' in result && typeof result.error === 'string'
+          ? result.error
+          : 'Yolculuk talebi şu an oluşturulamadı. Lütfen tekrar deneyin.';
+        setCurrentBackendRideId(null);
+        setRideRequested(false);
+        setFindingDriver(false);
+        Alert.alert('Yolculuk Başlatılamadı', backendError);
+        return;
       }
+
+      setCurrentBackendRideId(result.ride.id);
+      setRideRequested(true);
+      setFindingDriver(true);
+      toggleSearch(false);
+      console.log('[Customer] Ride created on backend:', result.ride.id);
     } catch (err) {
-      console.log('[Customer] Backend ride creation error (continuing):', err);
+      console.log('[Customer] Backend ride creation error:', err);
+      setCurrentBackendRideId(null);
+      setRideRequested(false);
+      setFindingDriver(false);
+      const errorMessage = err instanceof Error ? err.message : 'Yolculuk talebi şu an oluşturulamadı. Lütfen tekrar deneyin.';
+      Alert.alert('Yolculuk Başlatılamadı', errorMessage);
+      return;
     }
 
     console.log(`Ride requested: ${destination}, Free: ${free}, Payment: ${paymentMethod}, Price: ₺${free ? 0 : ridePrice}, ForOther: ${rideForOtherEnabled}`);

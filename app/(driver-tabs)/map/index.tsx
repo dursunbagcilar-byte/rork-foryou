@@ -1033,7 +1033,8 @@ export default function DriverHomeScreen() {
           rideId: currentRideId,
           driverId: driver.id,
         });
-        console.log('[Driver] Business order declined:', currentRideId, 'reassigned:', result?.reassignment?.assigned ?? false);
+        const reassigned = 'reassignment' in result && result.reassignment ? result.reassignment.assigned : false;
+        console.log('[Driver] Business order declined:', currentRideId, 'reassigned:', reassigned);
       } catch (error) {
         console.log('[Driver] Decline business order error:', error);
       }
@@ -1263,10 +1264,20 @@ export default function DriverHomeScreen() {
           onPress: async () => {
             if (currentRideId) {
               try {
-                await startRideMutation.mutateAsync({ rideId: currentRideId });
+                const result = await startRideMutation.mutateAsync({ rideId: currentRideId });
+                if (!result?.success) {
+                  const errorMessage = 'error' in result && typeof result.error === 'string'
+                    ? result.error
+                    : 'Yolculuk şu an başlatılamıyor. Lütfen tekrar deneyin.';
+                  Alert.alert('Yolculuk Başlatılamadı', errorMessage);
+                  return;
+                }
                 console.log('[Ride] Ride started on backend:', currentRideId, 'businessDelivery:', isBusinessDelivery);
               } catch (err) {
-                console.log('[Ride] Start ride backend error (continuing):', err);
+                console.log('[Ride] Start ride backend error:', err);
+                const errorMessage = err instanceof Error ? err.message : 'Yolculuk şu an başlatılamıyor. Lütfen tekrar deneyin.';
+                Alert.alert('Yolculuk Başlatılamadı', errorMessage);
+                return;
               }
             }
             setCustomerPickedUp(true);
@@ -1352,10 +1363,20 @@ export default function DriverHomeScreen() {
   const handleCompleteRide = useCallback(async () => {
     if (currentRideId) {
       try {
-        await completeRideMutation.mutateAsync({ rideId: currentRideId });
+        const result = await completeRideMutation.mutateAsync({ rideId: currentRideId });
+        if (!result?.success) {
+          const errorMessage = 'error' in result && typeof result.error === 'string'
+            ? result.error
+            : 'Yolculuk şu an tamamlanamıyor. Lütfen tekrar deneyin.';
+          Alert.alert('Yolculuk Tamamlanamadı', errorMessage);
+          return;
+        }
         console.log('[Driver] Ride completed on backend:', currentRideId);
       } catch (err) {
-        console.log('[Driver] Complete ride backend error (continuing):', err);
+        console.log('[Driver] Complete ride backend error:', err);
+        const errorMessage = err instanceof Error ? err.message : 'Yolculuk şu an tamamlanamıyor. Lütfen tekrar deneyin.';
+        Alert.alert('Yolculuk Tamamlanamadı', errorMessage);
+        return;
       }
     }
     setCurrentRideId(null);
@@ -1390,10 +1411,20 @@ export default function DriverHomeScreen() {
             onPress: async () => {
               if (currentRideId) {
                 try {
-                  await cancelRideMutation.mutateAsync({ rideId: currentRideId, cancelledBy: 'driver', cancelReason: 'Şoför iptal etti' });
+                  const result = await cancelRideMutation.mutateAsync({ rideId: currentRideId, cancelledBy: 'driver', cancelReason: 'Şoför iptal etti' });
+                  if (!result?.success) {
+                    const errorMessage = 'error' in result && typeof result.error === 'string'
+                      ? result.error
+                      : 'Yolculuk şu an iptal edilemiyor. Lütfen tekrar deneyin.';
+                    Alert.alert('İptal Edilemedi', errorMessage);
+                    return;
+                  }
                   console.log('[Ride] Driver cancelled ride on backend:', currentRideId);
                 } catch (err) {
                   console.log('[Ride] Cancel ride backend error:', err);
+                  const errorMessage = err instanceof Error ? err.message : 'Yolculuk şu an iptal edilemiyor. Lütfen tekrar deneyin.';
+                  Alert.alert('İptal Edilemedi', errorMessage);
+                  return;
                 }
               }
               setCurrentRideId(null);
@@ -1418,10 +1449,20 @@ export default function DriverHomeScreen() {
     setSelectedDriverCancelReason('');
     if (currentRideId) {
       try {
-        await cancelRideMutation.mutateAsync({ rideId: currentRideId, cancelledBy: 'driver', cancelReason: reason });
+        const result = await cancelRideMutation.mutateAsync({ rideId: currentRideId, cancelledBy: 'driver', cancelReason: reason });
+        if (!result?.success) {
+          const errorMessage = 'error' in result && typeof result.error === 'string'
+            ? result.error
+            : 'Yolculuk şu an iptal edilemiyor. Lütfen tekrar deneyin.';
+          Alert.alert('İptal Edilemedi', errorMessage);
+          return;
+        }
         console.log('[Ride] Driver cancel with reason on backend:', currentRideId, reason);
       } catch (err) {
         console.log('[Ride] Cancel with reason backend error:', err);
+        const errorMessage = err instanceof Error ? err.message : 'Yolculuk şu an iptal edilemiyor. Lütfen tekrar deneyin.';
+        Alert.alert('İptal Edilemedi', errorMessage);
+        return;
       }
     }
     setCurrentRideId(null);

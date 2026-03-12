@@ -51,6 +51,64 @@ function scoreDriver(driver: {
   return score;
 }
 
+function hasCustomerAccess(ctx: { userId: string | null; userType: 'customer' | 'driver' | null }, customerId: string): boolean {
+  return ctx.userType === 'customer' && ctx.userId === customerId;
+}
+
+function hasDriverAccess(ctx: { userId: string | null; userType: 'customer' | 'driver' | null }, driverId: string): boolean {
+  return ctx.userType === 'driver' && ctx.userId === driverId;
+}
+
+function isRideDriverActor(ride: Ride, driverId: string): boolean {
+  return ride.driverId === driverId || ride.assignedCourierId === driverId;
+}
+
+function isRideCustomerActor(ride: Ride, customerId: string): boolean {
+  return ride.customerId === customerId;
+}
+
+function isRideStatusOneOf(ride: Ride, statuses: Ride['status'][]): boolean {
+  return statuses.includes(ride.status);
+}
+
+function buildForbiddenRideResponse(message = 'Bu işlem için yetkiniz yok') {
+  return { success: false, error: message };
+}
+
+function buildRideStateError(message: string) {
+  return { success: false, error: message };
+}
+
+function buildNullRideError(message: string) {
+  return { success: false, error: message, ride: null };
+}
+
+function buildNullRideListError(message: string) {
+  return {
+    rides: [],
+    total: 0,
+    page: 1,
+    totalPages: 0,
+    hasMore: false,
+    error: message,
+  };
+}
+
+function buildEmptyRideError(message: string) {
+  return { success: false, error: message, ride: null };
+}
+
+function buildEmptyBusinessOrderError(message: string) {
+  return {
+    success: false,
+    error: message,
+    ride: null,
+    notifiedCouriers: 0,
+    notifiedScope: 'unauthorized',
+    dispatchResult: null,
+  };
+}
+
 export const ridesRouter = createTRPCRouter({
   create: protectedProcedure
     .input(
@@ -77,7 +135,11 @@ export const ridesRouter = createTRPCRouter({
         guestTrackingEnabled: z.boolean().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (!hasCustomerAccess(ctx, input.customerId)) {
+        return buildNullRideError('Yolculuk oluşturma yetkiniz yok');
+      }
+
       const id = "r_" + Date.now();
       const ride = {
         id,
@@ -161,7 +223,11 @@ export const ridesRouter = createTRPCRouter({
         duration: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (!hasCustomerAccess(ctx, input.customerId)) {
+        return buildEmptyBusinessOrderError('Sipariş oluşturma yetkiniz yok');
+      }
+
       const id = `r_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const ride: Ride = {
         id,
@@ -247,7 +313,11 @@ export const ridesRouter = createTRPCRouter({
         driverId: z.string(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (!hasDriverAccess(ctx, input.driverId)) {
+        return buildForbiddenRideResponse('Bu siparişi reddetme yetkiniz yok');
+      }
+
       const ride = db.rides.get(input.rideId);
       if (!isBusinessRide(ride)) return { success: false, error: 'İşletme siparişi bulunamadı' };
       if (ride.status !== 'pending') return { success: false, error: 'Sipariş artık beklemede değil' };
@@ -271,7 +341,11 @@ export const ridesRouter = createTRPCRouter({
         driverRating: z.number(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (!hasDriverAccess(ctx, input.driverId)) {
+        return buildEmptyRideError('Bu yolculuğu kabul etme yetkiniz yok');
+      }
+
       const ride = db.rides.get(input.rideId);
       if (!ride) return { success: false, error: "Yolculuk bulunamadı" };
       if (ride.status !== "pending") {
@@ -330,9 +404,15 @@ export const ridesRouter = createTRPCRouter({
 
   startRide: protectedProcedure
     .input(z.object({ rideId: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const ride = db.rides.get(input.rideId);
       if (!ride) return { success: false, error: "Yolculuk bulunamadı" };
+      if (ctx.userType !== 'driver' || !ctx.userId || !isRideDriverActor(ride, ctx.userId)) {
+        return buildRideStateError('Bu yolculuğu başlatma yetkiniz yok');
+      }
+      if (!isRideStatusOneOf(ride, ['accepted'])) {
+        return buildRideStateError('Yolculuk yalnızca kabul edildikten sonra başlatılabilir');
+      }
 
       const updated = { ...ride, status: "in_progress" as const };
       await db.rides.setSync(input.rideId, updated);
@@ -345,9 +425,15 @@ export const ridesRouter = createTRPCRouter({
 
   complete: protectedProcedure
     .input(z.object({ rideId: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const ride = db.rides.get(input.rideId);
       if (!ride) return { success: false, error: "Yolculuk bulunamadı" };
+      if (ctx.userType !== 'driver' || !ctx.userId || ride.driverId !== ctx.userId) {
+        return buildRideStateError('Bu yolculuğu tamamlama yetkiniz yok');
+      }
+      if (!isRideStatusOneOf(ride, ['in_progress'])) {
+        return buildRideStateError('Yolculuk yalnızca başladıktan sonra tamamlanabilir');
+      }
 
       const updated = {
         ...ride,
@@ -377,9 +463,12 @@ export const ridesRouter = createTRPCRouter({
 
   driverArrived: protectedProcedure
     .input(z.object({ rideId: z.string(), driverName: z.string() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const ride = db.rides.get(input.rideId);
       if (!ride) return { success: false, error: "Yolculuk bulunamadı" };
+      if (ctx.userType !== 'driver' || !ctx.userId || !isRideDriverActor(ride, ctx.userId)) {
+        return buildForbiddenRideResponse('Bu bildirim için yetkiniz yok');
+      }
 
       void sendPushToUser(
         ride.customerId,
@@ -398,7 +487,7 @@ export const ridesRouter = createTRPCRouter({
       cancelledBy: z.enum(["customer", "driver"]).optional(),
       cancelReason: z.string().optional(),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const ride = db.rides.get(input.rideId);
       if (!ride) return { success: false, error: "Yolculuk bulunamadı" };
 
@@ -406,8 +495,16 @@ export const ridesRouter = createTRPCRouter({
         return { success: false, error: "Bu yolculuk zaten tamamlanmış veya iptal edilmiş" };
       }
 
+      const cancelledBy = input.cancelledBy ?? (ctx.userType === 'driver' ? 'driver' : 'customer');
+      if (cancelledBy === 'customer') {
+        if (!ctx.userId || !isRideCustomerActor(ride, ctx.userId)) {
+          return buildRideStateError('Bu yolculuğu iptal etme yetkiniz yok');
+        }
+      } else if (!ctx.userId || !isRideDriverActor(ride, ctx.userId)) {
+        return buildRideStateError('Bu yolculuğu iptal etme yetkiniz yok');
+      }
+
       let cancellationFee = 0;
-      const cancelledBy = input.cancelledBy ?? "customer";
 
       if (cancelledBy === 'customer' && ride.status === 'accepted') {
         const createdAt = new Date(ride.createdAt).getTime();
@@ -464,7 +561,11 @@ export const ridesRouter = createTRPCRouter({
       limit: z.number().min(1).max(50).optional(),
       status: z.enum(["pending", "accepted", "in_progress", "completed", "cancelled"]).optional(),
     }))
-    .query(({ input }) => {
+    .query(({ input, ctx }) => {
+      if (!hasCustomerAccess(ctx, input.customerId)) {
+        return buildNullRideListError('Bu yolculuk geçmişini görüntüleme yetkiniz yok');
+      }
+
       const page = input.page ?? 1;
       const limit = input.limit ?? 20;
       let rides = db.rides.getByCustomer(input.customerId);
@@ -491,7 +592,11 @@ export const ridesRouter = createTRPCRouter({
       limit: z.number().min(1).max(50).optional(),
       status: z.enum(["pending", "accepted", "in_progress", "completed", "cancelled"]).optional(),
     }))
-    .query(({ input }) => {
+    .query(({ input, ctx }) => {
+      if (!hasDriverAccess(ctx, input.driverId)) {
+        return buildNullRideListError('Bu sürüş geçmişini görüntüleme yetkiniz yok');
+      }
+
       const page = input.page ?? 1;
       const limit = input.limit ?? 20;
       let rides = db.rides.getByDriver(input.driverId);
@@ -517,7 +622,11 @@ export const ridesRouter = createTRPCRouter({
       driverCategory: z.enum(['driver', 'scooter', 'courier']).optional(),
       driverId: z.string().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      if (ctx.userType !== 'driver' || !ctx.userId || (input.driverId && input.driverId !== ctx.userId)) {
+        return [];
+      }
+
       await refreshExpiredBusinessOrderAssignments(input.city);
       const pendingRides = db.rides.getPendingByCity(input.city);
       if (input.driverCategory === 'courier') {
@@ -626,7 +735,11 @@ export const ridesRouter = createTRPCRouter({
 
   getActiveRide: protectedProcedure
     .input(z.object({ userId: z.string(), type: z.enum(["customer", "driver"]) }))
-    .query(({ input }) => {
+    .query(({ input, ctx }) => {
+      if (!ctx.userId || ctx.userId !== input.userId || ctx.userType !== input.type) {
+        return null;
+      }
+
       if (input.type === "customer") {
         return db.rides.getActiveByCustomer(input.userId) ?? null;
       }
