@@ -4,6 +4,7 @@ import superjson from "superjson";
 import * as SecureStore from "expo-secure-store";
 
 import type { AppRouter } from "@/backend/trpc/app-router";
+import { getClientEnv } from "@/utils/clientEnv";
 
 export const trpc = createTRPCReact<AppRouter>();
 
@@ -107,10 +108,10 @@ function resolveBaseUrl(): string {
   let result = '';
   let fromEnv = false;
 
-  const apiBase = process.env.EXPO_PUBLIC_RORK_API_BASE_URL;
-  const toolkitUrl = process.env.EXPO_PUBLIC_TOOLKIT_URL;
-  const projectId = process.env.EXPO_PUBLIC_PROJECT_ID;
-  const teamId = process.env.EXPO_PUBLIC_TEAM_ID;
+  const apiBase = getClientEnv('EXPO_PUBLIC_RORK_API_BASE_URL');
+  const toolkitUrl = getClientEnv('EXPO_PUBLIC_TOOLKIT_URL');
+  const projectId = getClientEnv('EXPO_PUBLIC_PROJECT_ID');
+  const teamId = getClientEnv('EXPO_PUBLIC_TEAM_ID');
 
   if (!_resolvedBaseUrl) {
     console.log('[TRPC] resolveBaseUrl - apiBase:', apiBase ? apiBase.substring(0, 50) : 'EMPTY', 'toolkit:', toolkitUrl ? toolkitUrl.substring(0, 50) : 'EMPTY', 'projId:', projectId || 'EMPTY', 'teamId:', teamId || 'EMPTY');
@@ -322,9 +323,9 @@ export const trpcClient = trpc.createClient({
         if (token) {
           headers['authorization'] = `Bearer ${token}`;
         }
-        const dbEndpoint = process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT;
-        const dbNamespace = process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE;
-        const dbToken = process.env.EXPO_PUBLIC_RORK_DB_TOKEN;
+        const dbEndpoint = getClientEnv('EXPO_PUBLIC_RORK_DB_ENDPOINT');
+        const dbNamespace = getClientEnv('EXPO_PUBLIC_RORK_DB_NAMESPACE');
+        const dbToken = getClientEnv('EXPO_PUBLIC_RORK_DB_TOKEN');
         if (dbEndpoint && dbNamespace && dbToken) {
           headers['x-db-endpoint'] = dbEndpoint;
           headers['x-db-namespace'] = dbNamespace;

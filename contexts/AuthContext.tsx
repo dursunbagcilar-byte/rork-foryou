@@ -257,6 +257,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const [driverApproved, setDriverApproved] = useState<boolean>(false);
   const authBootstrapPromiseRef = useRef<Promise<boolean> | null>(null);
   const lastAuthBootstrapAtRef = useRef<number>(0);
+  const authRepairSyncRef = useRef<Record<string, number>>({});
 
   const getApiBase = useCallback((): string => {
     return getBaseUrl();
@@ -712,6 +713,63 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       return null;
     }
   }, []);
+
+  const backgroundRepairRemoteAccount = useCallback(async (
+    account: User | Driver,
+    reason: string,
+  ): Promise<void> => {
+    if (!account?.email || (account.type !== 'customer' && account.type !== 'driver')) {
+      return;
+    }
+
+    const normalizedEmail = normalizeAuthEmail(account.email);
+    const syncKey = `${account.type}:${normalizedEmail}`;
+    const lastSyncedAt = authRepairSyncRef.current[syncKey] ?? 0;
+    if (Date.now() - lastSyncedAt < 60000) {
+      console.log('[Auth] Background remote repair skipped due to cooldown for:', syncKey, 'reason:', reason);
+      return;
+    }
+
+    authRepairSyncRef.current[syncKey] = Date.now();
+
+    try {
+      const [rememberedLogin, backup] = await Promise.all([
+        getRememberedLogin(account.type),
+        getLocalAuthBackup(normalizedEmail),
+      ]);
+
+      if (!rememberedLogin || rememberedLogin.email !== normalizedEmail) {
+        console.log('[Auth] Background remote repair skipped - remembered login missing for:', normalizedEmail, 'reason:', reason);
+        return;
+      }
+
+      if (!backup) {
+        console.log('[Auth] Background remote repair skipped - local backup missing for:', normalizedEmail, 'reason:', reason);
+        return;
+      }
+
+      const backendReady = await ensureBackendAuthReady(`background-repair:${reason}`, true);
+      if (!backendReady) {
+        console.log('[Auth] Background remote repair bootstrap not confirmed for:', normalizedEmail, 'reason:', reason);
+      }
+
+      const result = await directFetch('/auth/repair-account', {
+        email: normalizedEmail,
+        password: rememberedLogin.password,
+        type: backup.type,
+        account: backup.user,
+      });
+
+      if (result?.success === false) {
+        console.log('[Auth] Background remote repair rejected for:', normalizedEmail, 'reason:', reason, 'error:', result.error ?? 'unknown');
+        return;
+      }
+
+      console.log('[Auth] Background remote repair completed for:', normalizedEmail, 'reason:', reason);
+    } catch (error) {
+      console.log('[Auth] Background remote repair error:', normalizedEmail, 'reason:', reason, error);
+    }
+  }, [directFetch, ensureBackendAuthReady, getLocalAuthBackup, getRememberedLogin]);
 
   const buildLegacyLocalUser = useCallback(async (email: string): Promise<User | Driver | null> => {
     const normalizedEmail = normalizeAuthEmail(email);
@@ -1357,6 +1415,14 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     };
     void loadAuth();
   }, [handleSessionInvalid, restoreCachedAuthUser, restoreServerSession]);
+
+  useEffect(() => {
+    if (isLoading || !user || (user.type !== 'customer' && user.type !== 'driver')) {
+      return;
+    }
+
+    void backgroundRepairRemoteAccount(user, 'authenticated-session');
+  }, [backgroundRepairRemoteAccount, isLoading, user]);
 
   useEffect(() => {
     if (user && user.type === 'driver') {

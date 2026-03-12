@@ -1,4 +1,6 @@
-export interface DbConfig {
+import { getClientEnv } from '@/utils/clientEnv';
+
+interface DbConfig {
   endpoint: string;
   namespace: string;
   token: string;
@@ -9,9 +11,9 @@ function normalizeEnvValue(value: string | undefined): string {
 }
 
 export function getOptionalDbConfig(): DbConfig | null {
-  const endpoint = normalizeEnvValue(process.env.EXPO_PUBLIC_RORK_DB_ENDPOINT);
-  const namespace = normalizeEnvValue(process.env.EXPO_PUBLIC_RORK_DB_NAMESPACE);
-  const token = normalizeEnvValue(process.env.EXPO_PUBLIC_RORK_DB_TOKEN);
+  const endpoint = normalizeEnvValue(getClientEnv('EXPO_PUBLIC_RORK_DB_ENDPOINT'));
+  const namespace = normalizeEnvValue(getClientEnv('EXPO_PUBLIC_RORK_DB_NAMESPACE'));
+  const token = normalizeEnvValue(getClientEnv('EXPO_PUBLIC_RORK_DB_TOKEN'));
 
   if (!endpoint || !namespace || !token) {
     return null;
