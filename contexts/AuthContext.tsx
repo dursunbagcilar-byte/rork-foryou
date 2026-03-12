@@ -1282,7 +1282,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
 
     try {
-      void ensureBackendAuthReady('customer-login');
+      const backendReady = await ensureBackendAuthReady('customer-login', true);
+      if (!backendReady) {
+        console.log('[Auth] customer-login bootstrap not confirmed, trying direct login anyway');
+      }
       console.log('[Auth] loginAsCustomer called for:', email, '(REST)');
       const result = await directFetch('/auth/login', { email, password, type: 'customer' });
       if (result && result.success === false && result.error) {
@@ -1421,7 +1424,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     };
 
     try {
-      void ensureBackendAuthReady('customer-register');
+      const backendReady = await ensureBackendAuthReady('customer-register', true);
+      if (!backendReady) {
+        console.log('[Auth] customer-register bootstrap not confirmed, trying direct register anyway');
+      }
       console.log('[Auth] registerCustomer called for:', email, '(REST)');
       const result = await directFetch('/auth/register-customer', payload);
       console.log('[Auth] REST register result:', JSON.stringify(result).substring(0, 500));
@@ -1525,7 +1531,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     };
 
     try {
-      void ensureBackendAuthReady('driver-register');
+      const backendReady = await ensureBackendAuthReady('driver-register', true);
+      if (!backendReady) {
+        console.log('[Auth] driver-register bootstrap not confirmed, trying direct register anyway');
+      }
       console.log('[Auth] registerDriver called for:', email, '(REST)');
       const result = await directFetch('/auth/register-driver', payload);
       if (result && result.success === false && result.error) {

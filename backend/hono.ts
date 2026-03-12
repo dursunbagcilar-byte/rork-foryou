@@ -589,6 +589,39 @@ function isValidDbUrl(url: string): boolean {
   }
 }
 
+function resolveRequestDbConfig(c: Context, body?: Record<string, unknown> | null): {
+  endpoint?: string;
+  namespace?: string;
+  token?: string;
+} {
+  const headerEndpoint = c.req.header('x-db-endpoint')?.trim() ?? '';
+  const headerNamespace = c.req.header('x-db-namespace')?.trim() ?? '';
+  const headerToken = c.req.header('x-db-token')?.trim() ?? '';
+
+  const bodyEndpoint = typeof body?.dbEndpoint === 'string' ? body.dbEndpoint.trim() : '';
+  const bodyNamespace = typeof body?.dbNamespace === 'string' ? body.dbNamespace.trim() : '';
+  const bodyToken = typeof body?.dbToken === 'string' ? body.dbToken.trim() : '';
+
+  const resolvedConfig = {
+    endpoint: headerEndpoint || bodyEndpoint || undefined,
+    namespace: headerNamespace || bodyNamespace || undefined,
+    token: headerToken || bodyToken || undefined,
+  };
+
+  if ((!headerEndpoint || !headerNamespace || !headerToken) && (bodyEndpoint || bodyNamespace || bodyToken)) {
+    console.log('[SERVER] resolveRequestDbConfig using body fallback:', {
+      hasEndpoint: !!resolvedConfig.endpoint,
+      hasNamespace: !!resolvedConfig.namespace,
+      hasToken: !!resolvedConfig.token,
+      missingHeaderEndpoint: !headerEndpoint,
+      missingHeaderNamespace: !headerNamespace,
+      missingHeaderToken: !headerToken,
+    });
+  }
+
+  return resolvedConfig;
+}
+
 async function ensureDbReady(dbEp?: string, dbNs?: string, dbTk?: string): Promise<boolean> {
   const cached = getCachedDbConfig();
   const resolvedEndpoint = (dbEp || '').trim()
@@ -1209,16 +1242,14 @@ app.post("/auth/verify-verification-code", async (c) => {
 app.post("/auth/register-customer", async (c) => {
   const startTime = Date.now();
   try {
-    const dbEp = c.req.header('x-db-endpoint');
-    const dbNs = c.req.header('x-db-namespace');
-    const dbTk = c.req.header('x-db-token');
-    const dbReady = await ensureDbReady(dbEp, dbNs, dbTk);
+    const body = await c.req.json().catch((): Record<string, unknown> => ({})) as Record<string, any>;
+    const requestDbConfig = resolveRequestDbConfig(c, body);
+    const dbReady = await ensureDbReady(requestDbConfig.endpoint, requestDbConfig.namespace, requestDbConfig.token);
     const storageMode = getCurrentStorageMode();
     if (!dbReady) {
       console.log('[REST] register-customer continuing without confirmed DB readiness, storageMode:', storageMode, 'dbConfigured:', isDbConfigured());
     }
 
-    const body = await c.req.json();
     console.log('[REST] register-customer start:', body.email, 'dbReady:', _dbReady, 'dbConfigured:', isDbConfigured());
 
     const cleanName = sanitizeInput(body.name || '');
@@ -1331,16 +1362,14 @@ app.post("/auth/register-customer", async (c) => {
 app.post("/auth/register-driver", async (c) => {
   const startTime = Date.now();
   try {
-    const dbEp = c.req.header('x-db-endpoint');
-    const dbNs = c.req.header('x-db-namespace');
-    const dbTk = c.req.header('x-db-token');
-    const dbReady = await ensureDbReady(dbEp, dbNs, dbTk);
+    const body = await c.req.json().catch((): Record<string, unknown> => ({})) as Record<string, any>;
+    const requestDbConfig = resolveRequestDbConfig(c, body);
+    const dbReady = await ensureDbReady(requestDbConfig.endpoint, requestDbConfig.namespace, requestDbConfig.token);
     const storageMode = getCurrentStorageMode();
     if (!dbReady) {
       console.log('[REST] register-driver continuing without confirmed DB readiness, storageMode:', storageMode, 'dbConfigured:', isDbConfigured());
     }
 
-    const body = await c.req.json();
     console.log('[REST] register-driver start:', body.email, 'dbReady:', _dbReady, 'dbConfigured:', isDbConfigured());
 
     const cleanName = sanitizeInput(body.name || '');
@@ -1437,13 +1466,11 @@ app.post("/auth/register-driver", async (c) => {
 
 app.post("/auth/login", async (c) => {
   try {
-    const dbEp = c.req.header('x-db-endpoint');
-    const dbNs = c.req.header('x-db-namespace');
-    const dbTk = c.req.header('x-db-token');
-    await recoverAuthStoreForRequest('login', dbEp, dbNs, dbTk);
+    const body = await c.req.json().catch((): Record<string, unknown> => ({})) as Record<string, any>;
+    const requestDbConfig = resolveRequestDbConfig(c, body);
+    await recoverAuthStoreForRequest('login', requestDbConfig.endpoint, requestDbConfig.namespace, requestDbConfig.token);
     const storageMode = getCurrentStorageMode();
 
-    const body = await c.req.json();
     console.log('[REST] login:', body.email, 'type:', body.type, 'dbReady:', _dbReady, 'storageMode:', storageMode, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
 
     const cleanEmail = (body.email || '').toLowerCase().trim();
@@ -1505,12 +1532,10 @@ app.post("/auth/login", async (c) => {
 
 app.post("/auth/repair-account", async (c) => {
   try {
-    const dbEp = c.req.header('x-db-endpoint');
-    const dbNs = c.req.header('x-db-namespace');
-    const dbTk = c.req.header('x-db-token');
-    await recoverAuthStoreForRequest('repair-account', dbEp, dbNs, dbTk);
-
     const body = await c.req.json().catch((): Record<string, unknown> => ({}));
+    const requestDbConfig = resolveRequestDbConfig(c, body);
+    await recoverAuthStoreForRequest('repair-account', requestDbConfig.endpoint, requestDbConfig.namespace, requestDbConfig.token);
+
     const cleanEmail = typeof body.email === 'string' ? body.email.toLowerCase().trim() : '';
     const password = typeof body.password === 'string' ? body.password : '';
     const accountType: 'customer' | 'driver' = body.type === 'driver' ? 'driver' : 'customer';
@@ -1545,13 +1570,11 @@ app.post("/auth/repair-account", async (c) => {
 
 app.post("/auth/session", async (c) => {
   try {
-    const dbEp = c.req.header('x-db-endpoint');
-    const dbNs = c.req.header('x-db-namespace');
-    const dbTk = c.req.header('x-db-token');
-    await recoverAuthStoreForRequest('session', dbEp, dbNs, dbTk);
-
     const authHeader = c.req.header('authorization');
     const body = await c.req.json().catch((): Record<string, unknown> => ({}));
+    const requestDbConfig = resolveRequestDbConfig(c, body);
+    await recoverAuthStoreForRequest('session', requestDbConfig.endpoint, requestDbConfig.namespace, requestDbConfig.token);
+
     const tokenFromBody = typeof body.token === 'string' ? body.token.trim() : '';
     const tokenFromHeader = authHeader?.replace('Bearer ', '').trim() ?? '';
     const sessionToken = tokenFromBody || tokenFromHeader;
@@ -1589,12 +1612,10 @@ app.post("/auth/session", async (c) => {
 
 app.post("/auth/send-reset-code", async (c) => {
   try {
-    const dbEp = c.req.header('x-db-endpoint');
-    const dbNs = c.req.header('x-db-namespace');
-    const dbTk = c.req.header('x-db-token');
-    await recoverAuthStoreForRequest('send-reset-code', dbEp, dbNs, dbTk);
+    const body = await c.req.json().catch((): Record<string, unknown> => ({})) as Record<string, any>;
+    const requestDbConfig = resolveRequestDbConfig(c, body);
+    await recoverAuthStoreForRequest('send-reset-code', requestDbConfig.endpoint, requestDbConfig.namespace, requestDbConfig.token);
 
-    const body = await c.req.json();
     const rawIdentifier = typeof body.contact === 'string' && body.contact.trim()
       ? body.contact
       : typeof body.phone === 'string' && body.phone.trim()
@@ -1701,12 +1722,10 @@ app.post("/auth/send-reset-code", async (c) => {
 
 app.post("/auth/verify-reset-code", async (c) => {
   try {
-    const dbEp = c.req.header('x-db-endpoint');
-    const dbNs = c.req.header('x-db-namespace');
-    const dbTk = c.req.header('x-db-token');
-    await recoverAuthStoreForRequest('verify-reset-code', dbEp, dbNs, dbTk);
+    const body = await c.req.json().catch((): Record<string, unknown> => ({})) as Record<string, any>;
+    const requestDbConfig = resolveRequestDbConfig(c, body);
+    await recoverAuthStoreForRequest('verify-reset-code', requestDbConfig.endpoint, requestDbConfig.namespace, requestDbConfig.token);
 
-    const body = await c.req.json();
     const rawIdentifier = typeof body.contact === 'string' && body.contact.trim()
       ? body.contact
       : typeof body.phone === 'string' && body.phone.trim()
@@ -1755,12 +1774,10 @@ app.post("/auth/verify-reset-code", async (c) => {
 
 app.post("/auth/reset-password", async (c) => {
   try {
-    const dbEp = c.req.header('x-db-endpoint');
-    const dbNs = c.req.header('x-db-namespace');
-    const dbTk = c.req.header('x-db-token');
-    await recoverAuthStoreForRequest('reset-password', dbEp, dbNs, dbTk);
+    const body = await c.req.json().catch((): Record<string, unknown> => ({})) as Record<string, any>;
+    const requestDbConfig = resolveRequestDbConfig(c, body);
+    await recoverAuthStoreForRequest('reset-password', requestDbConfig.endpoint, requestDbConfig.namespace, requestDbConfig.token);
 
-    const body = await c.req.json();
     const rawIdentifier = typeof body.contact === 'string' && body.contact.trim()
       ? body.contact
       : typeof body.phone === 'string' && body.phone.trim()
@@ -1815,12 +1832,11 @@ app.post("/auth/reset-password", async (c) => {
 app.post("/auth/register-business", async (c) => {
   const startTime = Date.now();
   try {
-    const dbEp = c.req.header('x-db-endpoint');
-    const dbNs = c.req.header('x-db-namespace');
-    const dbTk = c.req.header('x-db-token');
-    await ensureDbReady(dbEp, dbNs, dbTk);
-
     const authHeader = c.req.header('authorization') || c.req.header('Authorization') || '';
+    const body = await c.req.json().catch((): Record<string, unknown> => ({})) as Record<string, any>;
+    const requestDbConfig = resolveRequestDbConfig(c, body);
+    await ensureDbReady(requestDbConfig.endpoint, requestDbConfig.namespace, requestDbConfig.token);
+
     const sessionToken = authHeader.replace(/^Bearer\s+/i, '').trim();
     if (!sessionToken) {
       return c.json({ success: false, error: 'Oturum bulunamadı', business: null }, 401);
@@ -1840,7 +1856,6 @@ app.post("/auth/register-business", async (c) => {
       return c.json({ success: false, error: 'Şoför hesabı bulunamadı', business: null }, 404);
     }
 
-    const body = await c.req.json();
     const { sanitizeInput } = await import('./utils/security');
     const safeName = sanitizeInput(body.name || '');
     const safeWebsite = sanitizeInput(body.website || '');
