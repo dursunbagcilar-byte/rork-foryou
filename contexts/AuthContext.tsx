@@ -405,6 +405,21 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       console.log('[Auth] directFetch status:', res.status);
 
       if (res.status === 404) {
+        let notFoundError = '';
+        try {
+          const errData = await res.json();
+          if (typeof errData?.error === 'string' && errData.error.trim()) {
+            notFoundError = errData.error;
+          }
+        } catch (parseError) {
+          console.log('[Auth] directFetch 404 parse error:', parseError);
+        }
+
+        if (notFoundError) {
+          console.log('[Auth] directFetch 404 with API error:', notFoundError);
+          throw new Error(notFoundError);
+        }
+
         if (retryCount < MAX_RETRIES) {
           const delay = 1500;
           console.log(`[Auth] 404 - retrying in ${delay}ms...`);
