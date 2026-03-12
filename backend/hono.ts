@@ -1253,7 +1253,9 @@ app.post("/auth/register-customer", async (c) => {
     if (body.referralCode) {
       referrerUserId = db.referralCodeIndex.get(body.referralCode.toUpperCase().trim());
     }
-    const freeRides = referrerUserId ? 2 : 0;
+    const signupBonusFreeRides = 1;
+    const referralBonusFreeRides = referrerUserId ? 2 : 0;
+    const freeRides = signupBonusFreeRides + referralBonusFreeRides;
 
     const user = {
       id, name: cleanName, phone: cleanPhone, email: cleanEmail,

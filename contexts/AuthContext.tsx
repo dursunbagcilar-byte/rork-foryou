@@ -1559,14 +1559,75 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     console.log('[Auth] Completed rides:', newCount);
   }, [completedRides]);
 
+  const getAccountFreeRides = useCallback((): number => {
+    if (!user || user.type !== 'customer') {
+      return 0;
+    }
+    return Math.max(0, user.freeRidesRemaining ?? 0);
+  }, [user]);
+
+  const consumeFreeRide = useCallback(async (preferredSource?: 'account' | 'promo'): Promise<boolean> => {
+    const accountFreeRides = getAccountFreeRides();
+    const promoFreeRides = promoApplied ? Math.max(0, PRICING.freeRidesWithPromo - completedRides) : 0;
+    const shouldUsePromo = preferredSource === 'promo' && promoFreeRides > 0;
+    const shouldUseAccount = preferredSource === 'account'
+      ? accountFreeRides > 0
+      : !shouldUsePromo && accountFreeRides > 0;
+
+    if (shouldUseAccount && user?.type === 'customer') {
+      const fallbackRemaining = Math.max(0, accountFreeRides - 1);
+
+      try {
+        const result = await trpcClient.auth.useFreeRide.mutate({ userId: user.id });
+        if (!result.success) {
+          throw new Error(result.error ?? 'Ücretsiz sürüş hakkı kullanılamadı');
+        }
+
+        const updatedUser: User = {
+          ...user,
+          freeRidesRemaining: Math.max(0, result.freeRidesRemaining ?? fallbackRemaining),
+        };
+        setUser(updatedUser);
+        await AsyncStorage.setItem('auth_user', JSON.stringify(updatedUser));
+        console.log('[Auth] Account free ride consumed for:', user.id, 'remaining:', updatedUser.freeRidesRemaining);
+        return true;
+      } catch (error) {
+        console.log('[Auth] Account free ride consume error, applying local fallback:', error);
+        const updatedUser: User = {
+          ...user,
+          freeRidesRemaining: fallbackRemaining,
+        };
+        setUser(updatedUser);
+        await AsyncStorage.setItem('auth_user', JSON.stringify(updatedUser));
+        return true;
+      }
+    }
+
+    if (promoFreeRides > 0) {
+      const newCount = completedRides + 1;
+      setCompletedRides(newCount);
+      await AsyncStorage.setItem('completed_rides', newCount.toString());
+      console.log('[Auth] Promo free ride consumed. Completed rides:', newCount, 'remaining promo free rides:', Math.max(0, PRICING.freeRidesWithPromo - newCount));
+      return true;
+    }
+
+    console.log('[Auth] consumeFreeRide called without available credits. Preferred source:', preferredSource ?? 'auto');
+    return false;
+  }, [completedRides, getAccountFreeRides, promoApplied, user]);
+
   const isFreeRide = useCallback((): boolean => {
+    const accountFreeRides = getAccountFreeRides();
+    if (accountFreeRides > 0) {
+      return true;
+    }
     return promoApplied && completedRides < PRICING.freeRidesWithPromo;
-  }, [promoApplied, completedRides]);
+  }, [completedRides, getAccountFreeRides, promoApplied]);
 
   const remainingFreeRides = useCallback((): number => {
-    if (!promoApplied) return 0;
-    return Math.max(0, PRICING.freeRidesWithPromo - completedRides);
-  }, [promoApplied, completedRides]);
+    const accountFreeRides = getAccountFreeRides();
+    const promoFreeRides = promoApplied ? Math.max(0, PRICING.freeRidesWithPromo - completedRides) : 0;
+    return accountFreeRides + promoFreeRides;
+  }, [completedRides, getAccountFreeRides, promoApplied]);
 
   const addRideToHistory = useCallback(async (ride: Ride) => {
     const updated = [ride, ...rideHistory];
@@ -1792,6 +1853,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     registerDriver,
     applyPromoCode,
     incrementCompletedRides,
+    consumeFreeRide,
     isFreeRide,
     remainingFreeRides,
     addRideToHistory,
@@ -1828,6 +1890,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     registerDriver,
     applyPromoCode,
     incrementCompletedRides,
+    consumeFreeRide,
     isFreeRide,
     remainingFreeRides,
     addRideToHistory,

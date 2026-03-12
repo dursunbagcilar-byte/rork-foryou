@@ -408,7 +408,9 @@ export const authRouter = createTRPCRouter({
 
       const id = "c_" + Date.now() + "_" + Math.random().toString(36).substring(2, 8);
       const myReferralCode = getUniqueReferralCode();
-      const freeRides = referrerUserId ? 2 : 0;
+      const signupBonusFreeRides = 1;
+      const referralBonusFreeRides = referrerUserId ? 2 : 0;
+      const freeRides = signupBonusFreeRides + referralBonusFreeRides;
 
       const user = {
         id,
@@ -457,7 +459,7 @@ export const authRouter = createTRPCRouter({
       await persistPasswordHashDirect(cleanEmail, hashedPwd);
 
       const token = await createSession(id, "customer");
-      console.log("[AUTH] Customer registered:", id, cleanName, "referralCode:", myReferralCode, "freeRides:", freeRides);
+      console.log("[AUTH] Customer registered:", id, cleanName, "referralCode:", myReferralCode, "signupBonus:", signupBonusFreeRides, "referralBonus:", referralBonusFreeRides, "freeRides:", freeRides);
       return { success: true, error: null, user, token };
     }),
 

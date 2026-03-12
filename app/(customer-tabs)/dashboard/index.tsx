@@ -94,7 +94,7 @@ function decodePolyline(encoded: string): { latitude: number; longitude: number 
 export default function CustomerHomeScreen() {
   const { height: SCREEN_HEIGHT } = useWindowDimensions();
   const MAP_BOTTOM_PADDING = Math.round(SCREEN_HEIGHT * 0.37);
-  const { user, promoApplied, isFreeRide, remainingFreeRides, applyPromoCode, incrementCompletedRides, addRideToHistory, customVehicleImage, rideHistory } = useAuth();
+  const { user, promoApplied, isFreeRide, remainingFreeRides, applyPromoCode, incrementCompletedRides, consumeFreeRide, addRideToHistory, customVehicleImage, rideHistory } = useAuth();
   const { draft: rideForOtherDraft, resetRideForOtherDraft } = useRideForOthers();
 
   const { location: gpsLocation } = useLocation(true, 8000);
@@ -118,6 +118,7 @@ export default function CustomerHomeScreen() {
   const [rideDistance, setRideDistance] = useState<number>(0);
   const [rideDuration, setRideDuration] = useState<number>(0);
   const [currentRideFree, setCurrentRideFree] = useState<boolean>(false);
+  const [currentRideRewardSource, setCurrentRideRewardSource] = useState<'account' | 'promo' | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash');
   const [paymentLoading, setPaymentLoading] = useState<boolean>(false);
   const [placesLoading, setPlacesLoading] = useState<boolean>(false);
@@ -1111,8 +1112,13 @@ export default function CustomerHomeScreen() {
       );
       return;
     }
+    const accountFreeRides = user?.type === 'customer' ? Math.max(0, user.freeRidesRemaining ?? 0) : 0;
     const free = isFreeRide();
+    const freeRideSource: 'account' | 'promo' | null = free
+      ? (accountFreeRides > 0 ? 'account' : 'promo')
+      : null;
     setCurrentRideFree(free);
+    setCurrentRideRewardSource(freeRideSource);
 
     const rideForOtherEnabled = Boolean(rideForOtherDraft.enabled && rideForOtherDraft.recipient);
     const selectedRideRecipient = rideForOtherEnabled ? rideForOtherDraft.recipient : null;
@@ -1199,7 +1205,11 @@ export default function CustomerHomeScreen() {
   }, [destination, selectedDest, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, mapRegion.latitude, mapRegion.longitude, rideForOtherDraft]);
 
   const handleCompleteRide = useCallback(async () => {
-    await incrementCompletedRides();
+    if (currentRideFree) {
+      await consumeFreeRide(currentRideRewardSource ?? undefined);
+    } else {
+      await incrementCompletedRides();
+    }
     if (trackingIntervalRef.current) {
       clearInterval(trackingIntervalRef.current);
       trackingIntervalRef.current = null;
@@ -1239,7 +1249,7 @@ export default function CustomerHomeScreen() {
 
     setShowReceiptModal(true);
     console.log('Showing receipt modal');
-  }, [incrementCompletedRides, selectedDest, user, currentRideFree, ridePrice, rideDistance, rideDuration, addRideToHistory, currentBackendRideId, currentDriver, paymentMethod, activeRideForOther, activeRideRecipient, activeRidePaymentMode, activeRideLiveTracking]);
+  }, [incrementCompletedRides, consumeFreeRide, selectedDest, user, currentRideFree, currentRideRewardSource, ridePrice, rideDistance, rideDuration, addRideToHistory, currentBackendRideId, currentDriver, paymentMethod, activeRideForOther, activeRideRecipient, activeRidePaymentMode, activeRideLiveTracking]);
 
   const handleCloseReceipt = useCallback(() => {
     setShowReceiptModal(false);
@@ -2240,7 +2250,7 @@ export default function CustomerHomeScreen() {
                     </TouchableOpacity>
                   </View>
                 )}
-                {promoApplied && freeRidesLeft > 0 && (
+                {freeRidesLeft > 0 && (
                   <View style={styles.freeRidesBannerNew}>
                     <Gift size={18} color="#2ECC71" />
                     <Text style={styles.freeRidesBannerTextNew}>
@@ -3069,7 +3079,7 @@ export default function CustomerHomeScreen() {
                 {paymentMethod === 'card' ? <CreditCard size={14} color="#1A73E8" /> : <Banknote size={14} color={Colors.dark.success} />}
               </View>
               <Text style={[styles.paymentPillText, paymentMethod === 'card' && { color: '#1A73E8' }]}>
-                {currentRideFree ? 'Promosyon ile ücretsiz sürüş' : paymentMethod === 'card' ? 'Kart ile ödeme' : 'Nakit / IBAN ile ödeme'}
+                {currentRideFree ? 'Ücretsiz sürüş uygulandı' : paymentMethod === 'card' ? 'Kart ile ödeme' : 'Nakit / IBAN ile ödeme'}
               </Text>
             </View>
             {activeRideForOther && activeRideRecipient && (
@@ -3260,7 +3270,7 @@ export default function CustomerHomeScreen() {
             </View>
             <View style={styles.receiptRow}>
               <Text style={styles.receiptLabel}>Ödeme</Text>
-              <Text style={styles.receiptValue}>{currentRideFree ? 'Ücretsiz (Promo)' : paymentMethod === 'card' ? 'Kredi/Banka Kartı' : 'Nakit'}</Text>
+              <Text style={styles.receiptValue}>{currentRideFree ? 'Ücretsiz sürüş' : paymentMethod === 'card' ? 'Kredi/Banka Kartı' : 'Nakit'}</Text>
             </View>
             {activeRideForOther && activeRideRecipient && (
               <View style={styles.receiptRow}>
@@ -3272,7 +3282,7 @@ export default function CustomerHomeScreen() {
             <View style={styles.receiptTotalRow}>
               <Text style={styles.receiptTotalLabel}>Toplam</Text>
               <Text style={styles.receiptTotalValue}>
-                {currentRideFree ? 'ÜCRETSiZ' : `₺${ridePrice}`}
+                {currentRideFree ? 'ÜCRETSİZ' : `₺${ridePrice}`}
               </Text>
             </View>
             {sponsorVenueName && (
