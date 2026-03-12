@@ -212,7 +212,41 @@ async function readPortableTextFile(path: string): Promise<string | null> {
       const text = await d.readTextFile(path);
       return typeof text === 'string' ? text : null;
     }
-  } catch {}
+  } catch (error) {
+    console.log('[STORE] Deno snapshot read failed:', path, error);
+  }
+
+  try {
+    const bunInstance = (globalThis as any).Bun;
+    if (bunInstance?.file) {
+      const file = bunInstance.file(path);
+      if (await file.exists()) {
+        const text = await file.text();
+        return typeof text === 'string' ? text : null;
+      }
+    }
+  } catch (error) {
+    console.log('[STORE] Bun snapshot read failed:', path, error);
+  }
+
+  try {
+    const fs = await import('node:fs/promises');
+    const text = await fs.readFile(path, 'utf8');
+    return typeof text === 'string' ? text : null;
+  } catch (error) {
+    const rawCode = typeof error === 'object' && error !== null && 'code' in error
+      ? (error as { code?: unknown }).code
+      : '';
+    const errorCode = typeof rawCode === 'string'
+      ? rawCode
+      : typeof rawCode === 'number'
+        ? rawCode.toString()
+        : '';
+    if (errorCode && errorCode !== 'ENOENT') {
+      console.log('[STORE] Node snapshot read failed:', path, error);
+    }
+  }
+
   return null;
 }
 
@@ -223,7 +257,41 @@ async function writePortableTextFile(path: string, text: string): Promise<boolea
       await d.writeTextFile(path, text);
       return true;
     }
-  } catch {}
+  } catch (error) {
+    console.log('[STORE] Deno snapshot write failed:', path, error);
+  }
+
+  try {
+    const bunInstance = (globalThis as any).Bun;
+    if (bunInstance?.write) {
+      const file = bunInstance.file?.(path);
+      const exists = file && typeof file.exists === 'function' ? await file.exists() : false;
+      if (!exists) {
+        try {
+          const pathModule = await import('node:path');
+          const fs = await import('node:fs/promises');
+          await fs.mkdir(pathModule.dirname(path), { recursive: true });
+        } catch (mkdirError) {
+          console.log('[STORE] Bun snapshot mkdir fallback failed:', path, mkdirError);
+        }
+      }
+      await bunInstance.write(path, text);
+      return true;
+    }
+  } catch (error) {
+    console.log('[STORE] Bun snapshot write failed:', path, error);
+  }
+
+  try {
+    const fs = await import('node:fs/promises');
+    const pathModule = await import('node:path');
+    await fs.mkdir(pathModule.dirname(path), { recursive: true });
+    await fs.writeFile(path, text, 'utf8');
+    return true;
+  } catch (error) {
+    console.log('[STORE] Node snapshot write failed:', path, error);
+  }
+
   return false;
 }
 
@@ -490,6 +558,12 @@ async function loadFromSnapshot(): Promise<boolean> {
 }
 
 export function getPersistentStoreStatus(): { available: boolean; lastSavedAt: string | null; filePath: string | null } {
+  const hasInMemorySnapshotCandidate = users.size > 0 || drivers.size > 0 || passwords.size > 0 || sessions.size > 0;
+  if (!_snapshotAvailable && hasInMemorySnapshotCandidate && !_snapshotPersistTimer && !_snapshotPersistInFlight) {
+    console.log('[STORE] Snapshot unavailable while in-memory auth data exists, scheduling autosave');
+    scheduleSnapshotPersist('persistent-store-status-autosave');
+  }
+
   return {
     available: _snapshotAvailable,
     lastSavedAt: _snapshotLastSavedAt,
