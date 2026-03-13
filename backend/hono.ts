@@ -33,6 +33,45 @@ console.log("[SERVER] Hono v69 started - registration always allowed regardless 
 
 let _dbReady = false;
 let _dbInitPromise: Promise<void> | null = null;
+const _serverEnvCache: Record<string, string> = {};
+
+function normalizeServerEnvValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function cacheContextEnv(c: Context): void {
+  try {
+    const rawEnv = (c as unknown as { env?: Record<string, unknown> }).env;
+    if (!rawEnv || typeof rawEnv !== 'object') {
+      return;
+    }
+
+    const dbEnvKeys = [
+      'EXPO_PUBLIC_RORK_DB_ENDPOINT',
+      'EXPO_PUBLIC_RORK_DB_NAMESPACE',
+      'EXPO_PUBLIC_RORK_DB_TOKEN',
+      'RORK_DB_ENDPOINT',
+      'RORK_DB_NAMESPACE',
+      'RORK_DB_TOKEN',
+    ] as const;
+
+    let cachedAny = false;
+
+    for (const key of dbEnvKeys) {
+      const nextValue = normalizeServerEnvValue(rawEnv[key]);
+      if (nextValue && _serverEnvCache[key] !== nextValue) {
+        _serverEnvCache[key] = nextValue;
+        cachedAny = true;
+      }
+    }
+
+    if (cachedAny) {
+      console.log('[SERVER] Context env cache refreshed - endpoint:', !!(_serverEnvCache.EXPO_PUBLIC_RORK_DB_ENDPOINT || _serverEnvCache.RORK_DB_ENDPOINT), 'namespace:', !!(_serverEnvCache.EXPO_PUBLIC_RORK_DB_NAMESPACE || _serverEnvCache.RORK_DB_NAMESPACE), 'token:', !!(_serverEnvCache.EXPO_PUBLIC_RORK_DB_TOKEN || _serverEnvCache.RORK_DB_TOKEN));
+    }
+  } catch (error) {
+    console.log('[SERVER] Context env cache error:', error);
+  }
+}
 
 function maskPhoneNumber(phone: string | undefined): string | null {
   const digits = (phone ?? '').replace(/\D/g, '');
@@ -1090,6 +1129,12 @@ function readServerEnv(key: string): string {
       if (val) return val;
     }
   } catch {}
+
+  const cachedValue = normalizeServerEnvValue(_serverEnvCache[key]);
+  if (cachedValue) {
+    return cachedValue;
+  }
+
   return '';
 }
 
@@ -1164,6 +1209,7 @@ async function readBootstrapBodyFromClone(c: Context): Promise<unknown> {
 }
 
 app.use("*", async (c, next) => {
+  cacheContextEnv(c);
   const bootstrapBody = await readBootstrapBodyFromClone(c);
   const { ep, ns, tk } = resolveBootstrapDbConfig(c, bootstrapBody);
   if (ep && ns && tk) {
@@ -1226,6 +1272,7 @@ app.get("/health", async (c) => {
   const storageMode = getCurrentStorageMode();
   const ready = storageMode !== 'memory';
   const netgsmStatus = getNetgsmConfigStatus();
+  const resolvedHealthConfig = resolveDbHeaders(c);
   console.log('[SERVER] Health response: configured:', configured, 'ready:', ready, 'storageMode:', storageMode, 'snapshotAvailable:', persistentStore.available, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length, 'smsConfigured:', netgsmStatus.configured, 'smsSenderName:', netgsmStatus.senderName ?? 'none', 'smsConfiguredHeader:', netgsmStatus.configuredSenderName ?? 'none', 'smsHeaderMismatch:', netgsmStatus.senderHeaderMismatch, 'smsSenderLocked:', netgsmStatus.senderLocked);
   return c.json({
     status: "ok",
@@ -1235,7 +1282,9 @@ app.get("/health", async (c) => {
     storageMode,
     persistentStoreAvailable: persistentStore.available,
     persistentStoreLastSavedAt: persistentStore.lastSavedAt,
-    dbMissing: (!ep || !ns || !tk) ? { endpoint: !ep, namespace: !ns, token: !tk } : undefined,
+    dbMissing: (!resolvedHealthConfig.ep || !resolvedHealthConfig.ns || !resolvedHealthConfig.tk)
+      ? { endpoint: !resolvedHealthConfig.ep, namespace: !resolvedHealthConfig.ns, token: !resolvedHealthConfig.tk }
+      : undefined,
     smsProvider: AUTH_SMS_PROVIDER,
     smsConfigured: netgsmStatus.configured,
     smsSenderName: netgsmStatus.senderName,
@@ -2694,7 +2743,7 @@ app.post("/bootstrap-db", async (c) => {
         }
       }
       return c.json({
-        success: isDbConfigured() || db.users.getAll().length > 0 || db.drivers.getAll().length > 0,
+        success: isDbConfigured() || persistentStore.available || db.users.getAll().length > 0 || db.drivers.getAll().length > 0,
         configured: isDbConfigured(),
         storageMode: getCurrentStorageMode(),
         persistentStoreAvailable: persistentStore.available,
