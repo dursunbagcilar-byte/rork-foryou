@@ -81,6 +81,10 @@ export function isBusinessRide(ride: Ride | null | undefined): ride is BusinessR
   return !!ride && (ride.orderType === 'business_delivery' || ride.orderType === 'custom_delivery');
 }
 
+function hasActiveRideForCourier(driverId: string): boolean {
+  return !!db.rides.getActiveByDriver(driverId);
+}
+
 function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -116,6 +120,7 @@ function getEligibleCourierCandidates(ride: BusinessRide): CourierCandidate[] {
   return db.drivers.getOnlineCouriersByCity(ride.city)
     .filter((courier) => courier.isApproved !== false)
     .filter((courier) => !courier.isSuspended)
+    .filter((courier) => !hasActiveRideForCourier(courier.id))
     .filter((courier) => !attemptedCourierIds.has(courier.id))
     .filter((courier) => !rejectedCourierIds.has(courier.id))
     .map((courier) => {
@@ -339,6 +344,11 @@ export async function tryDispatchWaitingBusinessOrdersForCourier(driverId: strin
 
   const driverLocation = db.driverLocations.get(driverId);
   if (!driverLocation) {
+    return 0;
+  }
+
+  if (hasActiveRideForCourier(driverId)) {
+    console.log('[RIDES] Skipping courier dispatch because courier already has active ride:', driverId);
     return 0;
   }
 

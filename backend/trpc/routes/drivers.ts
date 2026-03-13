@@ -86,7 +86,9 @@ export const driversRouter = createTRPCRouter({
   getOnlineByCity: protectedProcedure
     .input(z.object({ city: z.string() }))
     .query(({ input }) => {
-      const drivers = db.drivers.getOnlineByCity(input.city);
+      const drivers = db.drivers.getOnlineByCity(input.city)
+        .filter((driver) => !db.rides.getActiveByDriver(driver.id));
+      console.log('[DRIVERS] getOnlineByCity available drivers:', input.city, 'count:', drivers.length);
       return drivers.map(d => {
         const loc = db.driverLocations.get(d.id);
         return {
