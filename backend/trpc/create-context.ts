@@ -4,6 +4,7 @@ import superjson from "superjson";
 import { bootstrapDbConfig, db, forceReloadStore, initializeStore } from "../db/store";
 import { dbGet, getCachedDbConfig, isDbConfigured, setDbConfig } from "../db/rork-db";
 import type { Driver, Session, User } from "../db/types";
+import { parseSignedSessionToken } from "../utils/session-token";
 
 function buildSessionRecordId(token: string): string {
   return token.replace(/[^a-zA-Z0-9]/g, "_");
@@ -237,6 +238,14 @@ async function resolveValidSession(token: string) {
 
   if (!session) {
     session = await loadSessionFromDb(token);
+  }
+
+  if (!session) {
+    session = await parseSignedSessionToken(token);
+    if (session) {
+      db.sessions.set(token, session);
+      console.log("[CONTEXT] Session recovered from signed token:", session.userId);
+    }
   }
 
   if (!session) {

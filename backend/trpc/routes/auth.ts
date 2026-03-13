@@ -3,11 +3,11 @@ import { createTRPCRouter, publicProcedure, protectedProcedure } from "../create
 import { db } from "../../db/store";
 import { dbDirectUpsert, isDbConfigured } from "../../db/rork-db";
 import type { Driver, Session, User } from "../../db/types";
+import { createSignedSessionRecord } from "../../utils/session-token";
 import {
   checkLoginAttempt,
   recordLoginFailure,
   recordLoginSuccess,
-  generateSecureToken,
   hashPassword,
   verifyPassword,
   sanitizeInput,
@@ -82,20 +82,11 @@ async function persistAccountDirect(account: User | Driver, accountType: "custom
 }
 
 async function createSession(userId: string, userType: "customer" | "driver"): Promise<string> {
-  const token = generateSecureToken(64);
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-  const sessionRecord: Session = {
-    token,
-    userId,
-    userType,
-    createdAt: now.toISOString(),
-    expiresAt: expiresAt.toISOString(),
-  };
-  await db.sessions.setSync(token, sessionRecord);
+  const sessionRecord: Session = await createSignedSessionRecord(userId, userType);
+  await db.sessions.setSync(sessionRecord.token, sessionRecord);
   await persistSessionDirect(sessionRecord);
-  console.log("[AUTH] Secure session created for:", userId, "expires:", expiresAt.toISOString());
-  return token;
+  console.log("[AUTH] Secure session created for:", userId, "expires:", sessionRecord.expiresAt);
+  return sessionRecord.token;
 }
 
 function generateReferralCode(): string {

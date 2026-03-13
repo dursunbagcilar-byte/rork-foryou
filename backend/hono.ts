@@ -7,6 +7,7 @@ import { createContext } from "./trpc/create-context";
 import { db, initializeStore, bootstrapDbConfig, reinitializeStore, forceReloadStore, getPersistentStoreStatus } from "./db/store";
 import { setDbConfig, isDbConfigured, getCachedDbConfig, dbGet } from "./db/rork-db";
 import type { User, Driver, Business, BusinessMenuItem, Session } from "./db/types";
+import { createSignedSessionRecord, parseSignedSessionToken } from "./utils/session-token";
 import {
   checkRateLimit,
   getClientIP,
@@ -16,7 +17,6 @@ import {
   validateEmail,
   validatePassword,
   hashPassword,
-  generateSecureToken,
   verifyPassword,
   checkLoginAttempt,
   recordLoginFailure,
@@ -609,16 +609,8 @@ async function repairAuthAccountFromBackup(input: {
     repaired = true;
   }
 
-  const sessionToken = generateSecureToken(64);
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-  const sessionRecord: Session = {
-    token: sessionToken,
-    userId: accountToPersist.id,
-    userType: resolvedType,
-    createdAt: now.toISOString(),
-    expiresAt: expiresAt.toISOString(),
-  };
+  const sessionRecord: Session = await createSignedSessionRecord(accountToPersist.id, resolvedType);
+  const sessionToken = sessionRecord.token;
 
   await db.sessions.setSync(sessionToken, sessionRecord);
   await persistSessionDirect(sessionRecord);
@@ -1029,6 +1021,14 @@ async function resolveValidSession(sessionToken: string): Promise<Session | null
 
   if (!session) {
     session = await loadSessionFromDb(sessionToken);
+  }
+
+  if (!session) {
+    session = await parseSignedSessionToken(sessionToken);
+    if (session) {
+      db.sessions.set(sessionToken, session);
+      console.log('[SERVER] Session recovered from signed token:', session.userId);
+    }
   }
 
   if (!session) {
@@ -1486,16 +1486,8 @@ app.post("/auth/register-customer", async (c) => {
     }
     await db.passwords.setSync(cleanEmail, hashedPwd);
 
-    const sessionToken = generateSecureToken(64);
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    const sessionRecord: Session = {
-      token: sessionToken,
-      userId: id,
-      userType: 'customer',
-      createdAt: now.toISOString(),
-      expiresAt: expiresAt.toISOString(),
-    };
+    const sessionRecord: Session = await createSignedSessionRecord(id, 'customer');
+    const sessionToken = sessionRecord.token;
     await db.sessions.setSync(sessionToken, sessionRecord);
     await persistAccountDirect(user, 'customer');
     await persistPasswordHashDirect(cleanEmail, hashedPwd);
@@ -1591,16 +1583,8 @@ app.post("/auth/register-driver", async (c) => {
     }
     await db.passwords.setSync(cleanEmail, hashedPwd);
 
-    const sessionToken = generateSecureToken(64);
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    const sessionRecord: Session = {
-      token: sessionToken,
-      userId: id,
-      userType: 'driver',
-      createdAt: now.toISOString(),
-      expiresAt: expiresAt.toISOString(),
-    };
+    const sessionRecord: Session = await createSignedSessionRecord(id, 'driver');
+    const sessionToken = sessionRecord.token;
     await db.sessions.setSync(sessionToken, sessionRecord);
     await persistAccountDirect(driver, 'driver');
     await persistPasswordHashDirect(cleanEmail, hashedPwd);
@@ -1721,16 +1705,8 @@ app.post("/auth/social-login", async (c) => {
       console.log('[REST] social-login matched customer:', user.id, provider, cleanEmail || user.email || 'no-email');
     }
 
-    const sessionToken = generateSecureToken(64);
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    const sessionRecord: Session = {
-      token: sessionToken,
-      userId: user.id,
-      userType: 'customer',
-      createdAt: now.toISOString(),
-      expiresAt: expiresAt.toISOString(),
-    };
+    const sessionRecord: Session = await createSignedSessionRecord(user.id, 'customer');
+    const sessionToken = sessionRecord.token;
     await db.sessions.setSync(sessionToken, sessionRecord);
     await persistSessionDirect(sessionRecord);
 
@@ -1927,16 +1903,8 @@ app.post("/auth/verify-login-code", async (c) => {
 
     db.resetCodes.delete(codeKey);
 
-    const sessionToken = generateSecureToken(64);
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    const sessionRecord: Session = {
-      token: sessionToken,
-      userId: account.id,
-      userType: actualType,
-      createdAt: now.toISOString(),
-      expiresAt: expiresAt.toISOString(),
-    };
+    const sessionRecord: Session = await createSignedSessionRecord(account.id, actualType);
+    const sessionToken = sessionRecord.token;
     await db.sessions.setSync(sessionToken, sessionRecord);
     await persistSessionDirect(sessionRecord);
 
@@ -2001,16 +1969,8 @@ app.post("/auth/login", async (c) => {
     if (!account) return c.json({ success: false, error: 'Hesap bulunamadı', user: null, token: null });
     if (accountType === 'driver' && (account as any).isSuspended) return c.json({ success: false, error: 'Hesabınız askıya alınmış', user: null, token: null });
 
-    const sessionToken = generateSecureToken(64);
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    const sessionRecord: Session = {
-      token: sessionToken,
-      userId: account.id,
-      userType: accountType,
-      createdAt: now.toISOString(),
-      expiresAt: expiresAt.toISOString(),
-    };
+    const sessionRecord: Session = await createSignedSessionRecord(account.id, accountType);
+    const sessionToken = sessionRecord.token;
     await db.sessions.setSync(sessionToken, sessionRecord);
     await persistSessionDirect(sessionRecord);
 
@@ -2334,12 +2294,8 @@ app.post("/auth/register-business", async (c) => {
       return c.json({ success: false, error: 'Oturum bulunamadı', business: null }, 401);
     }
 
-    const session = db.sessions.get(sessionToken);
-    const isExpired = session ? new Date(session.expiresAt).getTime() < Date.now() : true;
-    if (!session || isExpired || session.userType !== 'driver') {
-      if (session && isExpired) {
-        db.sessions.delete(sessionToken);
-      }
+    const session = await resolveValidSession(sessionToken);
+    if (!session || session.userType !== 'driver') {
       return c.json({ success: false, error: 'Geçersiz oturum', business: null }, 401);
     }
 
@@ -2493,12 +2449,8 @@ app.post("/drivers/set-online-status", async (c) => {
       return c.json({ success: false, error: 'Oturum bulunamadı' }, 401);
     }
 
-    const session = db.sessions.get(sessionToken);
-    const isExpired = session ? new Date(session.expiresAt).getTime() < Date.now() : true;
-    if (!session || isExpired || session.userType !== 'driver') {
-      if (session && isExpired) {
-        db.sessions.delete(sessionToken);
-      }
+    const session = await resolveValidSession(sessionToken);
+    if (!session || session.userType !== 'driver') {
       return c.json({ success: false, error: 'Geçersiz oturum' }, 401);
     }
 
@@ -2548,12 +2500,8 @@ app.post("/drivers/update-location", async (c) => {
       return c.json({ success: false, error: 'Oturum bulunamadı' }, 401);
     }
 
-    const session = db.sessions.get(sessionToken);
-    const isExpired = session ? new Date(session.expiresAt).getTime() < Date.now() : true;
-    if (!session || isExpired || session.userType !== 'driver') {
-      if (session && isExpired) {
-        db.sessions.delete(sessionToken);
-      }
+    const session = await resolveValidSession(sessionToken);
+    if (!session || session.userType !== 'driver') {
       return c.json({ success: false, error: 'Geçersiz oturum' }, 401);
     }
 
