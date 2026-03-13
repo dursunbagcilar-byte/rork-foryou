@@ -128,7 +128,7 @@ function decodePolyline(encoded: string): { latitude: number; longitude: number 
 export default function CustomerHomeScreen() {
   const { height: SCREEN_HEIGHT } = useWindowDimensions();
   const MAP_BOTTOM_PADDING = Math.round(SCREEN_HEIGHT * 0.37);
-  const { user, promoApplied, isFreeRide, remainingFreeRides, applyPromoCode, incrementCompletedRides, consumeFreeRide, addRideToHistory, customVehicleImage, rideHistory } = useAuth();
+  const { user, promoApplied, isFreeRide, remainingFreeRides, applyPromoCode, incrementCompletedRides, consumeFreeRide, addRideToHistory, customVehicleImage, rideHistory, ensureServerSession } = useAuth();
   const { draft: rideForOtherDraft, resetRideForOtherDraft } = useRideForOthers();
 
   const { location: gpsLocation } = useLocation(true, 8000);
@@ -1359,6 +1359,16 @@ export default function CustomerHomeScreen() {
       );
       return;
     }
+
+    try {
+      await ensureServerSession('customer-dashboard-create-ride');
+    } catch (sessionError) {
+      const sessionMessage = sessionError instanceof Error ? sessionError.message : 'Oturum doğrulanamadı. Lütfen tekrar giriş yapın.';
+      console.log('[Customer] Ride request blocked by session validation:', sessionMessage);
+      Alert.alert('Yolculuk Başlatılamadı', sessionMessage);
+      return;
+    }
+
     const accountFreeRides = user?.type === 'customer' ? Math.max(0, user.freeRidesRemaining ?? 0) : 0;
     const free = isFreeRide();
     const freeRideSource: 'account' | 'promo' | null = free
@@ -1482,7 +1492,7 @@ export default function CustomerHomeScreen() {
     }
 
     console.log(`Ride requested: ${destination}, Free: ${free}, Payment: ${paymentMethod}, Price: ₺${free ? 0 : ridePrice}, ForOther: ${rideForOtherEnabled}`);
-  }, [destination, selectedDest, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, mapRegion.latitude, mapRegion.longitude, rideForOtherDraft, selectedVehiclePackage]);
+  }, [destination, selectedDest, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, mapRegion.latitude, mapRegion.longitude, rideForOtherDraft, selectedVehiclePackage, ensureServerSession]);
 
   const handleCompleteRide = useCallback(async () => {
     if (currentBackendRideId) {
@@ -1797,6 +1807,7 @@ export default function CustomerHomeScreen() {
     setSelectedCancelReason('');
     if (currentBackendRideId) {
       try {
+        await ensureServerSession('customer-dashboard-cancel-ride');
         await cancelRideMutation.mutateAsync({ rideId: currentBackendRideId, cancelledBy: 'customer', cancelReason: reason });
         console.log('[Customer] Ride cancelled on backend:', currentBackendRideId);
       } catch (err) {
@@ -1812,7 +1823,7 @@ export default function CustomerHomeScreen() {
       'Yolculuğunuz iptal edildi. Geri bildiriminiz için teşekkürler.',
       [{ text: 'Tamam' }]
     );
-  }, [resetRideStates, currentBackendRideId, cancelRideMutation]);
+  }, [resetRideStates, currentBackendRideId, cancelRideMutation, ensureServerSession]);
 
   const handleShareWhatsAppLocation = useCallback(() => {
     const lat = mapRegion.latitude;
@@ -2043,6 +2054,7 @@ export default function CustomerHomeScreen() {
     }
 
     try {
+      await ensureServerSession('customer-dashboard-create-business-order');
       const result = await createBusinessOrderMutation.mutateAsync({
         customerId: user?.id ?? '',
         customerName: user?.name ?? 'Müşteri',
@@ -2081,9 +2093,10 @@ export default function CustomerHomeScreen() {
       Alert.alert('Hata', 'Sipariş oluşturulamadı. Lütfen tekrar deneyin.');
     } catch (error) {
       console.log('[Courier] createBusinessOrder error:', error);
-      Alert.alert('Hata', 'Sipariş oluşturulamadı. Lütfen tekrar deneyin.');
+      const errorMessage = error instanceof Error ? error.message : 'Sipariş oluşturulamadı. Lütfen tekrar deneyin.';
+      Alert.alert('Hata', errorMessage);
     }
-  }, [selectedCourierBiz, courierCart, courierCartTotal, onlineCouriersCount, user?.id, user?.name, user?.city, user?.district, mapRegion.latitude, mapRegion.longitude, createBusinessOrderMutation]);
+  }, [selectedCourierBiz, courierCart, courierCartTotal, onlineCouriersCount, user?.id, user?.name, user?.city, user?.district, mapRegion.latitude, mapRegion.longitude, createBusinessOrderMutation, ensureServerSession]);
 
   const handleCloseOrderSuccess = useCallback(() => {
     setShowOrderSuccess(false);

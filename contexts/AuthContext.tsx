@@ -1792,6 +1792,48 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   }, [directFetch, handleSessionInvalid, restoreCachedAuthUser, shouldTryLocalAuthFallback, tryRecoverServerSessionFromStoredUser]);
 
+  const ensureServerSession = useCallback(async (reason: string): Promise<boolean> => {
+    const token = await getSessionToken();
+
+    if (token) {
+      try {
+        const result = await directFetch('/auth/session', { token });
+        if (result?.valid === true && result.user) {
+          console.log('[Auth] ensureServerSession confirmed active token for:', reason);
+          return true;
+        }
+        console.log('[Auth] ensureServerSession token rejected by server for:', reason);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        console.log('[Auth] ensureServerSession validation error:', reason, message || error);
+
+        if (isNetworkError(message) || shouldTryLocalAuthFallback(message)) {
+          console.log('[Auth] ensureServerSession keeping current token after network/bootstrap error for:', reason);
+          return true;
+        }
+
+        if (!isSessionAuthError(message) && !message.toLowerCase().includes('oturum')) {
+          if (error instanceof Error) {
+            throw error;
+          }
+          throw new Error('Oturum doğrulanamadı');
+        }
+      }
+
+      await setSessionToken(null);
+    }
+
+    const storedUser = await AsyncStorage.getItem('auth_user');
+    const recoveredSession = await tryRecoverServerSessionFromStoredUser(storedUser, `ensure-server-session:${reason}`);
+    if (recoveredSession) {
+      console.log('[Auth] ensureServerSession recovered session for:', reason);
+      return true;
+    }
+
+    console.log('[Auth] ensureServerSession failed to recover session for:', reason);
+    throw new Error('Oturumunuzun süresi dolmuş. Lütfen tekrar giriş yapın.');
+  }, [directFetch, shouldTryLocalAuthFallback, tryRecoverServerSessionFromStoredUser]);
+
   useEffect(() => {
     const loadAuth = async () => {
       try {
@@ -2736,6 +2778,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     recoverLocalPassword,
     getRememberedLogin,
     getRememberedPhone,
+    ensureServerSession,
     updateAccountPhone,
     logout,
   }), [
@@ -2779,6 +2822,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     recoverLocalPassword,
     getRememberedLogin,
     getRememberedPhone,
+    ensureServerSession,
     updateAccountPhone,
     logout,
   ]);
