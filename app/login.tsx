@@ -17,7 +17,6 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Car, ShieldCheck, Smartphone, User } from 'lucide-react-native';
-import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useMutation } from '@tanstack/react-query';
 import { APP_BRAND } from '@/constants/branding';
 import { VerificationCodeModal } from '@/components/VerificationCodeModal';
@@ -226,14 +225,11 @@ export default function LoginScreen() {
   const [deliveryNote, setDeliveryNote] = useState<string | null>(null);
   const [providerName, setProviderName] = useState<string | null>(null);
   const [tabWidth, setTabWidth] = useState<number>(160);
-  const [activeQuickProvider, setActiveQuickProvider] = useState<QuickAccessProvider | null>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
 
   const isSmall = width < 360;
   const isTablet = width >= 600;
   const normalizedPhone = useMemo(() => normalizeTurkishPhone(phone), [phone]);
-  const isAppleVisible = mode === 'customer' && Platform.OS === 'ios';
-  const isGoogleVisible = mode === 'customer' && (Platform.OS === 'android' || Platform.OS === 'web');
   const googleClientId = Platform.OS === 'web' ? GOOGLE_WEB_CLIENT_ID : GOOGLE_ANDROID_CLIENT_ID;
   const isGoogleConfigured = Boolean(googleClientId);
 
@@ -379,7 +375,7 @@ export default function LoginScreen() {
     },
   });
 
-  const quickAccessMutation = useMutation<void, unknown, QuickAccessProvider>({
+  const _quickAccessMutation = useMutation<void, unknown, QuickAccessProvider>({
     mutationFn: async (provider): Promise<void> => {
       console.log('[Login] Quick access requested with provider:', provider);
 
@@ -435,10 +431,9 @@ export default function LoginScreen() {
       }
       Alert.alert('Hızlı Giriş Kullanılamadı', errorMessage);
     },
-    onSettled: () => {
-      setActiveQuickProvider(null);
-    },
   });
+
+  void _quickAccessMutation;
 
   const handleSendCode = useCallback(() => {
     const phoneValidationError = getTurkishPhoneValidationError(normalizedPhone);
@@ -479,11 +474,6 @@ export default function LoginScreen() {
     sendCodeMutation.mutate(targetPhone);
   }, [normalizedPhone, pendingPhone, sendCodeMutation]);
 
-  const handleQuickAccess = useCallback((provider: QuickAccessProvider) => {
-    setActiveQuickProvider(provider);
-    quickAccessMutation.mutate(provider);
-  }, [quickAccessMutation]);
-
   const indicatorTranslate = slideAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0, tabWidth],
@@ -492,22 +482,9 @@ export default function LoginScreen() {
   const topBarTop = insets.top + 10;
   const heroHeight = height * (isSmall ? 0.12 : 0.15);
   const imgHeight = height * (isSmall ? 0.45 : 0.55);
-  const quickAccessLoading = quickAccessMutation.isPending;
-  const loading = sendCodeMutation.isPending || verifyCodeMutation.isPending || quickAccessLoading;
+  const loading = sendCodeMutation.isPending || verifyCodeMutation.isPending;
   const actionLabel = sendCodeMutation.isPending ? 'SMS Kodu Gönderiliyor...' : 'SMS ile Giriş Yap';
-  const quickAccessHint = isAppleVisible
-    ? 'Apple hesabınızla gerçek iPhone oturumu açın'
-    : isGoogleVisible
-      ? (isGoogleConfigured ? 'Google hesabınızla güvenli OAuth girişi' : 'Google OAuth client ID bekleniyor')
-      : 'Hızlı giriş bu cihazda görünmüyor';
-  const quickAccessNote = isAppleVisible
-    ? 'Apple butonu yalnızca iPhone’da görünür ve gerçek Apple hesabı akışı açılır.'
-    : isGoogleVisible
-      ? 'Google butonu yalnızca Android ve web’de görünür ve gerçek Google OAuth akışı açılır.'
-      : '';
-  const subtitle = mode === 'customer'
-    ? 'Sosyal giriş veya kayıtlı telefon numaranıza gelen SMS kodu ile devam edin'
-    : 'Kayıtlı telefon numaranıza gelen SMS kodu ile devam edin';
+  const subtitle = 'Kayıtlı telefon numaranıza gelen SMS kodu ile devam edin';
 
   return (
     <View style={styles.container}>
@@ -576,51 +553,6 @@ export default function LoginScreen() {
                 <Text style={[styles.tabText, mode === 'driver' && styles.tabTextActive, { fontSize: isSmall ? 12 : 14 }]}>Şoför</Text>
               </TouchableOpacity>
             </View>
-
-            {mode === 'customer' && (isAppleVisible || isGoogleVisible) && (
-              <View style={styles.quickAccessSection}>
-                <View style={styles.quickAccessHeader}>
-                  <Text style={styles.quickAccessTitle}>Hızlı Giriş</Text>
-                  <Text style={styles.quickAccessHint}>{quickAccessHint}</Text>
-                </View>
-
-                {isGoogleVisible && (
-                  <TouchableOpacity
-                    style={[styles.socialButton, styles.googleButton, (!isGoogleConfigured || quickAccessLoading) && styles.socialButtonDisabled]}
-                    onPress={() => handleQuickAccess('google')}
-                    disabled={!isGoogleConfigured || quickAccessLoading}
-                    activeOpacity={0.88}
-                    testID="customer-google-quick-login"
-                  >
-                    <View style={styles.socialIconBadge}>
-                      <FontAwesome name="google" size={18} color="#202124" />
-                    </View>
-                    <Text style={[styles.socialButtonText, styles.googleButtonText]}>
-                      {activeQuickProvider === 'google' && quickAccessLoading ? 'Google ile giriş yapılıyor...' : 'Google ile Devam Et'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-
-                {isAppleVisible && (
-                  <TouchableOpacity
-                    style={[styles.socialButton, styles.appleButton, quickAccessLoading && styles.socialButtonDisabled]}
-                    onPress={() => handleQuickAccess('apple')}
-                    disabled={quickAccessLoading}
-                    activeOpacity={0.88}
-                    testID="customer-apple-quick-login"
-                  >
-                    <View style={[styles.socialIconBadge, styles.appleIconBadge]}>
-                      <FontAwesome name="apple" size={22} color="#FFFFFF" />
-                    </View>
-                    <Text style={[styles.socialButtonText, styles.appleButtonText]}>
-                      {activeQuickProvider === 'apple' && quickAccessLoading ? 'Apple ile giriş yapılıyor...' : 'Apple ile Devam Et'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-
-                <Text style={styles.quickAccessNote}>{quickAccessNote}</Text>
-              </View>
-            )}
 
             <View style={styles.inputGroup}>
               <View style={[styles.inputWrapper, { paddingHorizontal: isSmall ? 12 : 16, borderRadius: isSmall ? 12 : 14 }]}>
@@ -798,67 +730,6 @@ const styles = StyleSheet.create({
   },
   tabTextActive: {
     color: '#0A0A12',
-  },
-  quickAccessSection: {
-    marginBottom: 22,
-    gap: 12,
-  },
-  quickAccessHeader: {
-    gap: 4,
-  },
-  quickAccessTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  quickAccessHint: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.48)',
-  },
-  socialButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 17,
-    borderRadius: 18,
-    borderWidth: 1,
-  },
-  socialButtonDisabled: {
-    opacity: 0.45,
-  },
-  googleButton: {
-    backgroundColor: '#F7F7F4',
-    borderColor: 'rgba(255,255,255,0.16)',
-  },
-  appleButton: {
-    backgroundColor: '#050505',
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  socialIconBadge: {
-    width: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  appleIconBadge: {
-    transform: [{ translateY: -1 }],
-  },
-  socialButtonText: {
-    fontSize: 17,
-    fontWeight: '800',
-    letterSpacing: -0.2,
-  },
-  googleButtonText: {
-    color: '#202124',
-  },
-  appleButtonText: {
-    color: '#FFFFFF',
-  },
-  quickAccessNote: {
-    fontSize: 12,
-    lineHeight: 18,
-    color: 'rgba(255,255,255,0.42)',
   },
   inputGroup: {
     marginBottom: 14,
