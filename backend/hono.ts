@@ -1629,6 +1629,132 @@ app.post("/auth/register-driver", async (c) => {
   }
 });
 
+app.post("/auth/social-login", async (c) => {
+  const startTime = Date.now();
+  try {
+    const body = await c.req.json().catch((): Record<string, unknown> => ({})) as Record<string, any>;
+    const requestDbConfig = resolveRequestDbConfig(c, body);
+    await recoverAuthStoreForRequest('social-login', requestDbConfig.endpoint, requestDbConfig.namespace, requestDbConfig.token);
+
+    const provider = body.provider === 'apple' ? 'apple' : body.provider === 'google' ? 'google' : null;
+    const requestedType: 'customer' | 'driver' = body.type === 'driver' ? 'driver' : 'customer';
+    const providerUserId = typeof body.providerUserId === 'string' ? body.providerUserId.trim() : '';
+    const cleanEmail = typeof body.email === 'string' ? body.email.toLowerCase().trim() : '';
+    const cleanName = sanitizeInput(typeof body.name === 'string' ? body.name : '');
+    const cleanAvatar = typeof body.avatar === 'string' ? body.avatar.trim() : '';
+
+    if (!provider || !providerUserId) {
+      return c.json({ success: false, error: 'Sosyal giriş bilgisi eksik.', user: null, token: null }, 400);
+    }
+
+    if (requestedType !== 'customer') {
+      return c.json({ success: false, error: 'Sosyal giriş şu anda sadece müşteri hesabında kullanılabilir.', user: null, token: null }, 400);
+    }
+
+    let providerMatchedUser = db.users.getAll().find((item) => {
+      return item.oauthProvider === provider && item.oauthProviderId === providerUserId;
+    }) ?? null;
+
+    if (!providerMatchedUser) {
+      try {
+        await initializeStore();
+        await forceReloadStore();
+        providerMatchedUser = db.users.getAll().find((item) => {
+          return item.oauthProvider === provider && item.oauthProviderId === providerUserId;
+        }) ?? null;
+      } catch (reloadError) {
+        console.log('[REST] social-login provider lookup reload error:', reloadError);
+      }
+    }
+
+    const emailLookup = cleanEmail ? await loadAuthAccountByEmail(cleanEmail) : null;
+    if (emailLookup?.driver) {
+      return c.json({ success: false, error: 'Bu e-posta ile kayıtlı şoför hesabı var. Sosyal giriş şu anda sadece müşteri için açık.', user: null, token: null }, 409);
+    }
+
+    let user = providerMatchedUser ?? emailLookup?.user ?? null;
+    const createdAt = new Date().toISOString();
+
+    if (!user && !cleanEmail) {
+      return c.json({ success: false, error: 'Bu Apple hesabı için e-posta bilgisi alınamadı. Apple hesabınızda e-posta paylaşımını açıp tekrar deneyin.', user: null, token: null }, 400);
+    }
+
+    if (!user) {
+      const id = 'c_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let myCode = 'FY';
+      for (let i = 0; i < 5; i += 1) {
+        myCode += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+
+      user = {
+        id,
+        name: cleanName || (provider === 'apple' ? 'Apple Kullanıcısı' : 'Google Kullanıcısı'),
+        phone: '',
+        email: cleanEmail,
+        type: 'customer',
+        city: '',
+        district: '',
+        avatar: cleanAvatar || undefined,
+        oauthProvider: provider,
+        oauthProviderId: providerUserId,
+        referralCode: myCode,
+        freeRidesRemaining: 1,
+        createdAt,
+      };
+
+      await db.users.setSync(id, user);
+      db.referralCodeIndex.set(myCode, id);
+      await persistAccountDirect(user, 'customer');
+      console.log('[REST] social-login created customer:', id, provider, cleanEmail || 'no-email');
+    } else {
+      const updatedUser: User = {
+        ...user,
+        name: cleanName || user.name,
+        avatar: cleanAvatar || user.avatar,
+        oauthProvider: provider,
+        oauthProviderId: providerUserId,
+      };
+      user = updatedUser;
+      await db.users.setSync(user.id, user);
+      await persistAccountDirect(user, 'customer');
+      console.log('[REST] social-login matched customer:', user.id, provider, cleanEmail || user.email || 'no-email');
+    }
+
+    const sessionToken = generateSecureToken(64);
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const sessionRecord: Session = {
+      token: sessionToken,
+      userId: user.id,
+      userType: 'customer',
+      createdAt: now.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    };
+    await db.sessions.setSync(sessionToken, sessionRecord);
+    await persistSessionDirect(sessionRecord);
+
+    if (isDbConfigured()) {
+      try {
+        const { flushPendingOps, getPendingOpsCount } = await import('./db/rork-db');
+        const pending = getPendingOpsCount();
+        if (pending > 0) {
+          console.log('[REST] Flushing', pending, 'pending ops after social-login');
+          await flushPendingOps();
+        }
+      } catch (flushErr) {
+        console.log('[REST] Post-social-login flush error (non-critical):', flushErr);
+      }
+    }
+
+    console.log('[REST] social-login success:', user.id, provider, 'elapsed:', Date.now() - startTime, 'ms');
+    return c.json({ success: true, error: null, user, token: sessionToken });
+  } catch (err: any) {
+    console.log('[REST] social-login error:', err?.message ?? err, 'elapsed:', Date.now() - startTime, 'ms');
+    return c.json({ success: false, error: 'Sosyal giriş başlatılamadı. Lütfen tekrar deneyin.', user: null, token: null }, 500);
+  }
+});
+
 app.post("/auth/send-login-code", async (c) => {
   try {
     const body = await c.req.json().catch((): Record<string, unknown> => ({})) as Record<string, any>;

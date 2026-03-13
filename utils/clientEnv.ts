@@ -22,6 +22,10 @@ function readInlineExpoPublicEnv(key: string): string {
   switch (key) {
     case 'EXPO_PUBLIC_GOOGLE_MAPS_API_KEY':
       return normalizeEnvValue(process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY);
+    case 'EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID':
+      return normalizeEnvValue(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID);
+    case 'EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID':
+      return normalizeEnvValue(process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID);
     case 'EXPO_PUBLIC_RORK_API_BASE_URL':
       return normalizeEnvValue(process.env.EXPO_PUBLIC_RORK_API_BASE_URL);
     case 'EXPO_PUBLIC_RORK_AUTH_URL':

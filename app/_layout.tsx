@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -16,6 +17,12 @@ import InAppNotification from "@/components/InAppNotification";
 import { Colors } from "@/constants/colors";
 import { trpc, trpcClient, resetCircuitBreaker } from "@/lib/trpc";
 import { getDbBootstrapPayload, getDbHeaders, hasDbConfig } from "@/utils/db";
+
+try {
+  WebBrowser.maybeCompleteAuthSession();
+} catch (e) {
+  console.log('[Layout] WebBrowser.maybeCompleteAuthSession error:', e);
+}
 
 try {
   void SplashScreen.preventAutoHideAsync();

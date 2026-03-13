@@ -4,10 +4,12 @@ export interface User {
   phone: string;
   email: string;
   type: "customer";
-  gender: "male" | "female";
+  gender?: "male" | "female";
   city: string;
   district: string;
   avatar?: string;
+  oauthProvider?: "google" | "apple";
+  oauthProviderId?: string;
   referralCode: string;
   referredBy?: string;
   freeRidesRemaining: number;

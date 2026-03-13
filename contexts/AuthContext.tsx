@@ -72,6 +72,16 @@ interface PhoneLoginResponse {
   localFallbackUsed?: boolean;
 }
 
+export type SocialAuthProvider = 'google' | 'apple';
+
+interface SocialLoginPayload {
+  provider: SocialAuthProvider;
+  providerUserId: string;
+  email?: string | null;
+  name?: string | null;
+  avatar?: string | null;
+}
+
 const LOCAL_AUTH_PREFIX = 'localauthbackup';
 const REMEMBERED_LOGIN_PREFIX = 'remembered_login_credentials';
 const REMEMBERED_PHONE_LOGIN_PREFIX = 'remembered_phone_login';
@@ -1834,6 +1844,77 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     throw new Error(result.error ?? 'Mail adresiniz veya şifreniz hatalı');
   }, [persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin, saveRememberedPhone, saveRememberedPhoneAccount]);
 
+  const loginCustomerWithSocialAuth = useCallback(async (payload: SocialLoginPayload): Promise<UserType> => {
+    const providerUserId = payload.providerUserId.trim();
+    if (!providerUserId) {
+      throw new Error('Sosyal giriş kimliği okunamadı. Lütfen tekrar deneyin.');
+    }
+
+    const normalizedEmail = payload.email ? normalizeAuthEmail(payload.email) : '';
+    const normalizedName = payload.name?.trim() ?? '';
+    const normalizedAvatar = payload.avatar?.trim() ?? '';
+
+    const backendReady = await ensureBackendAuthReady(`customer-social-${payload.provider}`, true);
+    if (!backendReady) {
+      console.log('[Auth] customer-social bootstrap not confirmed, trying direct social login anyway');
+    }
+
+    console.log('[Auth] loginCustomerWithSocialAuth start:', payload.provider, normalizedEmail || 'no-email', providerUserId);
+    const result = await directFetch('/auth/social-login', {
+      provider: payload.provider,
+      providerUserId,
+      email: normalizedEmail || undefined,
+      name: normalizedName || undefined,
+      avatar: normalizedAvatar || undefined,
+      type: 'customer',
+    });
+
+    if (!result?.success || !result.user) {
+      throw new Error(result?.error ?? 'Sosyal giriş tamamlanamadı.');
+    }
+
+    const returnedUser = normalizeStoredAuthUser({
+      ...result.user,
+      type: 'customer',
+    } as User) ?? null;
+
+    if (!returnedUser || returnedUser.type !== 'customer') {
+      throw new Error('Sosyal giriş sonrası kullanıcı bilgisi okunamadı.');
+    }
+
+    setUser(returnedUser);
+    setUserType('customer');
+    setIsAuthenticated(true);
+
+    const persistenceTasks: Promise<unknown>[] = [
+      AsyncStorage.setItem('auth_user', JSON.stringify(returnedUser)),
+    ];
+
+    if (result.token) {
+      persistenceTasks.unshift(setSessionToken(result.token));
+    }
+
+    if (normalizedEmail) {
+      persistenceTasks.push(AsyncStorage.setItem('auth_credentials', JSON.stringify({
+        type: 'customer',
+        email: normalizedEmail,
+        name: returnedUser.name,
+        phone: returnedUser.phone ?? '',
+      })));
+    }
+
+    if (returnedUser.phone) {
+      persistenceTasks.push(saveRememberedPhone(returnedUser.phone, 'customer'));
+      if (returnedUser.email) {
+        persistenceTasks.push(saveRememberedPhoneAccount(returnedUser.phone, returnedUser.email, 'customer'));
+      }
+    }
+
+    await queueAuthPersistence(`social-login:customer:${payload.provider}:${returnedUser.id}`, persistenceTasks);
+    console.log('[Auth] Social login completed for customer:', returnedUser.id, payload.provider);
+    return 'customer';
+  }, [directFetch, ensureBackendAuthReady, queueAuthPersistence, saveRememberedPhone, saveRememberedPhoneAccount]);
+
   const repairRemoteAccountFromBackup = useCallback(async (
     email: string,
     password: string,
@@ -2507,6 +2588,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     rideHistory,
     loginAsCustomer,
     loginAsDriver,
+    loginCustomerWithSocialAuth,
     sendCustomerLoginCode,
     sendDriverLoginCode,
     verifyCustomerLoginCode,
@@ -2549,6 +2631,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     rideHistory,
     loginAsCustomer,
     loginAsDriver,
+    loginCustomerWithSocialAuth,
     sendCustomerLoginCode,
     sendDriverLoginCode,
     verifyCustomerLoginCode,

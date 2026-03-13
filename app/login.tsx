@@ -16,6 +16,9 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import * as AuthSession from 'expo-auth-session';
+import * as Google from 'expo-auth-session/providers/google';
 import { ArrowLeft, Car, ShieldCheck, Smartphone, User } from 'lucide-react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useMutation } from '@tanstack/react-query';
@@ -23,8 +26,10 @@ import { APP_BRAND } from '@/constants/branding';
 import { VerificationCodeModal } from '@/components/VerificationCodeModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
+import { getClientEnv } from '@/utils/clientEnv';
 
 type LoginMode = 'customer' | 'driver';
+type QuickAccessProvider = 'google' | 'apple';
 
 interface LoginCodeResponse {
   maskedPhone?: string | null;
@@ -35,7 +40,15 @@ interface LoginCodeResponse {
   localFallbackUsed?: boolean;
 }
 
-type QuickAccessProvider = 'google' | 'apple';
+interface GoogleUserProfile {
+  id?: string;
+  email?: string;
+  name?: string;
+  picture?: string;
+}
+
+const GOOGLE_WEB_CLIENT_ID = getClientEnv('EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID');
+const GOOGLE_ANDROID_CLIENT_ID = getClientEnv('EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID');
 
 function formatPhoneInput(value: string): string {
   const digits = normalizeTurkishPhone(value);
@@ -49,15 +62,31 @@ function formatPhoneInput(value: string): string {
   return parts.join(' ');
 }
 
-function maskEmailAddress(email: string): string {
-  const [localPart, domainPart = ''] = email.trim().split('@');
-  if (!localPart || !domainPart) {
-    return email;
+function buildAppleDisplayName(
+  fullName: AppleAuthentication.AppleAuthenticationFullName | null | undefined,
+  fallbackName?: string | null
+): string {
+  const nameParts = [fullName?.givenName?.trim(), fullName?.familyName?.trim()].filter(Boolean);
+  if (nameParts.length > 0) {
+    return nameParts.join(' ');
   }
 
-  const visibleStart = localPart.slice(0, 2);
-  const maskLength = Math.max(localPart.length - visibleStart.length, 2);
-  return `${visibleStart}${'•'.repeat(maskLength)}@${domainPart}`;
+  return fallbackName?.trim() || 'Apple Kullanıcısı';
+}
+
+async function fetchGoogleProfile(accessToken: string): Promise<GoogleUserProfile> {
+  console.log('[Login] Fetching Google profile');
+  const response = await fetch('https://www.googleapis.com/userinfo/v2/me', {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Google profil bilgisi alınamadı.');
+  }
+
+  return await response.json() as GoogleUserProfile;
 }
 
 export default function LoginScreen() {
@@ -68,8 +97,7 @@ export default function LoginScreen() {
     verifyCustomerLoginCode,
     verifyDriverLoginCode,
     getRememberedPhone,
-    getRememberedLogin,
-    loginAsCustomer,
+    loginCustomerWithSocialAuth,
   } = useAuth();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -81,14 +109,28 @@ export default function LoginScreen() {
   const [maskedPhone, setMaskedPhone] = useState<string | null>(null);
   const [deliveryNote, setDeliveryNote] = useState<string | null>(null);
   const [providerName, setProviderName] = useState<string | null>(null);
-  const [quickAccessAvailable, setQuickAccessAvailable] = useState<boolean>(false);
-  const [quickAccessEmail, setQuickAccessEmail] = useState<string | null>(null);
   const [tabWidth, setTabWidth] = useState<number>(160);
+  const [activeQuickProvider, setActiveQuickProvider] = useState<QuickAccessProvider | null>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
 
   const isSmall = width < 360;
   const isTablet = width >= 600;
   const normalizedPhone = useMemo(() => normalizeTurkishPhone(phone), [phone]);
+  const googleRedirectUri = useMemo(() => AuthSession.makeRedirectUri({ scheme: 'rork-app', path: 'oauth/google' }), []);
+  const isAppleVisible = mode === 'customer' && Platform.OS === 'ios';
+  const isGoogleVisible = mode === 'customer' && (Platform.OS === 'android' || Platform.OS === 'web');
+  const googleClientId = Platform.OS === 'web' ? GOOGLE_WEB_CLIENT_ID : GOOGLE_ANDROID_CLIENT_ID;
+
+  const [googleRequest, , promptGoogleAsync] = Google.useAuthRequest({
+    androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,
+    webClientId: GOOGLE_WEB_CLIENT_ID || undefined,
+    responseType: AuthSession.ResponseType.Token,
+    scopes: ['openid', 'profile', 'email'],
+    redirectUri: googleRedirectUri,
+    selectAccount: true,
+  });
+
+  const googleReady = Boolean(googleClientId && googleRequest);
 
   const switchMode = useCallback((newMode: LoginMode) => {
     Animated.spring(slideAnim, {
@@ -167,42 +209,6 @@ export default function LoginScreen() {
     };
   }, [getRememberedPhone, mode]);
 
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadQuickAccess = async () => {
-      if (mode !== 'customer') {
-        setQuickAccessAvailable(false);
-        setQuickAccessEmail(null);
-        return;
-      }
-
-      try {
-        const remembered = await getRememberedLogin('customer');
-        if (!isMounted) {
-          return;
-        }
-
-        const isAvailable = Boolean(remembered?.email && remembered.password);
-        setQuickAccessAvailable(isAvailable);
-        setQuickAccessEmail(remembered?.email ?? null);
-        console.log('[Login] Customer quick access availability:', isAvailable, 'email:', remembered?.email ?? 'none');
-      } catch (error) {
-        console.log('[Login] loadQuickAccess error:', error);
-        if (isMounted) {
-          setQuickAccessAvailable(false);
-          setQuickAccessEmail(null);
-        }
-      }
-    };
-
-    void loadQuickAccess();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [getRememberedLogin, mode]);
-
   const sendCodeMutation = useMutation<LoginCodeResponse, unknown, string>({
     mutationFn: async (targetPhone: string): Promise<LoginCodeResponse> => {
       if (mode === 'customer') {
@@ -271,16 +277,67 @@ export default function LoginScreen() {
   const quickAccessMutation = useMutation<void, unknown, QuickAccessProvider>({
     mutationFn: async (provider): Promise<void> => {
       console.log('[Login] Quick access requested with provider:', provider);
-      if (provider === 'apple' && Platform.OS !== 'ios') {
-        throw new Error('Apple ile devam et yalnızca iPhone üzerinde kullanılabilir.');
+
+      if (provider === 'apple') {
+        if (Platform.OS !== 'ios') {
+          throw new Error('Apple ile devam et yalnızca iPhone üzerinde kullanılabilir.');
+        }
+
+        const credential = await AppleAuthentication.signInAsync({
+          requestedScopes: [
+            AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+            AppleAuthentication.AppleAuthenticationScope.EMAIL,
+          ],
+        });
+
+        if (!credential.user) {
+          throw new Error('Apple hesabı doğrulanamadı.');
+        }
+
+        const displayName = buildAppleDisplayName(credential.fullName, null);
+        await loginCustomerWithSocialAuth({
+          provider: 'apple',
+          providerUserId: credential.user,
+          email: credential.email ?? undefined,
+          name: displayName,
+          avatar: null,
+        });
+        return;
       }
 
-      const remembered = await getRememberedLogin('customer');
-      if (!remembered?.email || !remembered.password) {
-        throw new Error('Hızlı giriş için önce müşteri hesabınızla bir kez normal giriş yapın.');
+      if (!googleReady) {
+        throw new Error('Google OAuth yapılandırması eksik.');
       }
 
-      await loginAsCustomer(remembered.email, remembered.password);
+      const response = await promptGoogleAsync();
+      console.log('[Login] Google OAuth response type:', response.type);
+
+      if (response.type === 'cancel' || response.type === 'dismiss') {
+        throw new Error('__oauth_cancelled__');
+      }
+
+      if (response.type !== 'success') {
+        throw new Error('Google hesabı doğrulanamadı.');
+      }
+
+      const accessToken = response.authentication?.accessToken ?? (typeof response.params?.access_token === 'string' ? response.params.access_token : '');
+      if (!accessToken) {
+        throw new Error('Google erişim anahtarı alınamadı.');
+      }
+
+      const profile = await fetchGoogleProfile(accessToken);
+      const providerUserId = profile.id?.trim() || profile.email?.trim() || '';
+      if (!providerUserId) {
+        throw new Error('Google kullanıcı bilgisi eksik.');
+      }
+
+      await loginCustomerWithSocialAuth({
+        provider: 'google',
+        providerUserId,
+        email: profile.email ?? undefined,
+        name: profile.name ?? undefined,
+        avatar: profile.picture ?? undefined,
+      });
     },
     onSuccess: () => {
       console.log('[Login] Customer quick access success');
@@ -289,7 +346,13 @@ export default function LoginScreen() {
     onError: (error: unknown) => {
       const errorMessage = error instanceof Error ? error.message : 'Hızlı giriş başlatılamadı.';
       console.log('[Login] quickAccess error:', error);
+      if (errorMessage === '__oauth_cancelled__') {
+        return;
+      }
       Alert.alert('Hızlı Giriş Kullanılamadı', errorMessage);
+    },
+    onSettled: () => {
+      setActiveQuickProvider(null);
     },
   });
 
@@ -333,6 +396,7 @@ export default function LoginScreen() {
   }, [normalizedPhone, pendingPhone, sendCodeMutation]);
 
   const handleQuickAccess = useCallback((provider: QuickAccessProvider) => {
+    setActiveQuickProvider(provider);
     quickAccessMutation.mutate(provider);
   }, [quickAccessMutation]);
 
@@ -344,14 +408,21 @@ export default function LoginScreen() {
   const topBarTop = insets.top + 10;
   const heroHeight = height * (isSmall ? 0.12 : 0.15);
   const imgHeight = height * (isSmall ? 0.45 : 0.55);
-  const loading = sendCodeMutation.isPending || verifyCodeMutation.isPending || quickAccessMutation.isPending;
+  const quickAccessLoading = quickAccessMutation.isPending;
+  const loading = sendCodeMutation.isPending || verifyCodeMutation.isPending || quickAccessLoading;
   const actionLabel = sendCodeMutation.isPending ? 'SMS Kodu Gönderiliyor...' : 'SMS ile Giriş Yap';
-  const quickAccessHint = quickAccessAvailable
-    ? `Kayıtlı müşteri hesabı hazır${quickAccessEmail ? ` • ${maskEmailAddress(quickAccessEmail)}` : ''}`
-    : 'İlk kullanımda önce normal giriş yapın';
-  const quickAccessDisabled = !quickAccessAvailable || quickAccessMutation.isPending;
+  const quickAccessHint = isAppleVisible
+    ? 'Apple hesabınızla gerçek iPhone oturumu açın'
+    : isGoogleVisible
+      ? (googleReady ? 'Google hesabınızla güvenli OAuth girişi' : 'Google OAuth client ID bekleniyor')
+      : 'Hızlı giriş bu cihazda görünmüyor';
+  const quickAccessNote = isAppleVisible
+    ? 'Apple butonu yalnızca iPhone’da görünür ve gerçek Apple hesabı akışı açılır.'
+    : isGoogleVisible
+      ? 'Google butonu yalnızca Android ve web’de görünür ve gerçek Google OAuth akışı açılır.'
+      : '';
   const subtitle = mode === 'customer'
-    ? 'Hızlı giriş veya kayıtlı telefon numaranıza gelen SMS kodu ile devam edin'
+    ? 'Sosyal giriş veya kayıtlı telefon numaranıza gelen SMS kodu ile devam edin'
     : 'Kayıtlı telefon numaranıza gelen SMS kodu ile devam edin';
 
   return (
@@ -391,7 +462,7 @@ export default function LoginScreen() {
             maxWidth: isTablet ? 500 : undefined,
             alignSelf: isTablet ? 'center' : undefined,
             width: isTablet ? '90%' : undefined,
-          }]}> 
+          }]}>
             <Text style={[styles.title, { fontSize: isSmall ? 24 : isTablet ? 32 : 28 }]}>Giriş Yap</Text>
             <Text style={[styles.subtitle, { fontSize: isSmall ? 12 : 14 }]}>{subtitle}</Text>
 
@@ -422,46 +493,48 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
 
-            {mode === 'customer' && (
+            {mode === 'customer' && (isAppleVisible || isGoogleVisible) && (
               <View style={styles.quickAccessSection}>
                 <View style={styles.quickAccessHeader}>
                   <Text style={styles.quickAccessTitle}>Hızlı Giriş</Text>
                   <Text style={styles.quickAccessHint}>{quickAccessHint}</Text>
                 </View>
 
-                <TouchableOpacity
-                  style={[styles.socialButton, styles.googleButton, quickAccessDisabled && styles.socialButtonDisabled]}
-                  onPress={() => handleQuickAccess('google')}
-                  disabled={quickAccessDisabled}
-                  activeOpacity={0.88}
-                  testID="customer-google-quick-login"
-                >
-                  <View style={styles.socialIconBadge}>
-                    <FontAwesome name="google" size={18} color="#202124" />
-                  </View>
-                  <Text style={[styles.socialButtonText, styles.googleButtonText]}>
-                    {quickAccessMutation.isPending && quickAccessMutation.variables === 'google' ? 'Google ile giriş yapılıyor...' : 'Google ile Devam Et'}
-                  </Text>
-                </TouchableOpacity>
+                {isGoogleVisible && (
+                  <TouchableOpacity
+                    style={[styles.socialButton, styles.googleButton, (!googleReady || quickAccessLoading) && styles.socialButtonDisabled]}
+                    onPress={() => handleQuickAccess('google')}
+                    disabled={!googleReady || quickAccessLoading}
+                    activeOpacity={0.88}
+                    testID="customer-google-quick-login"
+                  >
+                    <View style={styles.socialIconBadge}>
+                      <FontAwesome name="google" size={18} color="#202124" />
+                    </View>
+                    <Text style={[styles.socialButtonText, styles.googleButtonText]}>
+                      {activeQuickProvider === 'google' && quickAccessLoading ? 'Google ile giriş yapılıyor...' : 'Google ile Devam Et'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
 
-                <TouchableOpacity
-                  style={[styles.socialButton, styles.appleButton, quickAccessDisabled && styles.socialButtonDisabled]}
-                  onPress={() => handleQuickAccess('apple')}
-                  disabled={quickAccessDisabled}
-                  activeOpacity={0.88}
-                  testID="customer-apple-quick-login"
-                >
-                  <View style={[styles.socialIconBadge, styles.appleIconBadge]}>
-                    <FontAwesome name="apple" size={22} color="#FFFFFF" />
-                  </View>
-                  <Text style={[styles.socialButtonText, styles.appleButtonText]}>
-                    {quickAccessMutation.isPending && quickAccessMutation.variables === 'apple' ? 'Apple ile giriş yapılıyor...' : 'Apple ile Devam Et'}
-                  </Text>
-                </TouchableOpacity>
+                {isAppleVisible && (
+                  <TouchableOpacity
+                    style={[styles.socialButton, styles.appleButton, quickAccessLoading && styles.socialButtonDisabled]}
+                    onPress={() => handleQuickAccess('apple')}
+                    disabled={quickAccessLoading}
+                    activeOpacity={0.88}
+                    testID="customer-apple-quick-login"
+                  >
+                    <View style={[styles.socialIconBadge, styles.appleIconBadge]}>
+                      <FontAwesome name="apple" size={22} color="#FFFFFF" />
+                    </View>
+                    <Text style={[styles.socialButtonText, styles.appleButtonText]}>
+                      {activeQuickProvider === 'apple' && quickAccessLoading ? 'Apple ile giriş yapılıyor...' : 'Apple ile Devam Et'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
 
-                <Text style={styles.quickAccessNote}>
-                  iPhone tarafında Apple butonu, Android tarafında Google butonu müşteri hızlı girişi için görünür.
-                </Text>
+                <Text style={styles.quickAccessNote}>{quickAccessNote}</Text>
               </View>
             )}
 
