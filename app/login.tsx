@@ -16,9 +16,6 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as AppleAuthentication from 'expo-apple-authentication';
-import * as AuthSession from 'expo-auth-session';
-import * as Google from 'expo-auth-session/providers/google';
 import { ArrowLeft, Car, ShieldCheck, Smartphone, User } from 'lucide-react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useMutation } from '@tanstack/react-query';
@@ -47,8 +44,56 @@ interface GoogleUserProfile {
   picture?: string;
 }
 
+interface AppleFullName {
+  givenName?: string | null;
+  familyName?: string | null;
+}
+
+interface AppleCredentialResult {
+  user?: string | null;
+  email?: string | null;
+  fullName?: AppleFullName | null;
+}
+
+interface AppleAuthenticationModuleLike {
+  signInAsync: (options: { requestedScopes: number[] }) => Promise<AppleCredentialResult>;
+  AppleAuthenticationScope: {
+    FULL_NAME: number;
+    EMAIL: number;
+  };
+}
+
+interface AuthSessionResultLike {
+  type: string;
+  authentication?: {
+    accessToken?: string | null;
+  } | null;
+  params?: Record<string, string | undefined> | null;
+}
+
+interface AuthRequestConfigLike {
+  clientId: string;
+  redirectUri: string;
+  responseType: string;
+  scopes: string[];
+  extraParams?: Record<string, string>;
+}
+
+interface AuthRequestInstanceLike {
+  promptAsync: (discovery: { authorizationEndpoint: string }) => Promise<AuthSessionResultLike>;
+}
+
+interface AuthSessionModuleLike {
+  makeRedirectUri: (options?: { scheme?: string; path?: string; native?: string }) => string;
+  ResponseType: {
+    Token: string;
+  };
+  AuthRequest: new (config: AuthRequestConfigLike) => AuthRequestInstanceLike;
+}
+
 const GOOGLE_WEB_CLIENT_ID = getClientEnv('EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID');
 const GOOGLE_ANDROID_CLIENT_ID = getClientEnv('EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID');
+const GOOGLE_AUTHORIZATION_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
 
 function formatPhoneInput(value: string): string {
   const digits = normalizeTurkishPhone(value);
@@ -63,7 +108,7 @@ function formatPhoneInput(value: string): string {
 }
 
 function buildAppleDisplayName(
-  fullName: AppleAuthentication.AppleAuthenticationFullName | null | undefined,
+  fullName: AppleFullName | null | undefined,
   fallbackName?: string | null
 ): string {
   const nameParts = [fullName?.givenName?.trim(), fullName?.familyName?.trim()].filter(Boolean);
@@ -87,6 +132,77 @@ async function fetchGoogleProfile(accessToken: string): Promise<GoogleUserProfil
   }
 
   return await response.json() as GoogleUserProfile;
+}
+
+function getGoogleRedirectUri(authSession: AuthSessionModuleLike): string {
+  if (Platform.OS === 'web') {
+    return authSession.makeRedirectUri({ path: 'login' });
+  }
+
+  return authSession.makeRedirectUri({
+    scheme: 'rork-app',
+    path: 'login',
+    native: 'rork-app://login',
+  });
+}
+
+function getGoogleAccessToken(response: AuthSessionResultLike): string {
+  return response.authentication?.accessToken ?? (typeof response.params?.access_token === 'string' ? response.params.access_token : '');
+}
+
+async function startGoogleOAuthAsync(clientId: string): Promise<GoogleUserProfile> {
+  const authSessionModule = await import('expo-auth-session');
+  const authSession = authSessionModule as unknown as AuthSessionModuleLike;
+  const redirectUri = getGoogleRedirectUri(authSession);
+
+  console.log('[Login] Starting Google OAuth', {
+    platform: Platform.OS,
+    redirectUri,
+    hasClientId: Boolean(clientId),
+  });
+
+  const request = new authSession.AuthRequest({
+    clientId,
+    redirectUri,
+    responseType: authSession.ResponseType.Token,
+    scopes: ['openid', 'profile', 'email'],
+    extraParams: {
+      prompt: 'select_account',
+    },
+  });
+
+  const response = await request.promptAsync({
+    authorizationEndpoint: GOOGLE_AUTHORIZATION_ENDPOINT,
+  });
+
+  console.log('[Login] Google OAuth response type:', response.type);
+
+  if (response.type === 'cancel' || response.type === 'dismiss') {
+    throw new Error('__oauth_cancelled__');
+  }
+
+  if (response.type !== 'success') {
+    throw new Error('Google hesabı doğrulanamadı.');
+  }
+
+  const accessToken = getGoogleAccessToken(response);
+  if (!accessToken) {
+    throw new Error('Google erişim anahtarı alınamadı.');
+  }
+
+  return await fetchGoogleProfile(accessToken);
+}
+
+async function startAppleSignInAsync(): Promise<AppleCredentialResult> {
+  const appleAuthModule = await import('expo-apple-authentication');
+  const appleAuth = appleAuthModule as unknown as AppleAuthenticationModuleLike;
+
+  return await appleAuth.signInAsync({
+    requestedScopes: [
+      appleAuth.AppleAuthenticationScope.FULL_NAME,
+      appleAuth.AppleAuthenticationScope.EMAIL,
+    ],
+  });
 }
 
 export default function LoginScreen() {
@@ -116,21 +232,10 @@ export default function LoginScreen() {
   const isSmall = width < 360;
   const isTablet = width >= 600;
   const normalizedPhone = useMemo(() => normalizeTurkishPhone(phone), [phone]);
-  const googleRedirectUri = useMemo(() => AuthSession.makeRedirectUri({ scheme: 'rork-app', path: 'oauth/google' }), []);
   const isAppleVisible = mode === 'customer' && Platform.OS === 'ios';
   const isGoogleVisible = mode === 'customer' && (Platform.OS === 'android' || Platform.OS === 'web');
   const googleClientId = Platform.OS === 'web' ? GOOGLE_WEB_CLIENT_ID : GOOGLE_ANDROID_CLIENT_ID;
-
-  const [googleRequest, , promptGoogleAsync] = Google.useAuthRequest({
-    androidClientId: GOOGLE_ANDROID_CLIENT_ID || undefined,
-    webClientId: GOOGLE_WEB_CLIENT_ID || undefined,
-    responseType: AuthSession.ResponseType.Token,
-    scopes: ['openid', 'profile', 'email'],
-    redirectUri: googleRedirectUri,
-    selectAccount: true,
-  });
-
-  const googleReady = Boolean(googleClientId && googleRequest);
+  const isGoogleConfigured = Boolean(googleClientId);
 
   const switchMode = useCallback((newMode: LoginMode) => {
     Animated.spring(slideAnim, {
@@ -283,12 +388,7 @@ export default function LoginScreen() {
           throw new Error('Apple ile devam et yalnızca iPhone üzerinde kullanılabilir.');
         }
 
-        const credential = await AppleAuthentication.signInAsync({
-          requestedScopes: [
-            AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-            AppleAuthentication.AppleAuthenticationScope.EMAIL,
-          ],
-        });
+        const credential = await startAppleSignInAsync();
 
         if (!credential.user) {
           throw new Error('Apple hesabı doğrulanamadı.');
@@ -305,27 +405,11 @@ export default function LoginScreen() {
         return;
       }
 
-      if (!googleReady) {
+      if (!isGoogleConfigured) {
         throw new Error('Google OAuth yapılandırması eksik.');
       }
 
-      const response = await promptGoogleAsync();
-      console.log('[Login] Google OAuth response type:', response.type);
-
-      if (response.type === 'cancel' || response.type === 'dismiss') {
-        throw new Error('__oauth_cancelled__');
-      }
-
-      if (response.type !== 'success') {
-        throw new Error('Google hesabı doğrulanamadı.');
-      }
-
-      const accessToken = response.authentication?.accessToken ?? (typeof response.params?.access_token === 'string' ? response.params.access_token : '');
-      if (!accessToken) {
-        throw new Error('Google erişim anahtarı alınamadı.');
-      }
-
-      const profile = await fetchGoogleProfile(accessToken);
+      const profile = await startGoogleOAuthAsync(googleClientId);
       const providerUserId = profile.id?.trim() || profile.email?.trim() || '';
       if (!providerUserId) {
         throw new Error('Google kullanıcı bilgisi eksik.');
@@ -414,7 +498,7 @@ export default function LoginScreen() {
   const quickAccessHint = isAppleVisible
     ? 'Apple hesabınızla gerçek iPhone oturumu açın'
     : isGoogleVisible
-      ? (googleReady ? 'Google hesabınızla güvenli OAuth girişi' : 'Google OAuth client ID bekleniyor')
+      ? (isGoogleConfigured ? 'Google hesabınızla güvenli OAuth girişi' : 'Google OAuth client ID bekleniyor')
       : 'Hızlı giriş bu cihazda görünmüyor';
   const quickAccessNote = isAppleVisible
     ? 'Apple butonu yalnızca iPhone’da görünür ve gerçek Apple hesabı akışı açılır.'
@@ -502,9 +586,9 @@ export default function LoginScreen() {
 
                 {isGoogleVisible && (
                   <TouchableOpacity
-                    style={[styles.socialButton, styles.googleButton, (!googleReady || quickAccessLoading) && styles.socialButtonDisabled]}
+                    style={[styles.socialButton, styles.googleButton, (!isGoogleConfigured || quickAccessLoading) && styles.socialButtonDisabled]}
                     onPress={() => handleQuickAccess('google')}
-                    disabled={!googleReady || quickAccessLoading}
+                    disabled={!isGoogleConfigured || quickAccessLoading}
                     activeOpacity={0.88}
                     testID="customer-google-quick-login"
                   >
