@@ -17,6 +17,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Car, ShieldCheck, Smartphone, User } from 'lucide-react-native';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useMutation } from '@tanstack/react-query';
 import { APP_BRAND } from '@/constants/branding';
 import { VerificationCodeModal } from '@/components/VerificationCodeModal';
@@ -34,6 +35,8 @@ interface LoginCodeResponse {
   localFallbackUsed?: boolean;
 }
 
+type QuickAccessProvider = 'google' | 'apple';
+
 function formatPhoneInput(value: string): string {
   const digits = normalizeTurkishPhone(value);
   const parts = [
@@ -46,6 +49,17 @@ function formatPhoneInput(value: string): string {
   return parts.join(' ');
 }
 
+function maskEmailAddress(email: string): string {
+  const [localPart, domainPart = ''] = email.trim().split('@');
+  if (!localPart || !domainPart) {
+    return email;
+  }
+
+  const visibleStart = localPart.slice(0, 2);
+  const maskLength = Math.max(localPart.length - visibleStart.length, 2);
+  return `${visibleStart}${'•'.repeat(maskLength)}@${domainPart}`;
+}
+
 export default function LoginScreen() {
   const router = useRouter();
   const {
@@ -54,6 +68,8 @@ export default function LoginScreen() {
     verifyCustomerLoginCode,
     verifyDriverLoginCode,
     getRememberedPhone,
+    getRememberedLogin,
+    loginAsCustomer,
   } = useAuth();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -65,6 +81,8 @@ export default function LoginScreen() {
   const [maskedPhone, setMaskedPhone] = useState<string | null>(null);
   const [deliveryNote, setDeliveryNote] = useState<string | null>(null);
   const [providerName, setProviderName] = useState<string | null>(null);
+  const [quickAccessAvailable, setQuickAccessAvailable] = useState<boolean>(false);
+  const [quickAccessEmail, setQuickAccessEmail] = useState<string | null>(null);
   const [tabWidth, setTabWidth] = useState<number>(160);
   const slideAnim = useRef(new Animated.Value(0)).current;
 
@@ -149,6 +167,42 @@ export default function LoginScreen() {
     };
   }, [getRememberedPhone, mode]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadQuickAccess = async () => {
+      if (mode !== 'customer') {
+        setQuickAccessAvailable(false);
+        setQuickAccessEmail(null);
+        return;
+      }
+
+      try {
+        const remembered = await getRememberedLogin('customer');
+        if (!isMounted) {
+          return;
+        }
+
+        const isAvailable = Boolean(remembered?.email && remembered.password);
+        setQuickAccessAvailable(isAvailable);
+        setQuickAccessEmail(remembered?.email ?? null);
+        console.log('[Login] Customer quick access availability:', isAvailable, 'email:', remembered?.email ?? 'none');
+      } catch (error) {
+        console.log('[Login] loadQuickAccess error:', error);
+        if (isMounted) {
+          setQuickAccessAvailable(false);
+          setQuickAccessEmail(null);
+        }
+      }
+    };
+
+    void loadQuickAccess();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [getRememberedLogin, mode]);
+
   const sendCodeMutation = useMutation<LoginCodeResponse, unknown, string>({
     mutationFn: async (targetPhone: string): Promise<LoginCodeResponse> => {
       if (mode === 'customer') {
@@ -214,6 +268,31 @@ export default function LoginScreen() {
     },
   });
 
+  const quickAccessMutation = useMutation<void, unknown, QuickAccessProvider>({
+    mutationFn: async (provider): Promise<void> => {
+      console.log('[Login] Quick access requested with provider:', provider);
+      if (provider === 'apple' && Platform.OS !== 'ios') {
+        throw new Error('Apple ile devam et yalnızca iPhone üzerinde kullanılabilir.');
+      }
+
+      const remembered = await getRememberedLogin('customer');
+      if (!remembered?.email || !remembered.password) {
+        throw new Error('Hızlı giriş için önce müşteri hesabınızla bir kez normal giriş yapın.');
+      }
+
+      await loginAsCustomer(remembered.email, remembered.password);
+    },
+    onSuccess: () => {
+      console.log('[Login] Customer quick access success');
+      router.replace('/(customer-tabs)/dashboard');
+    },
+    onError: (error: unknown) => {
+      const errorMessage = error instanceof Error ? error.message : 'Hızlı giriş başlatılamadı.';
+      console.log('[Login] quickAccess error:', error);
+      Alert.alert('Hızlı Giriş Kullanılamadı', errorMessage);
+    },
+  });
+
   const handleSendCode = useCallback(() => {
     const phoneValidationError = getTurkishPhoneValidationError(normalizedPhone);
     if (phoneValidationError) {
@@ -253,6 +332,10 @@ export default function LoginScreen() {
     sendCodeMutation.mutate(targetPhone);
   }, [normalizedPhone, pendingPhone, sendCodeMutation]);
 
+  const handleQuickAccess = useCallback((provider: QuickAccessProvider) => {
+    quickAccessMutation.mutate(provider);
+  }, [quickAccessMutation]);
+
   const indicatorTranslate = slideAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0, tabWidth],
@@ -261,8 +344,15 @@ export default function LoginScreen() {
   const topBarTop = insets.top + 10;
   const heroHeight = height * (isSmall ? 0.12 : 0.15);
   const imgHeight = height * (isSmall ? 0.45 : 0.55);
-  const loading = sendCodeMutation.isPending || verifyCodeMutation.isPending;
+  const loading = sendCodeMutation.isPending || verifyCodeMutation.isPending || quickAccessMutation.isPending;
   const actionLabel = sendCodeMutation.isPending ? 'SMS Kodu Gönderiliyor...' : 'SMS ile Giriş Yap';
+  const quickAccessHint = quickAccessAvailable
+    ? `Kayıtlı müşteri hesabı hazır${quickAccessEmail ? ` • ${maskEmailAddress(quickAccessEmail)}` : ''}`
+    : 'İlk kullanımda önce normal giriş yapın';
+  const quickAccessDisabled = !quickAccessAvailable || quickAccessMutation.isPending;
+  const subtitle = mode === 'customer'
+    ? 'Hızlı giriş veya kayıtlı telefon numaranıza gelen SMS kodu ile devam edin'
+    : 'Kayıtlı telefon numaranıza gelen SMS kodu ile devam edin';
 
   return (
     <View style={styles.container}>
@@ -303,7 +393,7 @@ export default function LoginScreen() {
             width: isTablet ? '90%' : undefined,
           }]}> 
             <Text style={[styles.title, { fontSize: isSmall ? 24 : isTablet ? 32 : 28 }]}>Giriş Yap</Text>
-            <Text style={[styles.subtitle, { fontSize: isSmall ? 12 : 14 }]}>Kayıtlı telefon numaranıza gelen SMS kodu ile devam edin</Text>
+            <Text style={[styles.subtitle, { fontSize: isSmall ? 12 : 14 }]}>{subtitle}</Text>
 
             <View
               style={styles.tabContainer}
@@ -331,6 +421,49 @@ export default function LoginScreen() {
                 <Text style={[styles.tabText, mode === 'driver' && styles.tabTextActive, { fontSize: isSmall ? 12 : 14 }]}>Şoför</Text>
               </TouchableOpacity>
             </View>
+
+            {mode === 'customer' && (
+              <View style={styles.quickAccessSection}>
+                <View style={styles.quickAccessHeader}>
+                  <Text style={styles.quickAccessTitle}>Hızlı Giriş</Text>
+                  <Text style={styles.quickAccessHint}>{quickAccessHint}</Text>
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.socialButton, styles.googleButton, quickAccessDisabled && styles.socialButtonDisabled]}
+                  onPress={() => handleQuickAccess('google')}
+                  disabled={quickAccessDisabled}
+                  activeOpacity={0.88}
+                  testID="customer-google-quick-login"
+                >
+                  <View style={styles.socialIconBadge}>
+                    <FontAwesome name="google" size={18} color="#202124" />
+                  </View>
+                  <Text style={[styles.socialButtonText, styles.googleButtonText]}>
+                    {quickAccessMutation.isPending && quickAccessMutation.variables === 'google' ? 'Google ile giriş yapılıyor...' : 'Google ile Devam Et'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.socialButton, styles.appleButton, quickAccessDisabled && styles.socialButtonDisabled]}
+                  onPress={() => handleQuickAccess('apple')}
+                  disabled={quickAccessDisabled}
+                  activeOpacity={0.88}
+                  testID="customer-apple-quick-login"
+                >
+                  <View style={[styles.socialIconBadge, styles.appleIconBadge]}>
+                    <FontAwesome name="apple" size={22} color="#FFFFFF" />
+                  </View>
+                  <Text style={[styles.socialButtonText, styles.appleButtonText]}>
+                    {quickAccessMutation.isPending && quickAccessMutation.variables === 'apple' ? 'Apple ile giriş yapılıyor...' : 'Apple ile Devam Et'}
+                  </Text>
+                </TouchableOpacity>
+
+                <Text style={styles.quickAccessNote}>
+                  iPhone tarafında Apple butonu, Android tarafında Google butonu müşteri hızlı girişi için görünür.
+                </Text>
+              </View>
+            )}
 
             <View style={styles.inputGroup}>
               <View style={[styles.inputWrapper, { paddingHorizontal: isSmall ? 12 : 16, borderRadius: isSmall ? 12 : 14 }]}>
@@ -508,6 +641,67 @@ const styles = StyleSheet.create({
   },
   tabTextActive: {
     color: '#0A0A12',
+  },
+  quickAccessSection: {
+    marginBottom: 22,
+    gap: 12,
+  },
+  quickAccessHeader: {
+    gap: 4,
+  },
+  quickAccessTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  quickAccessHint: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.48)',
+  },
+  socialButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 17,
+    borderRadius: 18,
+    borderWidth: 1,
+  },
+  socialButtonDisabled: {
+    opacity: 0.45,
+  },
+  googleButton: {
+    backgroundColor: '#F7F7F4',
+    borderColor: 'rgba(255,255,255,0.16)',
+  },
+  appleButton: {
+    backgroundColor: '#050505',
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  socialIconBadge: {
+    width: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  appleIconBadge: {
+    transform: [{ translateY: -1 }],
+  },
+  socialButtonText: {
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  googleButtonText: {
+    color: '#202124',
+  },
+  appleButtonText: {
+    color: '#FFFFFF',
+  },
+  quickAccessNote: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: 'rgba(255,255,255,0.42)',
   },
   inputGroup: {
     marginBottom: 14,
