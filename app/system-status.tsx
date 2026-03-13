@@ -37,6 +37,12 @@ interface StatusItem {
 
 type StorageMode = 'database' | 'snapshot' | 'memory';
 
+interface DbMissingStatus {
+  endpoint?: boolean;
+  namespace?: boolean;
+  token?: boolean;
+}
+
 interface SystemStatusResult {
   checkedAt: string;
   baseUrl: string;
@@ -53,7 +59,40 @@ function isPersistentStorageMode(mode: StorageMode): boolean {
   return mode === 'database' || mode === 'snapshot';
 }
 
-function getDatabaseDescription(mode: StorageMode, users: number, drivers: number, clientDbEnvConfigured: boolean, explicitError?: string): string {
+function hasMissingDbConfig(dbMissing?: DbMissingStatus): boolean {
+  return Boolean(dbMissing?.endpoint || dbMissing?.namespace || dbMissing?.token);
+}
+
+function getMissingDbConfigLabel(dbMissing?: DbMissingStatus): string {
+  const missingParts: string[] = [];
+
+  if (dbMissing?.endpoint) {
+    missingParts.push('endpoint');
+  }
+
+  if (dbMissing?.namespace) {
+    missingParts.push('namespace');
+  }
+
+  if (dbMissing?.token) {
+    missingParts.push('token');
+  }
+
+  return missingParts.join(', ');
+}
+
+function isDatabaseConfigUnavailableError(explicitError?: string): boolean {
+  return explicitError?.trim().toLowerCase() === 'database config unavailable';
+}
+
+function getDatabaseDescription(
+  mode: StorageMode,
+  users: number,
+  drivers: number,
+  clientDbEnvConfigured: boolean,
+  explicitError?: string,
+  dbMissing?: DbMissingStatus,
+): string {
   if (mode === 'database') {
     return `Bulut veritabanı bağlı ve çalışıyor. ${users} müşteri, ${drivers} şoför kaydı.`;
   }
@@ -62,8 +101,15 @@ function getDatabaseDescription(mode: StorageMode, users: number, drivers: numbe
     return `Kalıcı sunucu depolaması aktif. ${users} müşteri, ${drivers} şoför kaydı korunuyor.`;
   }
 
+  if (isDatabaseConfigUnavailableError(explicitError) || hasMissingDbConfig(dbMissing)) {
+    const missingLabel = getMissingDbConfigLabel(dbMissing);
+    return missingLabel
+      ? `Kalıcı veritabanı yapılandırması şu anda görünmüyor (${missingLabel}). Backend geçici bellek modunda çalışıyor.`
+      : 'Kalıcı veritabanı yapılandırması şu anda görünmüyor. Backend geçici bellek modunda çalışıyor.';
+  }
+
   if (explicitError) {
-    return `Veritabanı hatası: ${explicitError}`;
+    return `Veritabanı bağlantı hatası: ${explicitError}`;
   }
 
   if (clientDbEnvConfigured) {
@@ -207,6 +253,7 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
   let backendLive = false;
   let databaseLive = false;
   let backendDbConfigured = false;
+  let backendDbMissing: DbMissingStatus | undefined;
   let backendPersistenceReady = false;
   let backendStorageMode: StorageMode = 'memory';
   let users = 0;
@@ -238,11 +285,7 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
         storageMode?: StorageMode;
         persistentStoreAvailable?: boolean;
         persistentStoreLastSavedAt?: string | null;
-        dbMissing?: {
-          endpoint?: boolean;
-          namespace?: boolean;
-          token?: boolean;
-        };
+        dbMissing?: DbMissingStatus;
         smsProvider?: string;
         smsConfigured?: boolean;
         smsSenderName?: string | null;
@@ -261,6 +304,7 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
 
       if (backendLive && healthPayload) {
         backendDbConfigured = Boolean(healthPayload.dbConfigured);
+        backendDbMissing = healthPayload.dbMissing;
         backendPersistenceReady = Boolean(healthPayload.dbReady || healthPayload.persistentStoreAvailable);
         backendStorageMode = healthPayload.storageMode === 'database' || healthPayload.storageMode === 'snapshot'
           ? healthPayload.storageMode
@@ -279,7 +323,7 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
         smsMissing = Array.isArray(healthPayload.smsMissing)
           ? healthPayload.smsMissing.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
           : [];
-        dbMessage = getDatabaseDescription(backendStorageMode, users, drivers, clientDbEnvConfigured);
+        dbMessage = getDatabaseDescription(backendStorageMode, users, drivers, clientDbEnvConfigured, undefined, backendDbMissing);
         smsMessage = getSmsDescription(smsConfigured, smsSenderName, smsMissing, smsHeaderMismatch, smsConfiguredHeader, smsSenderLocked);
       }
 
@@ -289,7 +333,11 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
       backendMessage = 'Backend bağlantısı kurulamadı. Sunucu uyanıyor olabilir.';
     }
 
-    if (backendLive && !databaseLive) {
+    const shouldAttemptBootstrap = backendLive
+      && !databaseLive
+      && (clientDbEnvConfigured || backendDbConfigured || !hasMissingDbConfig(backendDbMissing));
+
+    if (shouldAttemptBootstrap) {
       try {
         const bootstrapResponse = await fetchWithRetry(`${baseUrl}/api/bootstrap-db`, {
           method: 'POST',
@@ -316,14 +364,21 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
           databaseLive = backendPersistenceReady;
           users = typeof bootstrapPayload?.users === 'number' ? bootstrapPayload.users : users;
           drivers = typeof bootstrapPayload?.drivers === 'number' ? bootstrapPayload.drivers : drivers;
-          dbMessage = getDatabaseDescription(backendStorageMode, users, drivers, clientDbEnvConfigured, bootstrapPayload?.error);
+          dbMessage = getDatabaseDescription(
+            backendStorageMode,
+            users,
+            drivers,
+            clientDbEnvConfigured,
+            bootstrapPayload?.error,
+            backendDbMissing,
+          );
         }
         console.log('[SystemStatus] Bootstrap check:', { databaseLive, users, drivers, backendStorageMode });
       } catch (bootstrapErr) {
         console.log('[SystemStatus] Bootstrap check error:', bootstrapErr instanceof Error ? bootstrapErr.message : bootstrapErr);
         dbMessage = clientDbEnvConfigured
           ? 'Veritabanı bağlantısı zaman aşımına uğradı. Tekrar deneyin.'
-          : getDatabaseDescription(backendStorageMode, users, drivers, clientDbEnvConfigured);
+          : getDatabaseDescription(backendStorageMode, users, drivers, clientDbEnvConfigured, undefined, backendDbMissing);
       }
     }
 
@@ -355,7 +410,14 @@ async function fetchSystemStatus(): Promise<SystemStatusResult> {
           databaseLive = backendPersistenceReady;
           users = typeof bootstrapPayload?.users === 'number' ? bootstrapPayload.users : 0;
           drivers = typeof bootstrapPayload?.drivers === 'number' ? bootstrapPayload.drivers : 0;
-          dbMessage = getDatabaseDescription(backendStorageMode, users, drivers, clientDbEnvConfigured, bootstrapPayload?.error);
+          dbMessage = getDatabaseDescription(
+            backendStorageMode,
+            users,
+            drivers,
+            clientDbEnvConfigured,
+            bootstrapPayload?.error,
+            backendDbMissing,
+          );
         }
       } catch (fallbackErr) {
         console.log('[SystemStatus] Fallback bootstrap error:', fallbackErr instanceof Error ? fallbackErr.message : fallbackErr);
