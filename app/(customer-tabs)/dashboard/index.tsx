@@ -21,7 +21,7 @@ import { useRideForOthers, type RideForOtherPaymentMode, type RideRecipient } fr
 import { useLocation } from '@/hooks/useLocation';
 import { buildApiUrl, trpc } from '@/lib/trpc';
 import { ISTANBUL_REGION, findBestAlternativeVehicle, getVehicleTypeLabel } from '@/constants/mockData';
-import type { MockDriverInfo } from '@/constants/mockData';
+import type { Driver, MockDriverInfo } from '@/constants/mockData';
 import { getCityByName, getCityRegion } from '@/constants/cities';
 import {
   calculatePrice,
@@ -59,6 +59,40 @@ interface RoutePickerRecentItem {
   latitude?: number;
   longitude?: number;
   source: 'history' | 'city' | 'popular';
+}
+
+function buildDriverPreview(
+  driverId: string,
+  driverName: string,
+  driverRating: number,
+  profile?: Driver | null,
+): MockDriverInfo {
+  const resolvedName = profile?.name?.trim() || driverName.trim() || 'Şoför';
+  const nameParts = resolvedName.split(' ').filter(Boolean);
+  const shortName = nameParts.length > 1
+    ? `${nameParts[0]} ${nameParts[nameParts.length - 1].charAt(0)}.`
+    : resolvedName;
+  const initials = nameParts.length > 0
+    ? nameParts.map((part) => part.charAt(0)).join('').substring(0, 2).toUpperCase()
+    : 'SF';
+
+  return {
+    id: driverId,
+    name: resolvedName,
+    shortName,
+    initials,
+    phone: profile?.phone ?? '',
+    vehicleModel: profile?.vehicleModel ?? 'Araç',
+    vehiclePlate: profile?.vehiclePlate ?? '',
+    vehicleColor: profile?.vehicleColor ?? '',
+    vehicleType: profile?.driverCategory === 'scooter'
+      ? 'scooter'
+      : profile?.driverCategory === 'courier'
+        ? 'motorcycle'
+        : 'car',
+    rating: profile?.rating ?? driverRating,
+    totalRides: profile?.totalRides ?? 0,
+  };
 }
 
 function decodePolyline(encoded: string): { latitude: number; longitude: number }[] {
@@ -134,6 +168,7 @@ export default function CustomerHomeScreen() {
   const [tripStarted, setTripStarted] = useState<boolean>(false);
   const [tripRoutePath, setTripRoutePath] = useState<{ latitude: number; longitude: number }[]>([]);
   const [tripDriverLocation, setTripDriverLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [ridePickupOverride, setRidePickupOverride] = useState<{ latitude: number; longitude: number } | null>(null);
   const [tripEta, setTripEta] = useState<number>(0);
   const [tripCompleted, setTripCompleted] = useState<boolean>(false);
   const tripPathRef = useRef<{ latitude: number; longitude: number }[]>([]);
@@ -152,6 +187,12 @@ export default function CustomerHomeScreen() {
   const [showAlternativeSuggestion, setShowAlternativeSuggestion] = useState<boolean>(false);
   const [alternativeVehicle, setAlternativeVehicle] = useState<{ driver: MockDriverInfo; vehicleType: string } | null>(null);
   const [showCustomOrder, setShowCustomOrder] = useState<boolean>(false);
+  const [currentBackendRideId, setCurrentBackendRideId] = useState<string | null>(null);
+  const lastBackendRideStatusRef = useRef<string | null>(null);
+  const completionHandledRideIdRef = useRef<string | null>(null);
+  const cancellationHandledRideIdRef = useRef<string | null>(null);
+  const handleCompleteRideRef = useRef<(() => Promise<void>) | null>(null);
+  const resetRideStatesRef = useRef<(() => void) | null>(null);
   const [customOrderText, setCustomOrderText] = useState<string>('');
   const [customOrderImages, setCustomOrderImages] = useState<string[]>([]);
   const [customOrderAddress, setCustomOrderAddress] = useState<string>('');
@@ -698,7 +739,10 @@ export default function CustomerHomeScreen() {
     setTripStarted(true);
     setDriverArrived(false);
 
-    const pickup = { latitude: mapRegion.latitude, longitude: mapRegion.longitude };
+    const pickup = ridePickupOverride ?? {
+      latitude: mapRegion.latitude,
+      longitude: mapRegion.longitude,
+    };
     const dropoff = { latitude: selectedDest.latitude, longitude: selectedDest.longitude };
 
     console.log('[Trip] Fetching route from pickup to destination...');
@@ -712,16 +756,48 @@ export default function CustomerHomeScreen() {
     console.log('[Trip] Trip route ready:', path.length, 'points, dist:', distKm.toFixed(2), 'km, ETA:', etaMinutes, 'min');
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-  }, [selectedDest, mapRegion.latitude, mapRegion.longitude, fetchDriverRoute, densifyPath]);
+  }, [selectedDest, ridePickupOverride, mapRegion.latitude, mapRegion.longitude, fetchDriverRoute, densifyPath]);
 
   useEffect(() => {
     startTripRef.current = startTrip;
   }, [startTrip]);
 
-  const driverLocationPollQuery = trpc.drivers.getLocation.useQuery(
-    { driverId: currentDriver?.id ?? '' },
+  const customerActiveRideQuery = trpc.rides.getActiveRide.useQuery(
+    { userId: user?.id ?? '', type: 'customer' as const },
     {
-      enabled: !!currentDriver?.id && (
+      enabled: !!user?.id,
+      refetchInterval: (rideRequested || !!currentBackendRideId || tripStarted) ? 5000 : 20000,
+      staleTime: 4000,
+    }
+  );
+  const backendActiveRide = customerActiveRideQuery.data;
+  const backendDriverId = backendActiveRide?.driverId ? backendActiveRide.driverId : currentDriver?.id ?? '';
+
+  const _driverProfileQuery = trpc.drivers.getProfile.useQuery(
+    { driverId: backendDriverId },
+    {
+      enabled: backendDriverId.length > 0,
+      refetchInterval: tripStarted ? 15000 : 30000,
+      staleTime: 10000,
+    }
+  );
+  const backendDriverProfile = _driverProfileQuery.data;
+
+  const _rideDetailsQuery = trpc.rides.getById.useQuery(
+    { rideId: currentBackendRideId ?? '' },
+    {
+      enabled: !!currentBackendRideId,
+      refetchInterval: currentBackendRideId ? 5000 : false,
+      staleTime: 3000,
+    }
+  );
+  const backendRideDetails = _rideDetailsQuery.data;
+  const backendObservedRide = backendActiveRide ?? backendRideDetails ?? null;
+
+  const driverLocationPollQuery = trpc.drivers.getLocation.useQuery(
+    { driverId: backendDriverId },
+    {
+      enabled: backendDriverId.length > 0 && (
         (driverFound && !driverArrived && !tripStarted) ||
         (tripStarted && !tripCompleted)
       ),
@@ -730,14 +806,207 @@ export default function CustomerHomeScreen() {
     }
   );
 
-  const _customerActiveRideQuery = trpc.rides.getActiveRide.useQuery(
-    { userId: user?.id ?? '', type: 'customer' as const },
-    {
-      enabled: !!user?.id && rideRequested && !tripCompleted,
-      refetchInterval: 15000,
-      staleTime: 12000,
+  useEffect(() => {
+    const ride = backendObservedRide;
+    if (!ride) {
+      return;
     }
-  );
+
+    if (currentBackendRideId !== ride.id) {
+      console.log('[Customer] Syncing ride id from backend:', ride.id, 'status:', ride.status);
+      setCurrentBackendRideId(ride.id);
+    }
+
+    if (typeof ride.pickupLat === 'number' && typeof ride.pickupLng === 'number') {
+      const pickupLatitude = ride.pickupLat;
+      const pickupLongitude = ride.pickupLng;
+
+      setRidePickupOverride((previous) => {
+        if (previous?.latitude === pickupLatitude && previous?.longitude === pickupLongitude) {
+          return previous;
+        }
+
+        return {
+          latitude: pickupLatitude,
+          longitude: pickupLongitude,
+        };
+      });
+    }
+
+    if (!selectedDest && typeof ride.dropoffLat === 'number' && typeof ride.dropoffLng === 'number' && ride.dropoffAddress) {
+      setSelectedDest({
+        name: ride.dropoffAddress,
+        latitude: ride.dropoffLat,
+        longitude: ride.dropoffLng,
+      });
+      setDestination(ride.dropoffAddress);
+      console.log('[Customer] Hydrated destination from backend ride:', ride.dropoffAddress);
+    }
+
+    if (paymentMethod !== ride.paymentMethod) {
+      setPaymentMethod(ride.paymentMethod);
+    }
+    if (ridePrice !== ride.price) {
+      setRidePrice(ride.price);
+    }
+    if (currentRideFree !== ride.isFreeRide) {
+      setCurrentRideFree(ride.isFreeRide);
+    }
+
+    const parsedDistance = Number.parseFloat(ride.distance.replace(',', '.'));
+    if (!Number.isNaN(parsedDistance) && parsedDistance > 0 && rideDistance !== parsedDistance) {
+      setRideDistance(parsedDistance);
+    }
+
+    const parsedDuration = Number.parseInt(ride.duration.replace(/\D+/g, ''), 10);
+    if (!Number.isNaN(parsedDuration) && parsedDuration > 0 && rideDuration !== parsedDuration) {
+      setRideDuration(parsedDuration);
+    }
+  }, [backendObservedRide, currentBackendRideId, selectedDest, paymentMethod, ridePrice, currentRideFree, rideDistance, rideDuration]);
+
+  useEffect(() => {
+    const ride = backendObservedRide;
+    if (!ride?.driverId) {
+      return;
+    }
+
+    const nextDriver = buildDriverPreview(
+      ride.driverId,
+      ride.driverName,
+      ride.driverRating,
+      backendDriverProfile ?? null,
+    );
+
+    setCurrentDriver((previous) => {
+      if (
+        previous?.id === nextDriver.id &&
+        previous.shortName === nextDriver.shortName &&
+        previous.vehicleModel === nextDriver.vehicleModel &&
+        previous.vehiclePlate === nextDriver.vehiclePlate &&
+        previous.rating === nextDriver.rating &&
+        previous.totalRides === nextDriver.totalRides &&
+        previous.phone === nextDriver.phone
+      ) {
+        return previous;
+      }
+
+      console.log('[Customer] Synced driver preview from backend:', nextDriver.shortName, nextDriver.vehiclePlate);
+      return nextDriver;
+    });
+  }, [backendObservedRide, backendDriverProfile]);
+
+  useEffect(() => {
+    const ride = backendObservedRide;
+    if (!ride) {
+      return;
+    }
+
+    const previousStatus = lastBackendRideStatusRef.current;
+    if (previousStatus !== ride.status) {
+      console.log('[Customer] Backend ride status changed:', previousStatus ?? 'none', '->', ride.status, 'ride:', ride.id);
+    }
+
+    if (ride.status === 'pending') {
+      setRideRequested(true);
+      setFindingDriver(true);
+      setDriverFound(false);
+      setTripStarted(false);
+      setTripCompleted(false);
+      setDriverArrived(false);
+      setCustomerConfirmedArrival(false);
+      lastBackendRideStatusRef.current = ride.status;
+      return;
+    }
+
+    if (ride.status === 'accepted') {
+      setRideRequested(true);
+      setFindingDriver(false);
+      setDriverFound(true);
+      setTripStarted(false);
+      setTripCompleted(false);
+      setDriverArrived(false);
+      setCustomerConfirmedArrival(false);
+      lastBackendRideStatusRef.current = ride.status;
+      return;
+    }
+
+    if (ride.status === 'in_progress') {
+      setRideRequested(true);
+      setFindingDriver(false);
+      setDriverFound(true);
+      setDriverArrived(false);
+      setCustomerConfirmedArrival(true);
+      lastBackendRideStatusRef.current = ride.status;
+      return;
+    }
+
+    if (ride.status === 'completed') {
+      setRideRequested(true);
+      setFindingDriver(false);
+      setDriverFound(true);
+      setCustomerConfirmedArrival(true);
+      setTripStarted(true);
+      if (!tripCompleted) {
+        setTripCompleted(true);
+      }
+      if (completionHandledRideIdRef.current !== ride.id && !showReceiptModal && !showRatingModal) {
+        console.log('[Customer] Backend completed ride detected, opening receipt flow:', ride.id);
+        completionHandledRideIdRef.current = ride.id;
+        void handleCompleteRideRef.current?.();
+      }
+      lastBackendRideStatusRef.current = ride.status;
+      return;
+    }
+
+    if (ride.status === 'cancelled') {
+      if (cancellationHandledRideIdRef.current !== ride.id) {
+        cancellationHandledRideIdRef.current = ride.id;
+        console.log('[Customer] Backend cancelled ride detected:', ride.id, ride.cancelReason ?? 'no_reason');
+        Alert.alert(
+          'Yolculuk İptal Edildi',
+          ride.cancelReason ? `Sebep: ${ride.cancelReason}` : 'Yolculuğunuz iptal edildi.'
+        );
+        resetRideStatesRef.current?.();
+      }
+      lastBackendRideStatusRef.current = ride.status;
+    }
+  }, [backendObservedRide, tripCompleted, showReceiptModal, showRatingModal]);
+
+  useEffect(() => {
+    if (backendObservedRide?.status !== 'in_progress') {
+      return;
+    }
+    if (tripStarted || !selectedDest) {
+      return;
+    }
+
+    console.log('[Customer] Backend ride is in progress, starting trip UI:', backendObservedRide.id);
+    void startTripRef.current?.();
+  }, [backendObservedRide?.id, backendObservedRide?.status, tripStarted, selectedDest]);
+
+  useEffect(() => {
+    if (!driverFound || tripStarted || !driverLocation || driverRoutePath.length > 1) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const path = await fetchDriverRoute(driverLocation, {
+        latitude: mapRegion.latitude,
+        longitude: mapRegion.longitude,
+      });
+      if (cancelled) {
+        return;
+      }
+      const densePath = densifyPath(path, 80);
+      setDriverRoutePath(densePath);
+      console.log('[Customer] Built pickup route from real driver location:', densePath.length);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [driverFound, tripStarted, driverLocation, driverRoutePath.length, fetchDriverRoute, densifyPath, mapRegion.latitude, mapRegion.longitude]);
 
   useEffect(() => {
     if (!tripStarted || tripCompleted || !currentDriver?.id) return;
@@ -933,48 +1202,26 @@ export default function CustomerHomeScreen() {
   }, [driverFound, currentDriver?.id, tripStarted, reassigning, driverArrived, handleDriverCancelled, pulseAnim]);
 
   useEffect(() => {
-    if (findingDriver) {
-      const pulse = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 1.3, duration: 800, useNativeDriver: true }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
-        ])
-      );
-      pulse.start();
-      const timer = setTimeout(async () => {
-        pulse.stop();
-        const driver = await assignNewDriver(previousDriverIds, selectedVehiclePackage);
-        if (driver) {
-          setFindingDriver(false);
-          setDriverFound(true);
-          console.log('[Customer] Driver found for', selectedVehiclePackage, ':', driver.shortName);
-        } else {
-          console.log('[Customer] No driver for', selectedVehiclePackage, '- checking alternatives');
-          const alt = findBestAlternativeVehicle(selectedVehiclePackage, previousDriverIds);
-          if (alt) {
-            console.log('[Customer] Alternative found:', alt.vehicleType, alt.driver.shortName);
-            setAlternativeVehicle(alt);
-            setShowAlternativeSuggestion(true);
-            setFindingDriver(false);
-          } else {
-            setFindingDriver(false);
-            Alert.alert(
-              'Şoför Bulunamadı',
-              'Şu an hiçbir araç türünde müsait şoför bulunamamaktadır. Lütfen daha sonra tekrar deneyin.',
-              [{ text: 'Tamam', onPress: () => {
-                setRideRequested(false);
-                setFindingDriver(false);
-                setDriverFound(false);
-                setDestination('');
-                setSelectedDest(null);
-              }}]
-            );
-          }
-        }
-      }, 3000);
-      return () => { pulse.stop(); clearTimeout(timer); };
+    if (!findingDriver) {
+      pulseAnim.setValue(1);
+      return;
     }
-  }, [findingDriver, assignNewDriver, previousDriverIds, selectedVehiclePackage, pulseAnim]);
+
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.3, duration: 800, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+      ])
+    );
+
+    pulse.start();
+    console.log('[Customer] Waiting for a real driver acceptance from backend');
+
+    return () => {
+      pulse.stop();
+      pulseAnim.setValue(1);
+    };
+  }, [findingDriver, pulseAnim]);
 
   useEffect(() => {
     if (!driverFound || driverArrived || tripStarted || !currentDriver?.id) return;
@@ -1087,7 +1334,6 @@ export default function CustomerHomeScreen() {
   const cancelRideMutation = trpc.rides.cancel.useMutation();
   const createRatingMutation = trpc.ratings.create.useMutation();
   const sendMessageMutation = trpc.messages.send.useMutation();
-  const [currentBackendRideId, setCurrentBackendRideId] = useState<string | null>(null);
   const [activeRideRecipient, setActiveRideRecipient] = useState<RideRecipient | null>(null);
   const [activeRideForOther, setActiveRideForOther] = useState<boolean>(false);
   const [activeRidePaymentMode, setActiveRidePaymentMode] = useState<RideForOtherPaymentMode>('customer_app');
@@ -1201,11 +1447,16 @@ export default function CustomerHomeScreen() {
         return;
       }
 
+      lastBackendRideStatusRef.current = result.ride.status;
+      completionHandledRideIdRef.current = null;
+      cancellationHandledRideIdRef.current = null;
       setCurrentBackendRideId(result.ride.id);
       setRideRequested(true);
       setFindingDriver(true);
+      setDriverFound(false);
+      setTripStarted(false);
       toggleSearch(false);
-      console.log('[Customer] Ride created on backend:', result.ride.id);
+      console.log('[Customer] Ride created on backend, waiting for driver acceptance:', result.ride.id);
     } catch (err) {
       console.log('[Customer] Backend ride creation error:', err);
       setCurrentBackendRideId(null);
@@ -1220,6 +1471,10 @@ export default function CustomerHomeScreen() {
   }, [destination, selectedDest, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, mapRegion.latitude, mapRegion.longitude, rideForOtherDraft]);
 
   const handleCompleteRide = useCallback(async () => {
+    if (currentBackendRideId) {
+      completionHandledRideIdRef.current = currentBackendRideId;
+    }
+
     if (currentRideFree) {
       await consumeFreeRide(currentRideRewardSource ?? undefined);
     } else {
@@ -1265,6 +1520,8 @@ export default function CustomerHomeScreen() {
     setShowReceiptModal(true);
     console.log('Showing receipt modal');
   }, [incrementCompletedRides, consumeFreeRide, selectedDest, user, currentRideFree, currentRideRewardSource, ridePrice, rideDistance, rideDuration, addRideToHistory, currentBackendRideId, currentDriver, paymentMethod, activeRideForOther, activeRideRecipient, activeRidePaymentMode, activeRideLiveTracking]);
+
+  handleCompleteRideRef.current = handleCompleteRide;
 
   const handleCloseReceipt = useCallback(() => {
     setShowReceiptModal(false);
@@ -1392,6 +1649,9 @@ export default function CustomerHomeScreen() {
   ];
 
   const resetRideStates = useCallback(() => {
+    lastBackendRideStatusRef.current = null;
+    completionHandledRideIdRef.current = null;
+    cancellationHandledRideIdRef.current = null;
     setRideRequested(false);
     setFindingDriver(false);
     setDriverFound(false);
@@ -1407,6 +1667,7 @@ export default function CustomerHomeScreen() {
     setTripStarted(false);
     setTripRoutePath([]);
     setTripDriverLocation(null);
+    setRidePickupOverride(null);
     setTripEta(0);
     setTripCompleted(false);
     setCustomerConfirmedArrival(false);
@@ -1432,6 +1693,8 @@ export default function CustomerHomeScreen() {
     resetRideForOtherDraft();
     if (driverCancelTimerRef.current) { clearTimeout(driverCancelTimerRef.current); driverCancelTimerRef.current = null; }
   }, [resetRideForOtherDraft]);
+
+  resetRideStatesRef.current = resetRideStates;
 
   const handleCancelRide = useCallback(() => {
     if (customerConfirmedArrival) {
