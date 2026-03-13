@@ -903,11 +903,33 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         return;
       }
 
-      console.log('[Auth] Background remote repair completed for:', normalizedEmail, 'reason:', reason);
+      const repairedUser = normalizeStoredAuthUser(result?.user
+        ? {
+            ...result.user,
+            type: backup.type,
+          } as User | Driver
+        : null);
+      const persistenceTasks: Promise<unknown>[] = [];
+
+      if (result?.token) {
+        persistenceTasks.push(setSessionToken(result.token));
+      }
+
+      if (repairedUser) {
+        persistenceTasks.push(AsyncStorage.setItem('auth_user', JSON.stringify(repairedUser)));
+        setUser((currentUser) => currentUser?.id === repairedUser.id ? repairedUser : currentUser);
+        setUserType((currentType) => currentType === repairedUser.type ? repairedUser.type : currentType);
+      }
+
+      if (persistenceTasks.length > 0) {
+        await queueAuthPersistence(`background-repair:${reason}:${normalizedEmail}`, persistenceTasks);
+      }
+
+      console.log('[Auth] Background remote repair completed for:', normalizedEmail, 'reason:', reason, 'hasToken:', !!result?.token);
     } catch (error) {
       console.log('[Auth] Background remote repair error:', normalizedEmail, 'reason:', reason, error);
     }
-  }, [directFetch, ensureBackendAuthReady, getLocalAuthBackup, getRememberedLogin]);
+  }, [directFetch, ensureBackendAuthReady, getLocalAuthBackup, getRememberedLogin, queueAuthPersistence]);
 
   const buildLegacyLocalUser = useCallback(async (email: string): Promise<User | Driver | null> => {
     const normalizedEmail = normalizeAuthEmail(email);
@@ -1601,6 +1623,89 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   }, [directFetch, handlePhoneLoginSuccess, shouldTryLocalPhoneAuthFallback, tryLocalPhoneLogin]);
 
+  const tryRecoverServerSessionFromStoredUser = useCallback(async (
+    fallbackStoredUser: string | null,
+    reason: string,
+  ): Promise<boolean> => {
+    const parsedStoredUser = fallbackStoredUser ? parseStoredAuthUser(fallbackStoredUser) : null;
+    if (!parsedStoredUser || (parsedStoredUser.type !== 'customer' && parsedStoredUser.type !== 'driver')) {
+      console.log('[Auth] Session recovery skipped - cached user missing for:', reason);
+      return false;
+    }
+
+    const normalizedEmail = normalizeAuthEmail(parsedStoredUser.email);
+    if (!normalizedEmail) {
+      console.log('[Auth] Session recovery skipped - cached email missing for:', reason);
+      return false;
+    }
+
+    const [rememberedLogin, backup] = await Promise.all([
+      getRememberedLogin(parsedStoredUser.type),
+      getLocalAuthBackup(normalizedEmail),
+    ]);
+
+    if (!rememberedLogin || rememberedLogin.email !== normalizedEmail) {
+      console.log('[Auth] Session recovery skipped - remembered login missing for:', normalizedEmail, 'reason:', reason);
+      return false;
+    }
+
+    if (!backup) {
+      console.log('[Auth] Session recovery skipped - local backup missing for:', normalizedEmail, 'reason:', reason);
+      return false;
+    }
+
+    try {
+      const backendReady = await ensureBackendAuthReady(`session-recovery:${reason}`, true);
+      if (!backendReady) {
+        console.log('[Auth] Session recovery bootstrap not confirmed for:', normalizedEmail, 'reason:', reason);
+      }
+
+      const result = await directFetch('/auth/repair-account', {
+        email: normalizedEmail,
+        password: rememberedLogin.password,
+        type: backup.type,
+        account: backup.user,
+      });
+
+      if (result?.success === false || !result?.user) {
+        console.log('[Auth] Session recovery rejected for:', normalizedEmail, 'reason:', reason, 'error:', result?.error ?? 'unknown');
+        return false;
+      }
+
+      const repairedUser = normalizeStoredAuthUser({
+        ...result.user,
+        type: backup.type,
+      } as User | Driver);
+
+      if (!repairedUser) {
+        console.log('[Auth] Session recovery returned unreadable user for:', normalizedEmail, 'reason:', reason);
+        return false;
+      }
+
+      setUser(repairedUser);
+      setUserType(repairedUser.type);
+      setIsAuthenticated(true);
+
+      const persistenceTasks: Promise<unknown>[] = [
+        AsyncStorage.setItem('auth_user', JSON.stringify(repairedUser)),
+        saveRememberedLogin(rememberedLogin.email, rememberedLogin.password, repairedUser.type),
+        saveRememberedPhone(repairedUser.phone, repairedUser.type),
+        saveRememberedPhoneAccount(repairedUser.phone, repairedUser.email, repairedUser.type),
+      ];
+
+      if (result?.token) {
+        persistenceTasks.unshift(setSessionToken(result.token));
+      }
+
+      await queueAuthPersistence(`session-recovery:${reason}:${normalizedEmail}`, persistenceTasks);
+      console.log('[Auth] Session recovered from cached credentials for:', normalizedEmail, 'reason:', reason, 'hasToken:', !!result?.token);
+      return true;
+    } catch (error) {
+      console.log('[Auth] Session recovery from cached credentials failed for:', normalizedEmail, 'reason:', reason, error);
+      return false;
+    }
+  }, [directFetch, ensureBackendAuthReady, getLocalAuthBackup, getRememberedLogin, queueAuthPersistence, saveRememberedLogin, saveRememberedPhone, saveRememberedPhoneAccount]);
+
   const handleSessionInvalid = useCallback(async () => {
     console.log('[Auth] Session invalid, logging out...');
     await setSessionToken(null);
@@ -1613,6 +1718,10 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
   const restoreServerSession = useCallback(async (fallbackStoredUser: string | null): Promise<boolean> => {
     const token = await getSessionToken();
     if (!token) {
+      const recoveredSession = await tryRecoverServerSessionFromStoredUser(fallbackStoredUser, 'missing-token');
+      if (recoveredSession) {
+        return true;
+      }
       return restoreCachedAuthUser(fallbackStoredUser, 'missing-token');
     }
 
@@ -1639,6 +1748,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
 
       await setSessionToken(null);
+      const recoveredSession = await tryRecoverServerSessionFromStoredUser(fallbackStoredUser, 'invalid-server-session');
+      if (recoveredSession) {
+        return true;
+      }
+
       const restoredFromCache = await restoreCachedAuthUser(fallbackStoredUser, 'invalid-server-session');
       if (restoredFromCache) {
         return true;
@@ -1660,6 +1774,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
       if (isSessionAuthError(message) || message.toLowerCase().includes('oturum')) {
         await setSessionToken(null);
+        const recoveredSession = await tryRecoverServerSessionFromStoredUser(fallbackStoredUser, 'session-auth-error');
+        if (recoveredSession) {
+          return true;
+        }
+
         const restoredFromCache = await restoreCachedAuthUser(fallbackStoredUser, 'session-auth-error');
         if (restoredFromCache) {
           return true;
@@ -1671,7 +1790,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
       throw error instanceof Error ? error : new Error('Oturum doğrulanamadı');
     }
-  }, [directFetch, handleSessionInvalid, restoreCachedAuthUser, shouldTryLocalAuthFallback]);
+  }, [directFetch, handleSessionInvalid, restoreCachedAuthUser, shouldTryLocalAuthFallback, tryRecoverServerSessionFromStoredUser]);
 
   useEffect(() => {
     const loadAuth = async () => {
@@ -1679,11 +1798,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         const token = await getSessionToken();
         const stored = await AsyncStorage.getItem('auth_user');
 
-        if (token) {
-          await restoreServerSession(stored);
-        } else {
-          const restoredFromCache = await restoreCachedAuthUser(stored, 'initial-load');
-          if (!restoredFromCache && stored) {
+        if (token || stored) {
+          const restoredSession = await restoreServerSession(stored);
+          if (!restoredSession && stored) {
             console.log('[Auth] No session token found and cached auth_user is not restorable, clearing stale local data');
             await AsyncStorage.removeItem('auth_user');
           }
@@ -1710,7 +1827,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
     };
     void loadAuth();
-  }, [handleSessionInvalid, restoreCachedAuthUser, restoreServerSession]);
+  }, [handleSessionInvalid, restoreServerSession]);
 
   useEffect(() => {
     if (isLoading || !user || (user.type !== 'customer' && user.type !== 'driver')) {
