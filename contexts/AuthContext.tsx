@@ -54,6 +54,17 @@ interface RememberedPhoneLogin {
   updatedAt: string;
 }
 
+interface PhoneLoginResponse {
+  success: boolean;
+  error?: string | null;
+  maskedPhone?: string | null;
+  deliveryNote?: string | null;
+  smsProvider?: string | null;
+  actualType?: Exclude<UserType, null>;
+  localAuthenticatedType?: Exclude<UserType, null>;
+  localFallbackUsed?: boolean;
+}
+
 const LOCAL_AUTH_PREFIX = 'localauthbackup';
 const REMEMBERED_LOGIN_PREFIX = 'remembered_login_credentials';
 const REMEMBERED_PHONE_LOGIN_PREFIX = 'remembered_phone_login';
@@ -1147,6 +1158,63 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       lowerMessage.includes('oturum kalıcı olarak oluşturulamadı');
   }, []);
 
+  const shouldTryLocalPhoneAuthFallback = useCallback((message: string): boolean => {
+    const lowerMessage = (message || '').toLowerCase();
+    return shouldTryLocalAuthFallback(message) ||
+      lowerMessage.includes('bu telefon numarasıyla kayıtlı hesap bulunamadı') ||
+      lowerMessage.includes('telefon numarasıyla kayıtlı hesap bulunamadı') ||
+      lowerMessage.includes('doğrulama kodu bulunamadı') ||
+      lowerMessage.includes('süresi dolmuş');
+  }, [shouldTryLocalAuthFallback]);
+
+  const tryLocalPhoneLogin = useCallback(async (
+    phone: string,
+    requestedType: Exclude<UserType, null>,
+    reason: string,
+  ): Promise<Exclude<UserType, null> | null> => {
+    const normalizedPhone = normalizeTurkishPhone(phone);
+    if (!normalizedPhone) {
+      return null;
+    }
+
+    const candidateTypes = requestedType === 'driver'
+      ? ['driver', 'customer'] as const
+      : ['customer', 'driver'] as const;
+
+    for (const candidateType of candidateTypes) {
+      try {
+        const [rememberedPhone, rememberedLogin] = await Promise.all([
+          getRememberedPhone(candidateType),
+          getRememberedLogin(candidateType),
+        ]);
+
+        if (!rememberedPhone || rememberedPhone.phone !== normalizedPhone || !rememberedLogin?.email) {
+          continue;
+        }
+
+        const backup = await getLocalAuthBackup(rememberedLogin.email);
+        const backupPhone = normalizeTurkishPhone(backup?.user?.phone);
+        if (!backup || backup.type !== candidateType || backupPhone !== normalizedPhone) {
+          continue;
+        }
+
+        console.log('[Auth] tryLocalPhoneLogin matched backup:', normalizedPhone, 'requested:', requestedType, 'candidate:', candidateType, 'reason:', reason);
+        await saveRememberedPhone(normalizedPhone, backup.type);
+        return setAuthenticatedLocalUser({
+          ...backup.user,
+          phone: normalizedPhone,
+          email: normalizeAuthEmail(backup.user.email),
+          type: backup.type,
+        } as User | Driver, `phone-local-fallback:${reason}:${candidateType}`);
+      } catch (error) {
+        console.log('[Auth] tryLocalPhoneLogin candidate error:', error, 'phone:', normalizedPhone, 'candidate:', candidateType, 'reason:', reason);
+      }
+    }
+
+    console.log('[Auth] tryLocalPhoneLogin no local match for:', normalizedPhone, 'requested:', requestedType, 'reason:', reason);
+    return null;
+  }, [getLocalAuthBackup, getRememberedLogin, getRememberedPhone, saveRememberedPhone, setAuthenticatedLocalUser]);
+
   const shouldTryRemoteAccountRepair = useCallback((message: string): boolean => {
     const lowerMessage = (message || '').toLowerCase();
     return lowerMessage.includes('kullanıcı bulunamadı') ||
@@ -1240,55 +1308,107 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     throw new Error(result?.error ?? 'Giriş doğrulanamadı');
   }, [queueAuthPersistence, saveRememberedPhone]);
 
-  const sendCustomerLoginCode = useCallback(async (phone: string) => {
+  const sendCustomerLoginCode = useCallback(async (phone: string): Promise<PhoneLoginResponse> => {
     const normalizedPhone = normalizeTurkishPhone(phone);
     const phoneValidationError = getTurkishPhoneValidationError(normalizedPhone);
     if (phoneValidationError) {
       throw new Error(phoneValidationError);
     }
 
-    const backendReady = await ensureBackendAuthReady('customer-send-login-code', true);
-    if (!backendReady) {
-      console.log('[Auth] customer-send-login-code bootstrap not confirmed, trying direct request anyway');
+    try {
+      const backendReady = await ensureBackendAuthReady('customer-send-login-code', true);
+      if (!backendReady) {
+        console.log('[Auth] customer-send-login-code bootstrap not confirmed, trying direct request anyway');
+      }
+
+      const result = await directFetch('/auth/send-login-code', {
+        phone: normalizedPhone,
+        type: 'customer',
+      });
+
+      if (result?.success === false) {
+        throw new Error(result.error ?? 'SMS kodu gönderilemedi');
+      }
+
+      console.log('[Auth] Customer login code sent for:', normalizedPhone);
+      return result as PhoneLoginResponse;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      console.log('[Auth] sendCustomerLoginCode error:', message || error);
+
+      if (shouldTryLocalPhoneAuthFallback(message)) {
+        const localAuthenticatedType = await tryLocalPhoneLogin(normalizedPhone, 'customer', 'customer-send-login-code');
+        if (localAuthenticatedType) {
+          return {
+            success: true,
+            error: null,
+            maskedPhone: normalizedPhone,
+            deliveryNote: 'Sunucuya ulaşılamadığı için bu cihazdaki kayıtlı hesap yedeğiyle giriş yapıldı.',
+            smsProvider: 'device',
+            localAuthenticatedType,
+            localFallbackUsed: true,
+          };
+        }
+      }
+
+      if (error instanceof Error) {
+        throw error;
+      }
+
+      throw new Error('SMS kodu gönderilemedi');
     }
+  }, [directFetch, ensureBackendAuthReady, shouldTryLocalPhoneAuthFallback, tryLocalPhoneLogin]);
 
-    const result = await directFetch('/auth/send-login-code', {
-      phone: normalizedPhone,
-      type: 'customer',
-    });
-
-    if (result?.success === false) {
-      throw new Error(result.error ?? 'SMS kodu gönderilemedi');
-    }
-
-    console.log('[Auth] Customer login code sent for:', normalizedPhone);
-    return result;
-  }, [directFetch, ensureBackendAuthReady]);
-
-  const sendDriverLoginCode = useCallback(async (phone: string) => {
+  const sendDriverLoginCode = useCallback(async (phone: string): Promise<PhoneLoginResponse> => {
     const normalizedPhone = normalizeTurkishPhone(phone);
     const phoneValidationError = getTurkishPhoneValidationError(normalizedPhone);
     if (phoneValidationError) {
       throw new Error(phoneValidationError);
     }
 
-    const backendReady = await ensureBackendAuthReady('driver-send-login-code', true);
-    if (!backendReady) {
-      console.log('[Auth] driver-send-login-code bootstrap not confirmed, trying direct request anyway');
+    try {
+      const backendReady = await ensureBackendAuthReady('driver-send-login-code', true);
+      if (!backendReady) {
+        console.log('[Auth] driver-send-login-code bootstrap not confirmed, trying direct request anyway');
+      }
+
+      const result = await directFetch('/auth/send-login-code', {
+        phone: normalizedPhone,
+        type: 'driver',
+      });
+
+      if (result?.success === false) {
+        throw new Error(result.error ?? 'SMS kodu gönderilemedi');
+      }
+
+      console.log('[Auth] Driver login code sent for:', normalizedPhone);
+      return result as PhoneLoginResponse;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      console.log('[Auth] sendDriverLoginCode error:', message || error);
+
+      if (shouldTryLocalPhoneAuthFallback(message)) {
+        const localAuthenticatedType = await tryLocalPhoneLogin(normalizedPhone, 'driver', 'driver-send-login-code');
+        if (localAuthenticatedType) {
+          return {
+            success: true,
+            error: null,
+            maskedPhone: normalizedPhone,
+            deliveryNote: 'Sunucuya ulaşılamadığı için bu cihazdaki kayıtlı hesap yedeğiyle giriş yapıldı.',
+            smsProvider: 'device',
+            localAuthenticatedType,
+            localFallbackUsed: true,
+          };
+        }
+      }
+
+      if (error instanceof Error) {
+        throw error;
+      }
+
+      throw new Error('SMS kodu gönderilemedi');
     }
-
-    const result = await directFetch('/auth/send-login-code', {
-      phone: normalizedPhone,
-      type: 'driver',
-    });
-
-    if (result?.success === false) {
-      throw new Error(result.error ?? 'SMS kodu gönderilemedi');
-    }
-
-    console.log('[Auth] Driver login code sent for:', normalizedPhone);
-    return result;
-  }, [directFetch, ensureBackendAuthReady]);
+  }, [directFetch, ensureBackendAuthReady, shouldTryLocalPhoneAuthFallback, tryLocalPhoneLogin]);
 
   const verifyCustomerLoginCode = useCallback(async (phone: string, code: string) => {
     const normalizedPhone = normalizeTurkishPhone(phone);
@@ -1302,14 +1422,32 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       throw new Error('Lütfen 6 haneli SMS kodunu girin');
     }
 
-    const result = await directFetch('/auth/verify-login-code', {
-      phone: normalizedPhone,
-      code: trimmedCode,
-      type: 'customer',
-    });
+    try {
+      const result = await directFetch('/auth/verify-login-code', {
+        phone: normalizedPhone,
+        code: trimmedCode,
+        type: 'customer',
+      });
 
-    return handlePhoneLoginSuccess(result, normalizedPhone, 'PHONE_LOGIN_CUSTOMER');
-  }, [directFetch, handlePhoneLoginSuccess]);
+      return handlePhoneLoginSuccess(result, normalizedPhone, 'PHONE_LOGIN_CUSTOMER');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      console.log('[Auth] verifyCustomerLoginCode error:', message || error);
+
+      if (shouldTryLocalPhoneAuthFallback(message)) {
+        const localAuthenticatedType = await tryLocalPhoneLogin(normalizedPhone, 'customer', 'customer-verify-login-code');
+        if (localAuthenticatedType) {
+          return localAuthenticatedType;
+        }
+      }
+
+      if (error instanceof Error) {
+        throw error;
+      }
+
+      throw new Error('Giriş doğrulanamadı');
+    }
+  }, [directFetch, handlePhoneLoginSuccess, shouldTryLocalPhoneAuthFallback, tryLocalPhoneLogin]);
 
   const verifyDriverLoginCode = useCallback(async (phone: string, code: string) => {
     const normalizedPhone = normalizeTurkishPhone(phone);
@@ -1323,14 +1461,32 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       throw new Error('Lütfen 6 haneli SMS kodunu girin');
     }
 
-    const result = await directFetch('/auth/verify-login-code', {
-      phone: normalizedPhone,
-      code: trimmedCode,
-      type: 'driver',
-    });
+    try {
+      const result = await directFetch('/auth/verify-login-code', {
+        phone: normalizedPhone,
+        code: trimmedCode,
+        type: 'driver',
+      });
 
-    return handlePhoneLoginSuccess(result, normalizedPhone, 'PHONE_LOGIN_DRIVER');
-  }, [directFetch, handlePhoneLoginSuccess]);
+      return handlePhoneLoginSuccess(result, normalizedPhone, 'PHONE_LOGIN_DRIVER');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      console.log('[Auth] verifyDriverLoginCode error:', message || error);
+
+      if (shouldTryLocalPhoneAuthFallback(message)) {
+        const localAuthenticatedType = await tryLocalPhoneLogin(normalizedPhone, 'driver', 'driver-verify-login-code');
+        if (localAuthenticatedType) {
+          return localAuthenticatedType;
+        }
+      }
+
+      if (error instanceof Error) {
+        throw error;
+      }
+
+      throw new Error('Giriş doğrulanamadı');
+    }
+  }, [directFetch, handlePhoneLoginSuccess, shouldTryLocalPhoneAuthFallback, tryLocalPhoneLogin]);
 
   const handleSessionInvalid = useCallback(async () => {
     console.log('[Auth] Session invalid, logging out...');

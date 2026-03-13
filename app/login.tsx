@@ -29,6 +29,8 @@ interface LoginCodeResponse {
   maskedPhone?: string | null;
   deliveryNote?: string | null;
   smsProvider?: string | null;
+  localAuthenticatedType?: LoginMode | null;
+  localFallbackUsed?: boolean;
 }
 
 function formatPhoneInput(value: string): string {
@@ -155,6 +157,22 @@ export default function LoginScreen() {
       return await sendDriverLoginCode(targetPhone) as LoginCodeResponse;
     },
     onSuccess: (result, targetPhone) => {
+      if (result.localAuthenticatedType) {
+        setPendingPhone('');
+        setVerificationCode('');
+        setMaskedPhone(null);
+        setDeliveryNote(null);
+        setProviderName(null);
+        setShowVerificationModal(false);
+        console.log('[Login] Local phone fallback success for:', targetPhone, 'type:', result.localAuthenticatedType);
+        if (result.localAuthenticatedType === 'driver') {
+          router.replace('/(driver-tabs)/map');
+        } else {
+          router.replace('/(customer-tabs)/dashboard');
+        }
+        return;
+      }
+
       setPendingPhone(targetPhone);
       setVerificationCode('');
       setMaskedPhone(result.maskedPhone ?? targetPhone);
