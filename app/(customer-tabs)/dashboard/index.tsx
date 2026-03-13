@@ -19,7 +19,7 @@ import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRideForOthers, type RideForOtherPaymentMode, type RideRecipient } from '@/contexts/RideForOthersContext';
 import { useLocation } from '@/hooks/useLocation';
-import { buildApiUrl, trpc } from '@/lib/trpc';
+import { buildApiUrl, trpc, trpcClient } from '@/lib/trpc';
 import { ISTANBUL_REGION, findBestAlternativeVehicle, getVehicleTypeLabel } from '@/constants/mockData';
 import type { Driver, MockDriverInfo } from '@/constants/mockData';
 import { getCityByName, getCityRegion } from '@/constants/cities';
@@ -1049,17 +1049,6 @@ export default function CustomerHomeScreen() {
     }
   }, [tripStarted, tripCompleted, driverLocationPollQuery.data, selectedDest, currentDriver?.id]);
 
-  const findBestDriverQuery = trpc.rides.findBestDriver.useQuery(
-    {
-      city: user?.city ?? '',
-      pickupLat: mapRegion.latitude,
-      pickupLng: mapRegion.longitude,
-      vehicleCategory: selectedVehiclePackage === 'car' ? 'driver' : selectedVehiclePackage === 'scooter' ? 'scooter' : selectedVehiclePackage === 'motorcycle' ? 'courier' : 'driver',
-      excludeDriverIds: previousDriverIds,
-    },
-    { enabled: false }
-  );
-
   const assignNewDriver = useCallback(async (excludeIds: string[], vehicleType?: string) => {
     const customerLat = mapRegion.latitude;
     const customerLng = mapRegion.longitude;
@@ -1071,8 +1060,13 @@ export default function CustomerHomeScreen() {
 
     try {
       console.log('[Customer] Trying smart backend assignment, city:', user?.city, 'category:', requestedCategory, 'exclude:', excludeIds);
-      const result = await findBestDriverQuery.refetch();
-      const data = result.data;
+      const data = await trpcClient.rides.findBestDriver.query({
+        city: user?.city ?? '',
+        pickupLat: customerLat,
+        pickupLng: customerLng,
+        vehicleCategory: requestedCategory,
+        excludeDriverIds: excludeIds,
+      });
 
       if (data?.found && data.driver) {
         const bd = data.driver;
@@ -1129,7 +1123,7 @@ export default function CustomerHomeScreen() {
       console.log('[Customer] Driver route loaded:', path.length, 'points, dist:', distKm.toFixed(2), 'km');
     }
     return assignedDriver;
-  }, [selectedDest, mapRegion.latitude, mapRegion.longitude, fetchDriverRoute, densifyPath, user?.city, findBestDriverQuery]);
+  }, [selectedDest, mapRegion.latitude, mapRegion.longitude, fetchDriverRoute, densifyPath, user?.city]);
 
   const handleDriverCancelled = useCallback(async () => {
     console.log('[Customer] Driver cancelled! Reassigning...');

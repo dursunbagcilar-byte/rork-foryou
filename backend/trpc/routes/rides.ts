@@ -758,24 +758,28 @@ export const ridesRouter = createTRPCRouter({
       const pendingRides = db.rides.getPendingByCity(input.city);
       const actorDriver = db.drivers.get(actorDriverId);
       const actorDriverCategory = normalizeDriverCategory(input.driverCategory ?? actorDriver?.driverCategory);
-      if (input.driverCategory === 'courier') {
-        if (!input.driverId) {
-          return [];
-        }
-        return pendingRides
-          .filter((ride) => isBusinessRide(ride))
-          .filter((ride) => ride.assignedCourierId === input.driverId)
-          .filter((ride) => {
-            if (!ride.courierRequestExpiresAt) {
-              return true;
-            }
-            return new Date(ride.courierRequestExpiresAt).getTime() > Date.now();
-          });
-      }
-      return pendingRides.filter((ride) => {
+
+      const assignedBusinessOrders = pendingRides
+        .filter((ride) => isBusinessRide(ride))
+        .filter((ride) => ride.assignedCourierId === actorDriverId)
+        .filter((ride) => {
+          if (!ride.courierRequestExpiresAt) {
+            return true;
+          }
+          return new Date(ride.courierRequestExpiresAt).getTime() > Date.now();
+        });
+
+      const regularCategoryRides = pendingRides.filter((ride) => {
         const isRegularRide = ride.orderType !== 'business_delivery' && ride.orderType !== 'custom_delivery';
         return isRegularRide && matchesRequestedDriverCategory(actorDriverCategory, ride.requestedDriverCategory);
       });
+
+      if (actorDriverCategory === 'courier') {
+        console.log('[RIDES] getPendingByCity courier view:', actorDriverId, 'business:', assignedBusinessOrders.length, 'regular:', regularCategoryRides.length);
+        return [...assignedBusinessOrders, ...regularCategoryRides];
+      }
+
+      return regularCategoryRides;
     }),
 
   findBestDriver: protectedProcedure
