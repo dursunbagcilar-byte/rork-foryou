@@ -1054,7 +1054,7 @@ export default function CustomerHomeScreen() {
       city: user?.city ?? '',
       pickupLat: mapRegion.latitude,
       pickupLng: mapRegion.longitude,
-      vehicleCategory: selectedVehiclePackage === 'car' ? 'driver' : selectedVehiclePackage === 'scooter' ? 'scooter' : selectedVehiclePackage === 'motorcycle' ? 'driver' : 'driver',
+      vehicleCategory: selectedVehiclePackage === 'car' ? 'driver' : selectedVehiclePackage === 'scooter' ? 'scooter' : selectedVehiclePackage === 'motorcycle' ? 'courier' : 'driver',
       excludeDriverIds: previousDriverIds,
     },
     { enabled: false }
@@ -1063,7 +1063,7 @@ export default function CustomerHomeScreen() {
   const assignNewDriver = useCallback(async (excludeIds: string[], vehicleType?: string) => {
     const customerLat = mapRegion.latitude;
     const customerLng = mapRegion.longitude;
-    const categoryMap: Record<string, string> = { car: 'driver', scooter: 'scooter', motorcycle: 'driver' };
+    const categoryMap: Record<string, string> = { car: 'driver', scooter: 'scooter', motorcycle: 'courier' };
     const requestedCategory = vehicleType ? (categoryMap[vehicleType] ?? 'driver') : 'driver';
 
     let assignedDriver: MockDriverInfo | null = null;
@@ -1424,7 +1424,11 @@ export default function CustomerHomeScreen() {
     }
 
     try {
-      const requestedDriverCategory = selectedVehiclePackage === 'scooter' ? 'scooter' : 'driver';
+      const requestedDriverCategory = selectedVehiclePackage === 'scooter'
+        ? 'scooter'
+        : selectedVehiclePackage === 'motorcycle'
+          ? 'courier'
+          : 'driver';
       const result = await createRideMutation.mutateAsync({
         customerId: user?.id ?? '',
         customerName: user?.name ?? 'Müşteri',
