@@ -31,6 +31,37 @@ function isPhoneTakenByAnotherAccount(phone: string, excludedId?: string): boole
   return !!matchingDriver;
 }
 
+function hasDriverAccess(ctx: { userId: string | null; userType: 'customer' | 'driver' | null }, driverId: string): boolean {
+  return ctx.userType === 'driver' && ctx.userId === driverId;
+}
+
+function canCustomerAccessDriver(ctx: { userId: string | null; userType: 'customer' | 'driver' | null }, driverId: string): boolean {
+  if (ctx.userType !== 'customer' || !ctx.userId) {
+    return false;
+  }
+
+  return db.rides.getAll().some((ride) => {
+    const rideHasDriver = ride.driverId === driverId || ride.assignedCourierId === driverId;
+    if (!rideHasDriver) {
+      return false;
+    }
+
+    return ride.customerId === ctx.userId && (ride.status === 'accepted' || ride.status === 'in_progress');
+  });
+}
+
+function canAccessDriverProfile(ctx: { userId: string | null; userType: 'customer' | 'driver' | null }, driverId: string): boolean {
+  return hasDriverAccess(ctx, driverId) || canCustomerAccessDriver(ctx, driverId);
+}
+
+function canAccessDriverLocation(ctx: { userId: string | null; userType: 'customer' | 'driver' | null }, driverId: string): boolean {
+  return hasDriverAccess(ctx, driverId) || canCustomerAccessDriver(ctx, driverId);
+}
+
+function buildForbiddenDriverResponse(message = 'Bu işlem için yetkiniz yok') {
+  return { success: false, error: message };
+}
+
 export const driversRouter = createTRPCRouter({
   updateLocation: protectedProcedure
     .input(
@@ -40,7 +71,11 @@ export const driversRouter = createTRPCRouter({
         longitude: z.number(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (!hasDriverAccess(ctx, input.driverId)) {
+        return buildForbiddenDriverResponse();
+      }
+
       db.driverLocations.set(input.driverId, {
         latitude: input.latitude,
         longitude: input.longitude,
@@ -57,7 +92,11 @@ export const driversRouter = createTRPCRouter({
 
   getLocation: protectedProcedure
     .input(z.object({ driverId: z.string() }))
-    .query(({ input }) => {
+    .query(({ input, ctx }) => {
+      if (!canAccessDriverLocation(ctx, input.driverId)) {
+        return null;
+      }
+
       return db.driverLocations.get(input.driverId) ?? null;
     }),
 
@@ -68,7 +107,11 @@ export const driversRouter = createTRPCRouter({
         isOnline: z.boolean(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (!hasDriverAccess(ctx, input.driverId)) {
+        return buildForbiddenDriverResponse();
+      }
+
       const driver = db.drivers.get(input.driverId);
       if (!driver) return { success: false, error: "Şoför bulunamadı" };
 
@@ -105,7 +148,11 @@ export const driversRouter = createTRPCRouter({
 
   getProfile: protectedProcedure
     .input(z.object({ driverId: z.string() }))
-    .query(({ input }) => {
+    .query(({ input, ctx }) => {
+      if (!canAccessDriverProfile(ctx, input.driverId)) {
+        return null;
+      }
+
       return db.drivers.get(input.driverId) ?? null;
     }),
 
@@ -123,7 +170,11 @@ export const driversRouter = createTRPCRouter({
         taxCertificate: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
+      if (!hasDriverAccess(ctx, input.driverId)) {
+        return buildForbiddenDriverResponse();
+      }
+
       const driver = db.drivers.get(input.driverId);
       if (!driver) return { success: false, error: "Şoför bulunamadı" };
 
@@ -148,7 +199,11 @@ export const driversRouter = createTRPCRouter({
 
   checkApprovalStatus: protectedProcedure
     .input(z.object({ driverId: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input, ctx }) => {
+      if (!hasDriverAccess(ctx, input.driverId)) {
+        return { found: false, isApproved: false, isSuspended: false };
+      }
+
       await initializeStore();
       let driver = db.drivers.get(input.driverId);
       if (!driver) {
@@ -222,7 +277,19 @@ export const driversRouter = createTRPCRouter({
 
   getEarningsHistory: protectedProcedure
     .input(z.object({ driverId: z.string(), days: z.number().min(1).max(30).optional() }))
-    .query(({ input }) => {
+    .query(({ input, ctx }) => {
+      if (!hasDriverAccess(ctx, input.driverId)) {
+        return {
+          history: [],
+          dailyEarnings: 0,
+          weeklyEarnings: 0,
+          monthlyEarnings: 0,
+          totalRides: 0,
+          avgHoursPerDay: 0,
+          weeklyGrowth: 0,
+        };
+      }
+
       const days = input.days ?? 7;
       const rides = db.rides.getByDriver(input.driverId);
       const now = new Date();
@@ -283,7 +350,11 @@ export const driversRouter = createTRPCRouter({
 
   getDriverStats: protectedProcedure
     .input(z.object({ driverId: z.string() }))
-    .query(({ input }) => {
+    .query(({ input, ctx }) => {
+      if (!hasDriverAccess(ctx, input.driverId)) {
+        return null;
+      }
+
       const driver = db.drivers.get(input.driverId);
       if (!driver) return null;
       const rides = db.rides.getByDriver(input.driverId);

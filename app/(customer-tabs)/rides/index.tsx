@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { MapPin, Clock, Star, Banknote, CarFront, ArrowLeft, RefreshCw } from 'lucide-react-native';
+import { Clock, Star, Banknote, CarFront, ArrowLeft, RefreshCw } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { trpc } from '@/lib/trpc';
@@ -69,7 +69,7 @@ export default function RidesScreen() {
           </View>
           <View style={styles.rideStats}>
             <Banknote size={12} color={Colors.light.success} />
-            <Text style={styles.rideStatCash}>{item.isFreeRide ? 'Ücretsiz' : 'Nakit'}</Text>
+            <Text style={styles.rideStatCash}>{item.isFreeRide ? 'Ücretsiz' : item.paymentMethod === 'card' ? 'Kart' : 'Nakit'}</Text>
             <Text style={styles.rideStatDot}>•</Text>
             <Text style={styles.rideStatText}>{item.distance}</Text>
             <Text style={styles.rideStatDot}>•</Text>

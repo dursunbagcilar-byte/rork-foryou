@@ -2,6 +2,28 @@ import { z } from "zod";
 import { createTRPCRouter, publicProcedure, protectedProcedure } from "../create-context";
 import { initializeCheckoutForm, retrieveCheckoutFormResult, isIyzicoConfigured } from "../../utils/iyzico";
 import { db } from "../../db/store";
+import type { Ride } from "../../db/types";
+
+type ActorContext = {
+  userId: string | null;
+  userType: "customer" | "driver" | null;
+};
+
+function hasCustomerAccess(ctx: ActorContext, customerId: string): boolean {
+  return ctx.userType === 'customer' && ctx.userId === customerId;
+}
+
+function canAccessRidePayment(ctx: ActorContext, ride: Ride | null): boolean {
+  if (!ride || !ctx.userId || !ctx.userType) {
+    return false;
+  }
+
+  if (ctx.userType === 'customer') {
+    return ride.customerId === ctx.userId;
+  }
+
+  return ride.driverId === ctx.userId || ride.assignedCourierId === ctx.userId;
+}
 
 export const paymentsRouter = createTRPCRouter({
   checkConfig: publicProcedure.query(() => {
@@ -24,8 +46,12 @@ export const paymentsRouter = createTRPCRouter({
         callbackUrl: z.string(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       console.log('[PAYMENTS] Initializing payment for ride:', input.rideId, 'price:', input.price);
+
+      if (!hasCustomerAccess(ctx, input.customerId)) {
+        return { success: false, error: 'Bu ödeme işlemi için yetkiniz yok' };
+      }
 
       if (!isIyzicoConfigured()) {
         console.log('[PAYMENTS] iyzico not configured, returning error');
@@ -51,11 +77,11 @@ export const paymentsRouter = createTRPCRouter({
           buyer: {
             id: input.customerId,
             name: firstName,
-            surname: surname,
+            surname,
             gsmNumber: input.customerPhone.replace(/\s/g, ''),
             email: input.customerEmail || 'musteri@app.com',
             identityNumber: input.customerIdentityNumber || '00000000000',
-            registrationAddress: input.customerCity + ', Türkiye',
+            registrationAddress: `${input.customerCity}, Türkiye`,
             ip: '85.34.78.112',
             city: input.customerCity,
             country: 'Turkey',
@@ -64,13 +90,13 @@ export const paymentsRouter = createTRPCRouter({
             contactName: input.customerName,
             city: input.customerCity,
             country: 'Turkey',
-            address: input.customerCity + ', Türkiye',
+            address: `${input.customerCity}, Türkiye`,
           },
           billingAddress: {
             contactName: input.customerName,
             city: input.customerCity,
             country: 'Turkey',
-            address: input.customerCity + ', Türkiye',
+            address: `${input.customerCity}, Türkiye`,
           },
           basketItems: [
             {
@@ -94,7 +120,7 @@ export const paymentsRouter = createTRPCRouter({
             createdAt: new Date().toISOString(),
           });
 
-          console.log('[PAYMENTS] Payment initialized successfully, token:', result.token.substring(0, 20) + '...');
+          console.log('[PAYMENTS] Payment initialized successfully, token:', `${result.token.substring(0, 20)}...`);
           return {
             success: true,
             token: result.token,
@@ -117,13 +143,17 @@ export const paymentsRouter = createTRPCRouter({
         token: z.string(),
       })
     )
-    .mutation(async ({ input }) => {
-      console.log('[PAYMENTS] Verifying payment, token:', input.token.substring(0, 20) + '...');
+    .mutation(async ({ input, ctx }) => {
+      console.log('[PAYMENTS] Verifying payment, token:', `${input.token.substring(0, 20)}...`);
 
       const payment = db.payments.get(input.token);
       if (!payment) {
         console.log('[PAYMENTS] Payment not found');
         return { success: false, error: 'Ödeme bulunamadı' };
+      }
+
+      if (!hasCustomerAccess(ctx, payment.customerId)) {
+        return { success: false, error: 'Bu ödemeyi doğrulama yetkiniz yok' };
       }
 
       try {
@@ -160,9 +190,12 @@ export const paymentsRouter = createTRPCRouter({
 
   getPaymentStatus: protectedProcedure
     .input(z.object({ rideId: z.string() }))
-    .query(({ input }) => {
-      const payments = db.payments.getByRide(input.rideId);
-      if (!payments) return null;
-      return payments;
+    .query(({ input, ctx }) => {
+      const ride = db.rides.get(input.rideId) ?? null;
+      if (!canAccessRidePayment(ctx, ride)) {
+        return null;
+      }
+
+      return db.payments.getByRide(input.rideId);
     }),
 });

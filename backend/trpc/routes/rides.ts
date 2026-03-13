@@ -71,6 +71,18 @@ function isRideStatusOneOf(ride: Ride, statuses: Ride['status'][]): boolean {
   return statuses.includes(ride.status);
 }
 
+function canAccessRide(ctx: { userId: string | null; userType: 'customer' | 'driver' | null }, ride: Ride): boolean {
+  if (!ctx.userId || !ctx.userType) {
+    return false;
+  }
+
+  if (ctx.userType === 'customer') {
+    return isRideCustomerActor(ride, ctx.userId);
+  }
+
+  return isRideDriverActor(ride, ctx.userId);
+}
+
 function getActiveRideForDriver(driverId: string): Ride | null {
   return db.rides.getActiveByDriver(driverId) ?? null;
 }
@@ -648,8 +660,13 @@ export const ridesRouter = createTRPCRouter({
 
   getById: protectedProcedure
     .input(z.object({ rideId: z.string() }))
-    .query(({ input }) => {
-      return db.rides.get(input.rideId) ?? null;
+    .query(({ input, ctx }) => {
+      const ride = db.rides.get(input.rideId) ?? null;
+      if (!ride || !canAccessRide(ctx, ride)) {
+        return null;
+      }
+
+      return ride;
     }),
 
   getCustomerRides: protectedProcedure
