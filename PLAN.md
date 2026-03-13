@@ -11,6 +11,7 @@
 - [x] `rides.getPendingByCity` şoföre yalnızca kendi kategorisine uygun talepleri döndürür.
 - [x] `rides.findBestDriver` araç kategorisine göre gerçek adayları filtreler.
 - [x] Sürüş kaydında istenen şoför kategorisi saklanır.
+- [x] İl ve ilçe eşleşmeleri boşluk/büyük-küçük harf/Türkçe karakter farklarına dayanıklı hale getirildi.
 
 **Pages / Screens**
 - [x] Müşteri dashboard: sürüş oluştururken istenen araç tipi backend'e gönderilir.

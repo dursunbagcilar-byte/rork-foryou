@@ -100,6 +100,21 @@ function readRuntimeEnv(key: string): string {
   return '';
 }
 
+function normalizeLocationValue(value: string | undefined | null): string {
+  return (value ?? '').trim().toLocaleLowerCase('tr-TR');
+}
+
+function matchesLocationValue(left: string | undefined | null, right: string | undefined | null): boolean {
+  const normalizedLeft = normalizeLocationValue(left);
+  const normalizedRight = normalizeLocationValue(right);
+
+  if (!normalizedLeft || !normalizedRight) {
+    return false;
+  }
+
+  return normalizedLeft === normalizedRight;
+}
+
 function cleanSurrealId(raw: any, fallbackField?: string): string {
   if (!raw) return '';
   
@@ -1241,15 +1256,15 @@ export const db = {
       return Array.from(drivers.values()).find(d => d.email?.toLowerCase() === email.toLowerCase());
     },
     getOnlineByCity: (city: string) =>
-      Array.from(drivers.values()).filter(d => d.isOnline && d.city === city),
+      Array.from(drivers.values()).filter(d => d.isOnline && matchesLocationValue(d.city, city)),
     getCouriersByCity: (city: string) =>
-      Array.from(drivers.values()).filter(d => d.city === city && d.driverCategory === 'courier'),
+      Array.from(drivers.values()).filter(d => matchesLocationValue(d.city, city) && d.driverCategory === 'courier'),
     getCouriersByCityAndDistrict: (city: string, district: string) =>
-      Array.from(drivers.values()).filter(d => d.city === city && d.district === district && d.driverCategory === 'courier'),
+      Array.from(drivers.values()).filter(d => matchesLocationValue(d.city, city) && matchesLocationValue(d.district, district) && d.driverCategory === 'courier'),
     getOnlineCouriersByCity: (city: string) =>
-      Array.from(drivers.values()).filter(d => d.isOnline && d.city === city && d.driverCategory === 'courier'),
+      Array.from(drivers.values()).filter(d => d.isOnline && matchesLocationValue(d.city, city) && d.driverCategory === 'courier'),
     getOnlineCouriersByCityAndDistrict: (city: string, district: string) =>
-      Array.from(drivers.values()).filter(d => d.isOnline && d.city === city && d.district === district && d.driverCategory === 'courier'),
+      Array.from(drivers.values()).filter(d => d.isOnline && matchesLocationValue(d.city, city) && matchesLocationValue(d.district, district) && d.driverCategory === 'courier'),
     getAll: () => Array.from(drivers.values()),
     delete: (id: string) => {
       const driver = drivers.get(id);
@@ -1282,8 +1297,8 @@ export const db = {
       Array.from(businesses.values()).find((business) => business.ownerDriverId === ownerDriverId) ?? null,
     getByCity: (city: string, district?: string) =>
       Array.from(businesses.values())
-        .filter((business) => business.city === city)
-        .filter((business) => (district ? business.district === district : true))
+        .filter((business) => matchesLocationValue(business.city, city))
+        .filter((business) => (district ? matchesLocationValue(business.district, district) : true))
         .sort((a, b) => b.rating - a.rating),
     getAll: () => Array.from(businesses.values()),
   },
@@ -1306,7 +1321,7 @@ export const db = {
         .filter(r => r.driverId === driverId)
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     getPendingByCity: (city: string) =>
-      Array.from(rides.values()).filter(r => r.status === "pending" && r.city === city),
+      Array.from(rides.values()).filter(r => r.status === "pending" && matchesLocationValue(r.city, city)),
     getActiveByDriver: (driverId: string) =>
       Array.from(rides.values()).find(
         r => r.driverId === driverId && ["accepted", "in_progress"].includes(r.status)
