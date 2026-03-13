@@ -1,15 +1,17 @@
-# Giriş ekranından hızlı giriş kutularını gizle
+# Gerçek müşteri sürüş oluşturma ve eşleştirme akışı
 
 **Features**
-- [x] Giriş ekranında Google ve Apple ile devam et kutuları görünmez.
-- [x] Telefon numarası ile giriş akışı aynen çalışmaya devam eder.
-- [x] Arka plandaki hazır sosyal giriş altyapısı korunur.
-- [x] Müşteri ve şoför giriş deneyiminde başka bir davranış değişmez.
+- [x] Müşteri sürüş talebi yalnızca canlı ve müsait şoför varsa oluşturulur.
+- [x] Seçilen araç tipine göre uygun şoför kategorisi filtrelenir.
+- [x] Sürüş talebi en uygun canlı şoförlere bildirim olarak gönderilir.
+- [x] Müşteri ekranı kaç şoföre istek gönderildiğini gösterir.
 
-**Design**
-- [x] Giriş kartı daha sade ve temiz görünür.
-- [x] Kutular kaldırıldığı için telefonla giriş alanı daha net öne çıkar.
-- [x] Boşluklar ekranın mevcut düzenine uygun şekilde dengelenir.
+**Backend**
+- [x] `rides.create` gerçek canlı şoför uygunluğunu kontrol eder.
+- [x] `rides.getPendingByCity` şoföre yalnızca kendi kategorisine uygun talepleri döndürür.
+- [x] `rides.findBestDriver` araç kategorisine göre gerçek adayları filtreler.
+- [x] Sürüş kaydında istenen şoför kategorisi saklanır.
 
 **Pages / Screens**
-- [x] Giriş ekranı: Apple ve Google kutuları gizlenir, kalan içerik düzenli şekilde korunur.
+- [x] Müşteri dashboard: sürüş oluştururken istenen araç tipi backend'e gönderilir.
+- [x] Müşteri dashboard: "Şoför aranıyor" metni canlı eşleştirme durumunu yansıtır.

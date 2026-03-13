@@ -146,6 +146,7 @@ export default function CustomerHomeScreen() {
   const [rideRequested, setRideRequested] = useState<boolean>(false);
   const [findingDriver, setFindingDriver] = useState<boolean>(false);
   const [driverFound, setDriverFound] = useState<boolean>(false);
+  const [driverSearchStatus, setDriverSearchStatus] = useState<string>('Yakınlarınızdaki şoförler kontrol ediliyor');
   const [promoInput, setPromoInput] = useState<string>('');
   const [showPromo, setShowPromo] = useState<boolean>(false);
   const [ridePrice, setRidePrice] = useState<number>(0);
@@ -1413,6 +1414,7 @@ export default function CustomerHomeScreen() {
     }
 
     try {
+      const requestedDriverCategory = selectedVehiclePackage === 'scooter' ? 'scooter' : 'driver';
       const result = await createRideMutation.mutateAsync({
         customerId: user?.id ?? '',
         customerName: user?.name ?? 'Müşteri',
@@ -1427,6 +1429,7 @@ export default function CustomerHomeScreen() {
         duration: `${rideDuration} dk`,
         isFreeRide: free,
         city: user?.city ?? '',
+        requestedDriverCategory,
         paymentMethod: paymentMethod,
         rideForOther: rideForOtherEnabled,
         recipientName: selectedRideRecipient?.name,
@@ -1443,9 +1446,18 @@ export default function CustomerHomeScreen() {
         setCurrentBackendRideId(null);
         setRideRequested(false);
         setFindingDriver(false);
+        setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
         Alert.alert('Yolculuk Başlatılamadı', backendError);
         return;
       }
+
+      const availableDriversCount = typeof result.availableDriversCount === 'number' ? result.availableDriversCount : 0;
+      const notifiedDriversCount = typeof result.notifiedDriversCount === 'number' ? result.notifiedDriversCount : availableDriversCount;
+      const nextDriverSearchStatus = notifiedDriversCount > 1
+        ? `${notifiedDriversCount} müsait şoföre talebiniz gönderildi`
+        : availableDriversCount > 0
+          ? 'En yakın müsait şoföre talebiniz gönderildi'
+          : 'Yakınlarınızdaki şoförler kontrol ediliyor';
 
       lastBackendRideStatusRef.current = result.ride.status;
       completionHandledRideIdRef.current = null;
@@ -1454,21 +1466,23 @@ export default function CustomerHomeScreen() {
       setRideRequested(true);
       setFindingDriver(true);
       setDriverFound(false);
+      setDriverSearchStatus(nextDriverSearchStatus);
       setTripStarted(false);
       toggleSearch(false);
-      console.log('[Customer] Ride created on backend, waiting for driver acceptance:', result.ride.id);
+      console.log('[Customer] Ride created on backend, waiting for driver acceptance:', result.ride.id, 'availableDrivers:', availableDriversCount, 'notifiedDrivers:', notifiedDriversCount);
     } catch (err) {
       console.log('[Customer] Backend ride creation error:', err);
       setCurrentBackendRideId(null);
       setRideRequested(false);
       setFindingDriver(false);
+      setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
       const errorMessage = err instanceof Error ? err.message : 'Yolculuk talebi şu an oluşturulamadı. Lütfen tekrar deneyin.';
       Alert.alert('Yolculuk Başlatılamadı', errorMessage);
       return;
     }
 
     console.log(`Ride requested: ${destination}, Free: ${free}, Payment: ${paymentMethod}, Price: ₺${free ? 0 : ridePrice}, ForOther: ${rideForOtherEnabled}`);
-  }, [destination, selectedDest, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, mapRegion.latitude, mapRegion.longitude, rideForOtherDraft]);
+  }, [destination, selectedDest, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, mapRegion.latitude, mapRegion.longitude, rideForOtherDraft, selectedVehiclePackage]);
 
   const handleCompleteRide = useCallback(async () => {
     if (currentBackendRideId) {
@@ -1683,6 +1697,7 @@ export default function CustomerHomeScreen() {
     }
     setCurrentDriver(null);
     setPreviousDriverIds([]);
+    setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
     setCurrentBackendRideId(null);
     setActiveRideRecipient(null);
     setActiveRideForOther(false);
@@ -3218,7 +3233,7 @@ export default function CustomerHomeScreen() {
           <View style={styles.statusPanel}>
             <ActivityIndicator size="large" color={Colors.dark.primary} />
             <Text style={styles.statusTitle}>Şoför Aranıyor...</Text>
-            <Text style={styles.statusSub}>Yakınlarınızdaki şoförler kontrol ediliyor</Text>
+            <Text style={styles.statusSub}>{driverSearchStatus}</Text>
             <TouchableOpacity style={styles.cancelButton} onPress={handleCancelRide}>
               <Text style={styles.cancelButtonText}>İptal Et</Text>
             </TouchableOpacity>

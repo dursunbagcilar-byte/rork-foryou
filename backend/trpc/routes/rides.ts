@@ -80,8 +80,29 @@ function isDriverBusyWithAnotherRide(driverId: string, excludedRideId?: string):
   return !!activeRide && activeRide.id !== excludedRideId;
 }
 
-function getAvailableOnlineDriversByCity(city: string) {
-  return db.drivers.getOnlineByCity(city).filter((driver) => !isDriverBusyWithAnotherRide(driver.id));
+function normalizeDriverCategory(driverCategory?: string): NonNullable<Ride['requestedDriverCategory']> {
+  if (driverCategory === 'scooter' || driverCategory === 'courier') {
+    return driverCategory;
+  }
+
+  return 'driver';
+}
+
+function matchesRequestedDriverCategory(driverCategory: string | undefined, requestedCategory?: Ride['requestedDriverCategory']): boolean {
+  if (!requestedCategory) {
+    return true;
+  }
+
+  return normalizeDriverCategory(driverCategory) === requestedCategory;
+}
+
+function getAvailableOnlineDriversByCity(city: string, requestedCategory?: Ride['requestedDriverCategory']) {
+  return db.drivers
+    .getOnlineByCity(city)
+    .filter((driver) => !isDriverBusyWithAnotherRide(driver.id))
+    .filter((driver) => driver.isApproved !== false)
+    .filter((driver) => !driver.isSuspended)
+    .filter((driver) => matchesRequestedDriverCategory(driver.driverCategory, requestedCategory));
 }
 
 function buildForbiddenRideResponse(message = 'Bu işlem için yetkiniz yok') {
@@ -139,6 +160,7 @@ export const ridesRouter = createTRPCRouter({
         duration: z.string(),
         isFreeRide: z.boolean(),
         city: z.string(),
+        requestedDriverCategory: z.enum(["driver", "scooter", "courier"]).optional(),
         paymentMethod: z.enum(["cash", "card"]).optional(),
         rideForOther: z.boolean().optional(),
         recipientName: z.string().optional(),
@@ -153,13 +175,55 @@ export const ridesRouter = createTRPCRouter({
         return buildNullRideError('Yolculuk oluşturma yetkiniz yok');
       }
 
-      const id = "r_" + Date.now();
-      const ride = {
+      const requestedDriverCategory = input.requestedDriverCategory ?? 'driver';
+      const rankedDrivers = getAvailableOnlineDriversByCity(input.city, requestedDriverCategory)
+        .map((driver) => {
+          const location = db.driverLocations.get(driver.id);
+          let distance = 999;
+
+          if (location && typeof input.pickupLat === 'number' && typeof input.pickupLng === 'number') {
+            distance = haversineDistance(input.pickupLat, input.pickupLng, location.latitude, location.longitude);
+          } else if (location) {
+            distance = 10;
+          }
+
+          const matchScore = scoreDriver({
+            id: driver.id,
+            name: driver.name,
+            rating: driver.rating,
+            totalRides: driver.totalRides,
+            driverCategory: driver.driverCategory,
+            isApproved: driver.isApproved,
+            isSuspended: driver.isSuspended,
+            distance,
+          }, requestedDriverCategory);
+
+          return {
+            ...driver,
+            distance,
+            matchScore,
+          };
+        })
+        .sort((a, b) => b.matchScore - a.matchScore);
+
+      if (rankedDrivers.length === 0) {
+        console.log('[RIDES] No available live drivers for ride request:', input.customerId, 'city:', input.city, 'category:', requestedDriverCategory);
+        return {
+          success: false,
+          error: 'Şu anda seçtiğiniz araç tipinde müsait şoför yok. Lütfen biraz sonra tekrar deneyin.',
+          ride: null,
+          availableDriversCount: 0,
+          notifiedDriversCount: 0,
+        };
+      }
+
+      const id = `r_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const ride: Ride = {
         id,
         customerId: input.customerId,
         customerName: input.customerName,
-        driverId: "",
-        driverName: "",
+        driverId: '',
+        driverName: '',
         driverRating: 0,
         pickupAddress: input.pickupAddress,
         dropoffAddress: input.dropoffAddress,
@@ -167,14 +231,16 @@ export const ridesRouter = createTRPCRouter({
         pickupLng: input.pickupLng,
         dropoffLat: input.dropoffLat,
         dropoffLng: input.dropoffLng,
-        status: "pending" as const,
+        status: 'pending',
         price: input.price,
         distance: input.distance,
         duration: input.duration,
         createdAt: new Date().toISOString(),
-        paymentMethod: input.paymentMethod ?? ("cash" as const),
+        paymentMethod: input.paymentMethod ?? 'cash',
         isFreeRide: input.isFreeRide,
         city: input.city,
+        requestedDriverCategory,
+        orderType: 'ride',
         rideForOther: input.rideForOther,
         recipientName: input.recipientName,
         recipientPhone: input.recipientPhone,
@@ -184,7 +250,7 @@ export const ridesRouter = createTRPCRouter({
       };
 
       await db.rides.setSync(id, ride);
-      console.log("[RIDES] Created ride:", id, "city:", input.city, "payment:", ride.paymentMethod, "forOther:", input.rideForOther ?? false);
+      console.log('[RIDES] Created ride:', id, 'city:', input.city, 'category:', requestedDriverCategory, 'payment:', ride.paymentMethod, 'forOther:', input.rideForOther ?? false, 'candidateCount:', rankedDrivers.length);
 
       setTimeout(() => {
         const currentRide = db.rides.get(id);
@@ -196,20 +262,27 @@ export const ridesRouter = createTRPCRouter({
         }
       }, 5 * 60 * 1000);
 
-      const availableDrivers = getAvailableOnlineDriversByCity(input.city);
+      const driversToNotify = rankedDrivers.slice(0, Math.min(rankedDrivers.length, 5));
       const driverRideInfo = input.isFreeRide
         ? `Ücretsiz sürüş • ${input.pickupAddress} → ${input.dropoffAddress}`
         : `₺${input.price.toFixed(0)} • ${input.pickupAddress} → ${input.dropoffAddress}`;
 
-      if (availableDrivers.length === 0) {
-        console.log('[RIDES] Created ride with no immediately available drivers:', id, 'city:', input.city);
+      for (const driver of driversToNotify) {
+        void sendPushToUser(driver.id, '🔔 Yeni Yolculuk Talebi!', driverRideInfo, {
+          type: 'new_ride_request',
+          rideId: id,
+          isFreeRide: input.isFreeRide ? 'true' : 'false',
+          requestedDriverCategory,
+        });
       }
 
-      for (const driver of availableDrivers) {
-        void sendPushToUser(driver.id, '🔔 Yeni Yolculuk Talebi!', driverRideInfo, { type: 'new_ride_request', rideId: id, isFreeRide: input.isFreeRide ? 'true' : 'false' });
-      }
-
-      return { success: true, ride };
+      console.log('[RIDES] Ride request dispatched to live drivers:', id, driversToNotify.map((driver) => `${driver.name}:${driver.distance.toFixed(2)}km`).join(', '));
+      return {
+        success: true,
+        ride,
+        availableDriversCount: rankedDrivers.length,
+        notifiedDriversCount: driversToNotify.length,
+      };
     }),
 
   createBusinessOrder: protectedProcedure
@@ -666,6 +739,8 @@ export const ridesRouter = createTRPCRouter({
       }
 
       const pendingRides = db.rides.getPendingByCity(input.city);
+      const actorDriver = db.drivers.get(actorDriverId);
+      const actorDriverCategory = normalizeDriverCategory(input.driverCategory ?? actorDriver?.driverCategory);
       if (input.driverCategory === 'courier') {
         if (!input.driverId) {
           return [];
@@ -680,7 +755,10 @@ export const ridesRouter = createTRPCRouter({
             return new Date(ride.courierRequestExpiresAt).getTime() > Date.now();
           });
       }
-      return pendingRides.filter((ride) => !isBusinessRide(ride));
+      return pendingRides.filter((ride) => {
+        const isRegularRide = ride.orderType !== 'business_delivery' && ride.orderType !== 'custom_delivery';
+        return isRegularRide && matchesRequestedDriverCategory(actorDriverCategory, ride.requestedDriverCategory);
+      });
     }),
 
   findBestDriver: protectedProcedure
@@ -694,6 +772,9 @@ export const ridesRouter = createTRPCRouter({
       })
     )
     .query(({ input }) => {
+      const requestedCategory = input.vehicleCategory === 'scooter' || input.vehicleCategory === 'courier' || input.vehicleCategory === 'driver'
+        ? input.vehicleCategory
+        : undefined;
       const onlineDrivers = db.drivers.getOnlineByCity(input.city);
       const availableDrivers = onlineDrivers.filter((driver) => !isDriverBusyWithAnotherRide(driver.id));
       const excludeIds = new Set(input.excludeDriverIds ?? []);
@@ -702,6 +783,7 @@ export const ridesRouter = createTRPCRouter({
         .filter(d => !excludeIds.has(d.id))
         .filter(d => d.isApproved !== false)
         .filter(d => !d.isSuspended)
+        .filter(d => matchesRequestedDriverCategory(d.driverCategory, requestedCategory))
         .map(d => {
           const loc = db.driverLocations.get(d.id);
           let distance = 999;
@@ -728,19 +810,19 @@ export const ridesRouter = createTRPCRouter({
         });
 
       if (candidates.length === 0) {
-        console.log('[RIDES] findBestDriver: no available candidates in', input.city, 'category:', input.vehicleCategory, 'online:', onlineDrivers.length, 'available:', availableDrivers.length);
+        console.log('[RIDES] findBestDriver: no available candidates in', input.city, 'category:', requestedCategory ?? 'any', 'online:', onlineDrivers.length, 'available:', availableDrivers.length);
         return { found: false, driver: null, totalOnline: availableDrivers.length, reason: 'no_drivers' as const };
       }
 
       const scored = candidates.map(d => ({
         ...d,
-        score: scoreDriver(d, input.vehicleCategory),
+        score: scoreDriver(d, requestedCategory),
       }));
 
       scored.sort((a, b) => b.score - a.score);
 
       const best = scored[0];
-      console.log('[RIDES] findBestDriver: best=', best.name, 'score=', best.score.toFixed(1), 'dist=', best.distance.toFixed(2), 'km, category:', best.driverCategory, 'requested:', input.vehicleCategory);
+      console.log('[RIDES] findBestDriver: best=', best.name, 'score=', best.score.toFixed(1), 'dist=', best.distance.toFixed(2), 'km, category:', best.driverCategory, 'requested:', requestedCategory ?? 'any');
       console.log('[RIDES] findBestDriver: candidates:', scored.map(s => `${s.name}(${s.score.toFixed(1)})`).join(', '));
 
       const shortName = best.name.split(' ').length > 1
