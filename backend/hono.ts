@@ -1003,6 +1003,15 @@ async function hydrateSessionAccount(session: Session): Promise<User | Driver | 
   }
 }
 
+function isAuthStoreUnavailable(): boolean {
+  const storageMode = getCurrentStorageMode();
+  const persistentStore = getPersistentStoreStatus();
+  const loadedUsers = db.users.getAll().length;
+  const loadedDrivers = db.drivers.getAll().length;
+
+  return storageMode === 'memory' && !isDbConfigured() && !persistentStore.available && loadedUsers === 0 && loadedDrivers === 0;
+}
+
 async function resolveValidSession(sessionToken: string): Promise<Session | null> {
   let session: Session | null | undefined = db.sessions.get(sessionToken);
 
@@ -1654,6 +1663,16 @@ app.post("/auth/send-login-code", async (c) => {
     }
     if (!account) {
       recordLoginFailure(lookupKey);
+      if (isAuthStoreUnavailable()) {
+        console.log('[REST] send-login-code blocked - auth store unavailable for phone login:', cleanPhone);
+        return c.json({
+          success: false,
+          error: 'Giriş sistemi şu anda hazırlanıyor. Lütfen biraz sonra tekrar deneyin.',
+          maskedPhone: maskPhoneNumber(cleanPhone),
+          deliveryNote: getSmsDeliveryNote(maskPhoneNumber(cleanPhone)),
+          smsProvider: AUTH_SMS_PROVIDER,
+        });
+      }
       return c.json({
         success: false,
         error: 'Bu telefon numarasıyla kayıtlı hesap bulunamadı. Lütfen kayıt olduğunuz telefon numarasını kontrol edin.',
@@ -1730,6 +1749,15 @@ app.post("/auth/verify-login-code", async (c) => {
       }
     }
     if (!account) {
+      if (isAuthStoreUnavailable()) {
+        console.log('[REST] verify-login-code blocked - auth store unavailable for phone login:', cleanPhone);
+        return c.json({
+          success: false,
+          error: 'Giriş sistemi şu anda hazırlanıyor. Lütfen biraz sonra tekrar deneyin.',
+          user: null,
+          token: null,
+        });
+      }
       return c.json({
         success: false,
         error: 'Bu telefon numarasıyla kayıtlı hesap bulunamadı. Lütfen kayıt olduğunuz telefon numarasını kontrol edin.',

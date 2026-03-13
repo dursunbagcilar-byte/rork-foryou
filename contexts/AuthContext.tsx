@@ -337,14 +337,19 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     return authBootstrapPromiseRef.current;
   }, [getApiBase, getDbHeaders]);
 
-  const queueAuthPersistence = useCallback((label: string, tasks: Promise<unknown>[]): void => {
-    void Promise.all(tasks)
-      .then(() => {
-        console.log('[Auth] Background persistence completed for:', label);
-      })
-      .catch((error) => {
-        console.log('[Auth] Background persistence error for:', label, error);
+  const queueAuthPersistence = useCallback(async (label: string, tasks: Promise<unknown>[]): Promise<void> => {
+    const results = await Promise.allSettled(tasks);
+    const rejected = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+
+    if (rejected.length > 0) {
+      console.log('[Auth] Critical persistence partial failure for:', label, 'failed:', rejected.length);
+      rejected.forEach((result, index) => {
+        console.log('[Auth] Critical persistence error detail:', label, index + 1, result.reason);
       });
+      return;
+    }
+
+    console.log('[Auth] Critical persistence completed for:', label);
   }, []);
 
   const directFetch = useCallback(async (
@@ -1300,7 +1305,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         persistenceTasks.unshift(setSessionToken(result.token));
       }
 
-      queueAuthPersistence(`phone-login:${actualType}:${normalizedPhone}`, persistenceTasks);
+      await queueAuthPersistence(`phone-login:${actualType}:${normalizedPhone}`, persistenceTasks);
       console.log('[Auth] Phone login success for:', normalizedPhone, 'type:', actualType);
       return actualType;
     }
@@ -1716,18 +1721,19 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         AsyncStorage.setItem('auth_user', JSON.stringify(returnedUser)),
         persistLocalAuthBackup(returnedUser as User | Driver, password),
         saveRememberedLogin(email, password, actualType),
+        saveRememberedPhone(returnedUser.phone, actualType),
       ];
 
       if (result.token) {
         persistenceTasks.unshift(setSessionToken(result.token));
       }
 
-      queueAuthPersistence(`login:${actualType}:${email}`, persistenceTasks);
+      await queueAuthPersistence(`login:${actualType}:${email}`, persistenceTasks);
       console.log('[Auth] Logged in as', actualType, ':', returnedUser.id, returnedUser.name);
       return actualType;
     }
     throw new Error(result.error ?? 'Mail adresiniz veya şifreniz hatalı');
-  }, [persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin]);
+  }, [persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin, saveRememberedPhone]);
 
   const repairRemoteAccountFromBackup = useCallback(async (
     email: string,
@@ -1957,7 +1963,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           persistenceTasks.unshift(setSessionToken(result.token));
         }
 
-        queueAuthPersistence(`register-customer:${email}`, persistenceTasks);
+        await queueAuthPersistence(`register-customer:${email}`, persistenceTasks);
         console.log('[Auth] Registered customer:', customer.id);
         return;
       }
@@ -2065,7 +2071,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           persistenceTasks.unshift(setSessionToken(result.token));
         }
 
-        queueAuthPersistence(`register-driver:${email}`, persistenceTasks);
+        await queueAuthPersistence(`register-driver:${email}`, persistenceTasks);
         console.log('[Auth] Registered driver:', driver.id);
         return;
       }
