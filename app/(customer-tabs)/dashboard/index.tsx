@@ -3241,12 +3241,16 @@ export default function CustomerHomeScreen() {
           </KeyboardAvoidingView>
         )}
         {rideRequested && findingDriver && !reassigning && (
-          <View style={styles.statusPanel}>
-            <ActivityIndicator size="large" color={Colors.dark.primary} />
-            <Text style={styles.statusTitle}>Şoför Aranıyor...</Text>
-            <Text style={styles.statusSub}>{driverSearchStatus}</Text>
-            <TouchableOpacity style={styles.cancelButton} onPress={handleCancelRide}>
-              <Text style={styles.cancelButtonText}>İptal Et</Text>
+          <View style={[styles.statusPanel, styles.statusPanelSearching]} testID="driver-search-status-panel">
+            <ActivityIndicator size="large" color="#FFFFFF" />
+            <Text style={[styles.statusTitle, styles.statusTitleSearching]} testID="driver-search-status-title">Şoför aranıyor</Text>
+            <Text style={[styles.statusSub, styles.statusSubSearching]} testID="driver-search-status-subtitle">{driverSearchStatus}</Text>
+            <TouchableOpacity
+              style={[styles.cancelButton, styles.cancelButtonSearching]}
+              onPress={handleCancelRide}
+              testID="driver-search-cancel-button"
+            >
+              <Text style={[styles.cancelButtonText, styles.cancelButtonTextSearching]}>İptal Et</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -4794,11 +4798,22 @@ const styles = StyleSheet.create({
     paddingBottom: 30,
     alignItems: 'center',
   },
+  statusPanelSearching: {
+    backgroundColor: Colors.dark.success,
+    shadowColor: Colors.dark.success,
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.24,
+    shadowRadius: 20,
+    elevation: 16,
+  },
   statusTitle: {
     fontSize: 20,
     fontWeight: '700' as const,
     color: '#1A1A2E',
     marginTop: 16,
+  },
+  statusTitleSearching: {
+    color: '#FFFFFF',
   },
   statusSub: {
     fontSize: 14,
@@ -4806,6 +4821,9 @@ const styles = StyleSheet.create({
     marginTop: 6,
     textAlign: 'center' as const,
     paddingHorizontal: 10,
+  },
+  statusSubSearching: {
+    color: 'rgba(255,255,255,0.9)',
   },
   altSuggestionIcon: {
     width: 72,
@@ -4918,11 +4936,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.dark.accent,
   },
+  cancelButtonSearching: {
+    borderColor: 'rgba(255,255,255,0.45)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
   cancelButtonText: {
     fontSize: 15,
     fontWeight: '600' as const,
     color: Colors.dark.accent,
     textAlign: 'center' as const,
+  },
+  cancelButtonTextSearching: {
+    color: '#FFFFFF',
   },
   driverPanel: {
     position: 'absolute',
