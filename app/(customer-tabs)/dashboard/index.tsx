@@ -933,6 +933,10 @@ export default function CustomerHomeScreen() {
       setTripCompleted(false);
       setDriverArrived(false);
       setCustomerConfirmedArrival(false);
+      if (ride.queuedForDriverId && !ride.driverId) {
+        const queuedDriverLabel = ride.queuedForDriverName?.trim() || 'Şoför';
+        setDriverSearchStatus(`${queuedDriverLabel} şu an yolculukta. Sıraya alındınız.`);
+      }
       lastBackendRideStatusRef.current = ride.status;
       return;
     }
@@ -1343,6 +1347,7 @@ export default function CustomerHomeScreen() {
 
   const initializePaymentMutation = trpc.payments.initializePayment.useMutation();
   const createRideMutation = trpc.rides.create.useMutation();
+  const createQueuedRideMutation = trpc.rides.createQueued.useMutation();
   const createBusinessOrderMutation = trpc.rides.createBusinessOrder.useMutation();
   const cancelRideMutation = trpc.rides.cancel.useMutation();
   const createRatingMutation = trpc.ratings.create.useMutation();
@@ -1436,12 +1441,12 @@ export default function CustomerHomeScreen() {
     }
 
     try {
-      const requestedDriverCategory = selectedVehiclePackage === 'scooter'
+      const requestedDriverCategory: 'driver' | 'scooter' | 'courier' = selectedVehiclePackage === 'scooter'
         ? 'scooter'
         : selectedVehiclePackage === 'motorcycle'
           ? 'courier'
           : 'driver';
-      const result = await createRideMutation.mutateAsync({
+      const rideRequestPayload: Parameters<typeof createRideMutation.mutateAsync>[0] = {
         customerId: user?.id ?? '',
         customerName: user?.name ?? 'Müşteri',
         pickupAddress: user?.city ? `${user.city}${user.district ? ' / ' + user.district : ''}` : 'Mevcut Konum',
@@ -1455,6 +1460,7 @@ export default function CustomerHomeScreen() {
         duration: `${rideDuration} dk`,
         isFreeRide: free,
         city: user?.city ?? '',
+        district: user?.district ?? '',
         requestedDriverCategory,
         paymentMethod: paymentMethod,
         rideForOther: rideForOtherEnabled,
@@ -1463,9 +1469,74 @@ export default function CustomerHomeScreen() {
         recipientRelation: selectedRideRecipient?.relation,
         guestPaymentMode: rideForOtherDraft.paymentMode,
         guestTrackingEnabled: rideForOtherDraft.liveTrackingEnabled,
-      });
+      };
+
+      const submitQueuedRideRequest = async (): Promise<void> => {
+        try {
+          const queuedResult = await createQueuedRideMutation.mutateAsync(rideRequestPayload);
+          if (!queuedResult?.success || !queuedResult.ride) {
+            const queuedError = 'error' in queuedResult && typeof queuedResult.error === 'string'
+              ? queuedResult.error
+              : 'Sıra talebi şu an oluşturulamadı. Lütfen tekrar deneyin.';
+            setCurrentBackendRideId(null);
+            setRideRequested(false);
+            setFindingDriver(false);
+            setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
+            Alert.alert('Sıraya Alınamadı', queuedError);
+            return;
+          }
+
+          const queuedDriverShortName = 'queuedDriver' in queuedResult && queuedResult.queuedDriver?.shortName
+            ? queuedResult.queuedDriver.shortName
+            : 'Şoför';
+
+          lastBackendRideStatusRef.current = queuedResult.ride.status;
+          completionHandledRideIdRef.current = null;
+          cancellationHandledRideIdRef.current = null;
+          setCurrentBackendRideId(queuedResult.ride.id);
+          setRideRequested(true);
+          setFindingDriver(true);
+          setDriverFound(false);
+          setDriverSearchStatus(`${queuedDriverShortName} şu an yolculukta. Sıraya alındınız.`);
+          setTripStarted(false);
+          toggleSearch(false);
+          console.log('[Customer] Ride queued on backend:', queuedResult.ride.id, 'queuedDriver:', queuedDriverShortName);
+        } catch (queueError) {
+          console.log('[Customer] Backend queued ride creation error:', queueError);
+          setCurrentBackendRideId(null);
+          setRideRequested(false);
+          setFindingDriver(false);
+          setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
+          const queueErrorMessage = queueError instanceof Error ? queueError.message : 'Sıra talebi şu an oluşturulamadı. Lütfen tekrar deneyin.';
+          Alert.alert('Sıraya Alınamadı', queueErrorMessage);
+        }
+      };
+
+      const result = await createRideMutation.mutateAsync(rideRequestPayload);
 
       if (!result?.success || !result.ride) {
+        const queueAvailable = 'queueAvailable' in result && result.queueAvailable === true;
+        const queuedDriverShortName = 'queuedDriver' in result && result.queuedDriver?.shortName
+          ? result.queuedDriver.shortName
+          : 'Şoför';
+
+        if (queueAvailable) {
+          Alert.alert(
+            'Şoför Şu Anda Meşgul',
+            `${queuedDriverShortName} şu anda başka bir yolculukta. Sıraya alınmak ister misiniz?`,
+            [
+              { text: 'Hayır', style: 'cancel' },
+              {
+                text: 'Evet, sıraya al',
+                onPress: () => {
+                  void submitQueuedRideRequest();
+                },
+              },
+            ]
+          );
+          return;
+        }
+
         const backendError = 'error' in result && typeof result.error === 'string'
           ? result.error
           : 'Yolculuk talebi şu an oluşturulamadı. Lütfen tekrar deneyin.';
@@ -1508,7 +1579,7 @@ export default function CustomerHomeScreen() {
     }
 
     console.log(`Ride requested: ${destination}, Free: ${free}, Payment: ${paymentMethod}, Price: ₺${free ? 0 : ridePrice}, ForOther: ${rideForOtherEnabled}`);
-  }, [destination, selectedDest, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, mapRegion.latitude, mapRegion.longitude, rideForOtherDraft, selectedVehiclePackage, ensureServerSession]);
+  }, [destination, selectedDest, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, createQueuedRideMutation, mapRegion.latitude, mapRegion.longitude, rideForOtherDraft, selectedVehiclePackage, ensureServerSession]);
 
   const handleCompleteRide = useCallback(async () => {
     if (currentBackendRideId) {

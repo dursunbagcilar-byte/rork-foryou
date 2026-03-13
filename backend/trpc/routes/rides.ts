@@ -117,6 +117,108 @@ function getAvailableOnlineDriversByCity(city: string, requestedCategory?: Ride[
     .filter((driver) => matchesRequestedDriverCategory(driver.driverCategory, requestedCategory));
 }
 
+function normalizeLocationValue(value: string | undefined | null): string {
+  return (value ?? '').trim().toLocaleLowerCase('tr-TR');
+}
+
+function matchesLocationValue(left: string | undefined | null, right: string | undefined | null): boolean {
+  const normalizedLeft = normalizeLocationValue(left);
+  const normalizedRight = normalizeLocationValue(right);
+
+  if (!normalizedLeft || !normalizedRight) {
+    return false;
+  }
+
+  return normalizedLeft === normalizedRight;
+}
+
+function buildDriverShortName(name: string): string {
+  const nameParts = name.trim().split(' ').filter(Boolean);
+  if (nameParts.length > 1) {
+    return `${nameParts[0]} ${nameParts[nameParts.length - 1].charAt(0)}.`;
+  }
+
+  return nameParts[0] ?? 'Şoför';
+}
+
+interface BusyDriverQueueCandidate {
+  id: string;
+  name: string;
+  shortName: string;
+  activeRideId: string;
+  matchScore: number;
+  distance: number;
+}
+
+function findBusyDriverQueueCandidate(params: {
+  city: string;
+  district?: string;
+  requestedCategory?: Ride['requestedDriverCategory'];
+  pickupLat?: number;
+  pickupLng?: number;
+}): BusyDriverQueueCandidate | null {
+  if (!params.district?.trim()) {
+    return null;
+  }
+
+  let bestCandidate: BusyDriverQueueCandidate | null = null;
+
+  for (const driver of db.drivers.getOnlineByCity(params.city)) {
+    if (driver.isApproved === false || driver.isSuspended) {
+      continue;
+    }
+
+    if (!matchesLocationValue(driver.district, params.district)) {
+      continue;
+    }
+
+    if (!matchesRequestedDriverCategory(driver.driverCategory, params.requestedCategory)) {
+      continue;
+    }
+
+    const activeRide = getActiveRideForDriver(driver.id);
+    if (!activeRide) {
+      continue;
+    }
+
+    const location = db.driverLocations.get(driver.id);
+    let distance = 999;
+
+    if (location && typeof params.pickupLat === 'number' && typeof params.pickupLng === 'number') {
+      distance = haversineDistance(params.pickupLat, params.pickupLng, location.latitude, location.longitude);
+    } else if (location) {
+      distance = 10;
+    }
+
+    const busyMinutes = Math.max(0, (Date.now() - new Date(activeRide.createdAt).getTime()) / 60000);
+    const matchScore = scoreDriver({
+      id: driver.id,
+      name: driver.name,
+      rating: driver.rating,
+      totalRides: driver.totalRides,
+      driverCategory: driver.driverCategory,
+      isApproved: driver.isApproved,
+      isSuspended: driver.isSuspended,
+      distance,
+    }, params.requestedCategory) + Math.min(busyMinutes / 30, 1) * 10;
+
+    const candidate: BusyDriverQueueCandidate = {
+      id: driver.id,
+      name: driver.name,
+      shortName: buildDriverShortName(driver.name),
+      activeRideId: activeRide.id,
+      matchScore,
+      distance,
+    };
+
+    if (!bestCandidate || candidate.matchScore > bestCandidate.matchScore) {
+      bestCandidate = candidate;
+    }
+  }
+
+  return bestCandidate;
+}
+
 function buildForbiddenRideResponse(message = 'Bu işlem için yetkiniz yok') {
   return { success: false, error: message };
 }
@@ -172,6 +274,7 @@ export const ridesRouter = createTRPCRouter({
         duration: z.string(),
         isFreeRide: z.boolean(),
         city: z.string(),
+        district: z.string().optional(),
         requestedDriverCategory: z.enum(["driver", "scooter", "courier"]).optional(),
         paymentMethod: z.enum(["cash", "card"]).optional(),
         rideForOther: z.boolean().optional(),
@@ -219,6 +322,31 @@ export const ridesRouter = createTRPCRouter({
         .sort((a, b) => b.matchScore - a.matchScore);
 
       if (rankedDrivers.length === 0) {
+        const queueCandidate = findBusyDriverQueueCandidate({
+          city: input.city,
+          district: input.district,
+          requestedCategory: requestedDriverCategory,
+          pickupLat: input.pickupLat,
+          pickupLng: input.pickupLng,
+        });
+
+        if (queueCandidate) {
+          console.log('[RIDES] No available drivers, offering queue placement:', input.customerId, 'city:', input.city, 'district:', input.district ?? '', 'queuedDriver:', queueCandidate.id);
+          return {
+            success: false,
+            error: `${queueCandidate.shortName} şu anda başka bir yolculukta. İsterseniz sıraya alınabilirsiniz.`,
+            ride: null,
+            availableDriversCount: 0,
+            notifiedDriversCount: 0,
+            queueAvailable: true,
+            queuedDriver: {
+              id: queueCandidate.id,
+              name: queueCandidate.name,
+              shortName: queueCandidate.shortName,
+            },
+          };
+        }
+
         console.log('[RIDES] No available live drivers for ride request:', input.customerId, 'city:', input.city, 'category:', requestedDriverCategory);
         return {
           success: false,
@@ -251,6 +379,7 @@ export const ridesRouter = createTRPCRouter({
         paymentMethod: input.paymentMethod ?? 'cash',
         isFreeRide: input.isFreeRide,
         city: input.city,
+        district: input.district,
         requestedDriverCategory,
         orderType: 'ride',
         rideForOther: input.rideForOther,
@@ -294,6 +423,130 @@ export const ridesRouter = createTRPCRouter({
         ride,
         availableDriversCount: rankedDrivers.length,
         notifiedDriversCount: driversToNotify.length,
+      };
+    }),
+
+  createQueued: protectedProcedure
+    .input(
+      z.object({
+        customerId: z.string(),
+        customerName: z.string(),
+        pickupAddress: z.string(),
+        dropoffAddress: z.string(),
+        pickupLat: z.number().optional(),
+        pickupLng: z.number().optional(),
+        dropoffLat: z.number().optional(),
+        dropoffLng: z.number().optional(),
+        price: z.number(),
+        distance: z.string(),
+        duration: z.string(),
+        isFreeRide: z.boolean(),
+        city: z.string(),
+        district: z.string().optional(),
+        requestedDriverCategory: z.enum(["driver", "scooter", "courier"]).optional(),
+        paymentMethod: z.enum(["cash", "card"]).optional(),
+        rideForOther: z.boolean().optional(),
+        recipientName: z.string().optional(),
+        recipientPhone: z.string().optional(),
+        recipientRelation: z.string().optional(),
+        guestPaymentMode: z.enum(["customer_app", "guest_in_car"]).optional(),
+        guestTrackingEnabled: z.boolean().optional(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      if (!hasCustomerAccess(ctx, input.customerId)) {
+        return buildNullRideError('Yolculuk oluşturma yetkiniz yok');
+      }
+
+      const requestedDriverCategory = input.requestedDriverCategory ?? 'driver';
+      const queueCandidate = findBusyDriverQueueCandidate({
+        city: input.city,
+        district: input.district,
+        requestedCategory: requestedDriverCategory,
+        pickupLat: input.pickupLat,
+        pickupLng: input.pickupLng,
+      });
+
+      if (!queueCandidate) {
+        console.log('[RIDES] Queue request failed because no busy same-district driver was found:', input.customerId, 'city:', input.city, 'district:', input.district ?? '');
+        return {
+          success: false,
+          error: 'Sıraya alınacak aktif şoför bulunamadı. Lütfen tekrar deneyin.',
+          ride: null,
+        };
+      }
+
+      const id = `r_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const queuedAt = new Date().toISOString();
+      const ride: Ride = {
+        id,
+        customerId: input.customerId,
+        customerName: input.customerName,
+        driverId: '',
+        driverName: '',
+        driverRating: 0,
+        pickupAddress: input.pickupAddress,
+        dropoffAddress: input.dropoffAddress,
+        pickupLat: input.pickupLat,
+        pickupLng: input.pickupLng,
+        dropoffLat: input.dropoffLat,
+        dropoffLng: input.dropoffLng,
+        status: 'pending',
+        price: input.price,
+        distance: input.distance,
+        duration: input.duration,
+        createdAt: queuedAt,
+        paymentMethod: input.paymentMethod ?? 'cash',
+        isFreeRide: input.isFreeRide,
+        city: input.city,
+        district: input.district,
+        requestedDriverCategory,
+        queuedForDriverId: queueCandidate.id,
+        queuedForDriverName: queueCandidate.name,
+        queuedAt,
+        orderType: 'ride',
+        rideForOther: input.rideForOther,
+        recipientName: input.recipientName,
+        recipientPhone: input.recipientPhone,
+        recipientRelation: input.recipientRelation,
+        guestPaymentMode: input.guestPaymentMode,
+        guestTrackingEnabled: input.guestTrackingEnabled,
+      };
+
+      await db.rides.setSync(id, ride);
+      console.log('[RIDES] Queued ride created:', id, 'customer:', input.customerId, 'targetDriver:', queueCandidate.id, 'district:', input.district ?? '');
+
+      createRideNotification(
+        queueCandidate.id,
+        '🕓 Sıradaki müşteri talebi',
+        `${input.customerName} için yeni bir sıradaki yolculuk kaydı oluşturuldu. Mevcut yolculuğunuz bitince ilk talep olarak göreceksiniz.`,
+        {
+          type: 'queued_ride_request',
+          rideId: id,
+          customerName: input.customerName,
+        }
+      );
+      void sendPushToUser(
+        queueCandidate.id,
+        '🕓 Sıradaki müşteri talebi',
+        `${input.customerName} sıraya alındı. Yolculuğunuz tamamlanınca yeni talep olarak sizi bekleyecek.`,
+        {
+          type: 'queued_ride_request',
+          rideId: id,
+          customerName: input.customerName,
+        }
+      );
+
+      return {
+        success: true,
+        ride,
+        availableDriversCount: 0,
+        notifiedDriversCount: 1,
+        queuedDriver: {
+          id: queueCandidate.id,
+          name: queueCandidate.name,
+          shortName: queueCandidate.shortName,
+        },
       };
     }),
 
@@ -458,6 +711,10 @@ export const ridesRouter = createTRPCRouter({
         return { success: false, error: 'Aktif yolculuğunuzu tamamlamadan yeni yolculuk kabul edemezsiniz' };
       }
 
+      if (ride.queuedForDriverId && ride.queuedForDriverId !== input.driverId) {
+        return { success: false, error: 'Bu yolculuk sıradaki şoföre ayrıldı' };
+      }
+
       if (ride.status !== "pending") {
         console.log('[RIDES] Race condition: ride', input.rideId, 'status is', ride.status, 'not pending. Already accepted by:', ride.driverId);
         return { success: false, error: "Yolculuk zaten kabul edilmiş" };
@@ -487,6 +744,9 @@ export const ridesRouter = createTRPCRouter({
         driverRating: input.driverRating,
         assignedCourierId: undefined,
         courierRequestExpiresAt: undefined,
+        queuedForDriverId: undefined,
+        queuedForDriverName: undefined,
+        queuedAt: undefined,
       };
 
       await db.rides.setSync(input.rideId, updated);
@@ -769,17 +1029,32 @@ export const ridesRouter = createTRPCRouter({
           return new Date(ride.courierRequestExpiresAt).getTime() > Date.now();
         });
 
+      const queuedCategoryRides = pendingRides
+        .filter((ride) => {
+          const isRegularRide = ride.orderType !== 'business_delivery' && ride.orderType !== 'custom_delivery';
+          return isRegularRide
+            && ride.queuedForDriverId === actorDriverId
+            && matchesRequestedDriverCategory(actorDriverCategory, ride.requestedDriverCategory);
+        })
+        .sort((firstRide, secondRide) => {
+          const firstTime = new Date(firstRide.queuedAt ?? firstRide.createdAt).getTime();
+          const secondTime = new Date(secondRide.queuedAt ?? secondRide.createdAt).getTime();
+          return firstTime - secondTime;
+        });
+
       const regularCategoryRides = pendingRides.filter((ride) => {
         const isRegularRide = ride.orderType !== 'business_delivery' && ride.orderType !== 'custom_delivery';
-        return isRegularRide && matchesRequestedDriverCategory(actorDriverCategory, ride.requestedDriverCategory);
+        return isRegularRide
+          && !ride.queuedForDriverId
+          && matchesRequestedDriverCategory(actorDriverCategory, ride.requestedDriverCategory);
       });
 
       if (actorDriverCategory === 'courier') {
-        console.log('[RIDES] getPendingByCity courier view:', actorDriverId, 'business:', assignedBusinessOrders.length, 'regular:', regularCategoryRides.length);
-        return [...assignedBusinessOrders, ...regularCategoryRides];
+        console.log('[RIDES] getPendingByCity courier view:', actorDriverId, 'business:', assignedBusinessOrders.length, 'queued:', queuedCategoryRides.length, 'regular:', regularCategoryRides.length);
+        return [...assignedBusinessOrders, ...queuedCategoryRides, ...regularCategoryRides];
       }
 
-      return regularCategoryRides;
+      return [...queuedCategoryRides, ...regularCategoryRides];
     }),
 
   findBestDriver: protectedProcedure

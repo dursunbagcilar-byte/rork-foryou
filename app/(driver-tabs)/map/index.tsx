@@ -1383,8 +1383,10 @@ export default function DriverHomeScreen() {
     setCurrentCustomerName('');
     setCurrentRidePrice(0);
     resetRideState();
+    void activeRideQuery.refetch();
+    void pendingRidesQuery.refetch();
     Alert.alert('Yolculuk Tamamlandı', 'Kazançlarınız güncellendi. İyi yolculuklar!');
-  }, [resetRideState, currentRideId, completeRideMutation]);
+  }, [resetRideState, currentRideId, completeRideMutation, activeRideQuery, pendingRidesQuery]);
 
   const DRIVER_CANCEL_REASONS = [
     { key: 'customer_no_show', label: 'Müşteri gelmedi' },

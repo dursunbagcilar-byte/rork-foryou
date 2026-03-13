@@ -110,7 +110,11 @@ export interface Ride {
   paymentStatus?: "pending" | "paid" | "failed";
   isFreeRide: boolean;
   city: string;
+  district?: string;
   requestedDriverCategory?: "driver" | "scooter" | "courier";
+  queuedForDriverId?: string;
+  queuedForDriverName?: string;
+  queuedAt?: string;
   rideForOther?: boolean;
   recipientName?: string;
   recipientPhone?: string;
