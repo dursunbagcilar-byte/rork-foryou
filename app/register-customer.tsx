@@ -148,10 +148,12 @@ export default function RegisterCustomerScreen() {
     setLoading(true);
     try {
       console.log('[RegisterCustomer] Starting registration for:', normalizedEmail, 'verified:', isRegistrationVerified);
-      await Promise.all([
-        acceptAllConsents(),
-        registerCustomer(name, sanitizedPhone, normalizedEmail, password, gender as 'male' | 'female', selectedCity, selectedDistrict, vehiclePlate || undefined, referralCode || undefined),
-      ]);
+      await registerCustomer(name, sanitizedPhone, normalizedEmail, password, gender as 'male' | 'female', selectedCity, selectedDistrict, vehiclePlate || undefined, referralCode || undefined);
+      try {
+        await acceptAllConsents();
+      } catch (consentError) {
+        console.log('[RegisterCustomer] Consent persistence warning (non-critical):', consentError);
+      }
       console.log('[RegisterCustomer] Registration successful');
       router.replace('/(customer-tabs)/dashboard');
     } catch (e: unknown) {

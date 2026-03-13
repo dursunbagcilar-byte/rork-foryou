@@ -534,10 +534,12 @@ export default function RegisterDriverScreen() {
       const licenseIssueDateStr = isCourier ? undefined : (parsedLicenseDate ? parsedLicenseDate.toISOString() : undefined);
       const registrationVehicleModel = isBusinessCategorySelected ? 'İşletme hesabı' : vehicleModel;
       const registrationVehicleColor = isBusinessCategorySelected ? 'Belirtilmedi' : vehicleColor;
-      await Promise.all([
-        acceptAllConsents(),
-        registerDriver(name, sanitizedPhone, normalizedEmail, password, isCourier ? '' : vehiclePlate, registrationVehicleModel, registrationVehicleColor, partnerName, selectedCity, selectedDistrict, licenseIssueDateStr, driverCategory),
-      ]);
+      await registerDriver(name, sanitizedPhone, normalizedEmail, password, isCourier ? '' : vehiclePlate, registrationVehicleModel, registrationVehicleColor, partnerName, selectedCity, selectedDistrict, licenseIssueDateStr, driverCategory);
+      try {
+        await acceptAllConsents();
+      } catch (consentError) {
+        console.log('[RegisterDriver] Consent persistence warning (non-critical):', consentError);
+      }
 
       let businessRegistrationWarning: string | null = null;
       if (isCourier && shouldShowBusinessFields) {

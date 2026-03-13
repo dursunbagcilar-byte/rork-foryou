@@ -54,6 +54,13 @@ interface RememberedPhoneLogin {
   updatedAt: string;
 }
 
+interface RememberedPhoneAccount {
+  phone: string;
+  email: string;
+  type: Exclude<UserType, null>;
+  updatedAt: string;
+}
+
 interface PhoneLoginResponse {
   success: boolean;
   error?: string | null;
@@ -68,6 +75,7 @@ interface PhoneLoginResponse {
 const LOCAL_AUTH_PREFIX = 'localauthbackup';
 const REMEMBERED_LOGIN_PREFIX = 'remembered_login_credentials';
 const REMEMBERED_PHONE_LOGIN_PREFIX = 'remembered_phone_login';
+const REMEMBERED_PHONE_ACCOUNT_PREFIX = 'remembered_phone_account';
 
 function normalizeAuthEmail(email: string): string {
   return email.toLowerCase().trim();
@@ -95,6 +103,10 @@ function buildRememberedLoginKey(type: Exclude<UserType, null>): string {
 
 function buildRememberedPhoneLoginKey(type: Exclude<UserType, null>): string {
   return `${REMEMBERED_PHONE_LOGIN_PREFIX}_${type}`;
+}
+
+function buildRememberedPhoneAccountKey(type: Exclude<UserType, null>, phone: string): string {
+  return `${REMEMBERED_PHONE_ACCOUNT_PREFIX}_${type}_${normalizeTurkishPhone(phone)}`;
 }
 
 function parseRememberedLogin(raw: string): RememberedLoginCredentials | null {
@@ -128,6 +140,26 @@ function parseRememberedPhoneLogin(raw: string): RememberedPhoneLogin | null {
     };
   } catch (error) {
     console.log('[Auth] parseRememberedPhoneLogin error:', error);
+    return null;
+  }
+}
+
+function parseRememberedPhoneAccount(raw: string): RememberedPhoneAccount | null {
+  try {
+    const parsed = JSON.parse(raw) as RememberedPhoneAccount;
+    const normalizedPhone = normalizeTurkishPhone(parsed?.phone);
+    const normalizedEmail = normalizeAuthEmail(parsed?.email ?? '');
+    if (!normalizedPhone || !normalizedEmail || !parsed?.type) {
+      return null;
+    }
+
+    return {
+      ...parsed,
+      phone: normalizedPhone,
+      email: normalizedEmail,
+    };
+  } catch (error) {
+    console.log('[Auth] parseRememberedPhoneAccount error:', error);
     return null;
   }
 }
@@ -757,6 +789,59 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
   }, []);
 
+  const saveRememberedPhoneAccount = useCallback(async (
+    phone: string,
+    email: string,
+    type: Exclude<UserType, null>
+  ): Promise<void> => {
+    const normalizedPhone = normalizeTurkishPhone(phone);
+    const normalizedEmail = normalizeAuthEmail(email);
+    if (!normalizedPhone || !normalizedEmail) {
+      return;
+    }
+
+    try {
+      const payload: RememberedPhoneAccount = {
+        phone: normalizedPhone,
+        email: normalizedEmail,
+        type,
+        updatedAt: new Date().toISOString(),
+      };
+      await SecureStore.setItemAsync(buildRememberedPhoneAccountKey(type, normalizedPhone), JSON.stringify(payload));
+      console.log('[Auth] Remembered phone account saved for:', normalizedPhone, 'email:', normalizedEmail, 'type:', type);
+    } catch (error) {
+      console.log('[Auth] saveRememberedPhoneAccount error:', error, 'phone:', normalizedPhone, 'email:', normalizedEmail, 'type:', type);
+    }
+  }, []);
+
+  const getRememberedPhoneAccount = useCallback(async (
+    phone: string,
+    type: Exclude<UserType, null>
+  ): Promise<RememberedPhoneAccount | null> => {
+    const normalizedPhone = normalizeTurkishPhone(phone);
+    if (!normalizedPhone) {
+      return null;
+    }
+
+    try {
+      const raw = await SecureStore.getItemAsync(buildRememberedPhoneAccountKey(type, normalizedPhone));
+      if (!raw) {
+        return null;
+      }
+
+      const parsed = parseRememberedPhoneAccount(raw);
+      if (!parsed) {
+        console.log('[Auth] getRememberedPhoneAccount invalid payload for:', normalizedPhone, 'type:', type);
+        return null;
+      }
+
+      return parsed;
+    } catch (error) {
+      console.log('[Auth] getRememberedPhoneAccount error:', error, 'phone:', normalizedPhone, 'type:', type);
+      return null;
+    }
+  }, []);
+
   const backgroundRepairRemoteAccount = useCallback(async (
     account: User | Driver,
     reason: string,
@@ -1188,23 +1273,32 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
     for (const candidateType of candidateTypes) {
       try {
-        const [rememberedPhone, rememberedLogin] = await Promise.all([
+        const [rememberedPhone, rememberedPhoneAccount, rememberedLogin] = await Promise.all([
           getRememberedPhone(candidateType),
+          getRememberedPhoneAccount(normalizedPhone, candidateType),
           getRememberedLogin(candidateType),
         ]);
 
-        if (!rememberedPhone || rememberedPhone.phone !== normalizedPhone || !rememberedLogin?.email) {
+        const linkedEmail = rememberedPhoneAccount?.email ?? rememberedLogin?.email;
+        if (!linkedEmail) {
           continue;
         }
 
-        const backup = await getLocalAuthBackup(rememberedLogin.email);
+        if (rememberedPhone && rememberedPhone.phone !== normalizedPhone && !rememberedPhoneAccount) {
+          continue;
+        }
+
+        const backup = await getLocalAuthBackup(linkedEmail);
         const backupPhone = normalizeTurkishPhone(backup?.user?.phone);
         if (!backup || backup.type !== candidateType || backupPhone !== normalizedPhone) {
           continue;
         }
 
-        console.log('[Auth] tryLocalPhoneLogin matched backup:', normalizedPhone, 'requested:', requestedType, 'candidate:', candidateType, 'reason:', reason);
-        await saveRememberedPhone(normalizedPhone, backup.type);
+        console.log('[Auth] tryLocalPhoneLogin matched backup:', normalizedPhone, 'requested:', requestedType, 'candidate:', candidateType, 'reason:', reason, 'email:', linkedEmail);
+        await Promise.all([
+          saveRememberedPhone(normalizedPhone, backup.type),
+          saveRememberedPhoneAccount(normalizedPhone, backup.user.email, backup.type),
+        ]);
         return setAuthenticatedLocalUser({
           ...backup.user,
           phone: normalizedPhone,
@@ -1218,7 +1312,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
     console.log('[Auth] tryLocalPhoneLogin no local match for:', normalizedPhone, 'requested:', requestedType, 'reason:', reason);
     return null;
-  }, [getLocalAuthBackup, getRememberedLogin, getRememberedPhone, saveRememberedPhone, setAuthenticatedLocalUser]);
+  }, [getLocalAuthBackup, getRememberedLogin, getRememberedPhone, getRememberedPhoneAccount, saveRememberedPhone, saveRememberedPhoneAccount, setAuthenticatedLocalUser]);
 
   const shouldTryRemoteAccountRepair = useCallback((message: string): boolean => {
     const lowerMessage = (message || '').toLowerCase();
@@ -1272,14 +1366,17 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       throw new Error('Bu e-posta ile kayıtlı şoför hesabı bulunamadı');
     }
 
-    await saveRememberedLogin(normalizedEmail, password, backup.type);
-    await saveRememberedPhone(backup.user.phone, backup.type);
+    await Promise.all([
+      saveRememberedLogin(normalizedEmail, password, backup.type),
+      saveRememberedPhone(backup.user.phone, backup.type),
+      saveRememberedPhoneAccount(backup.user.phone, normalizedEmail, backup.type),
+    ]);
 
     return setAuthenticatedLocalUser({
       ...backup.user,
       email: normalizedEmail,
     } as User | Driver, 'secure-backup');
-  }, [getLocalAuthBackup, saveRememberedLogin, saveRememberedPhone, setAuthenticatedLocalUser]);
+  }, [getLocalAuthBackup, saveRememberedLogin, saveRememberedPhone, saveRememberedPhoneAccount, setAuthenticatedLocalUser]);
 
   const handlePhoneLoginSuccess = useCallback(async (
     result: any,
@@ -1299,6 +1396,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       const persistenceTasks: Promise<unknown>[] = [
         AsyncStorage.setItem('auth_user', JSON.stringify(returnedUser)),
         saveRememberedPhone(normalizedPhone, actualType),
+        saveRememberedPhoneAccount(normalizedPhone, returnedUser.email, actualType),
       ];
 
       if (result?.token) {
@@ -1311,7 +1409,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
 
     throw new Error(result?.error ?? 'Giriş doğrulanamadı');
-  }, [queueAuthPersistence, saveRememberedPhone]);
+  }, [queueAuthPersistence, saveRememberedPhone, saveRememberedPhoneAccount]);
 
   const sendCustomerLoginCode = useCallback(async (phone: string): Promise<PhoneLoginResponse> => {
     const normalizedPhone = normalizeTurkishPhone(phone);
@@ -1722,6 +1820,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         persistLocalAuthBackup(returnedUser as User | Driver, password),
         saveRememberedLogin(email, password, actualType),
         saveRememberedPhone(returnedUser.phone, actualType),
+        saveRememberedPhoneAccount(returnedUser.phone, returnedUser.email, actualType),
       ];
 
       if (result.token) {
@@ -1733,7 +1832,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       return actualType;
     }
     throw new Error(result.error ?? 'Mail adresiniz veya şifreniz hatalı');
-  }, [persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin, saveRememberedPhone]);
+  }, [persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin, saveRememberedPhone, saveRememberedPhoneAccount]);
 
   const repairRemoteAccountFromBackup = useCallback(async (
     email: string,
@@ -1957,6 +2056,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           persistLocalAuthBackup(customer, password),
           saveRememberedLogin(email, password, 'customer'),
           saveRememberedPhone(normalizedPhone, 'customer'),
+          saveRememberedPhoneAccount(normalizedPhone, customer.email, 'customer'),
         ];
 
         if (result.token) {
@@ -1988,7 +2088,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen tekrar deneyin.');
     }
-  }, [directFetch, ensureBackendAuthReady, persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin, saveRememberedPhone]);
+  }, [directFetch, ensureBackendAuthReady, persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin, saveRememberedPhone, saveRememberedPhoneAccount]);
 
   const registerDriver = useCallback(async (
     name: string,
@@ -2065,6 +2165,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           persistLocalAuthBackup(driver, password),
           saveRememberedLogin(email, password, 'driver'),
           saveRememberedPhone(normalizedPhone, 'driver'),
+          saveRememberedPhoneAccount(normalizedPhone, driver.email, 'driver'),
         ];
 
         if (result.token) {
@@ -2095,7 +2196,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (err instanceof Error) throw err;
       throw new Error('Sunucuya bağlanılamadı. Lütfen tekrar deneyin.');
     }
-  }, [directFetch, ensureBackendAuthReady, persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin, saveRememberedPhone]);
+  }, [directFetch, ensureBackendAuthReady, persistLocalAuthBackup, queueAuthPersistence, saveRememberedLogin, saveRememberedPhone, saveRememberedPhoneAccount]);
 
   const applyPromoCode = useCallback(async (code: string): Promise<boolean> => {
     if (code.toUpperCase() === PRICING.promoCode && !promoApplied) {

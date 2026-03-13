@@ -29,6 +29,7 @@ interface LoginCodeResponse {
   maskedPhone?: string | null;
   deliveryNote?: string | null;
   smsProvider?: string | null;
+  actualType?: LoginMode | null;
   localAuthenticatedType?: LoginMode | null;
   localFallbackUsed?: boolean;
 }
@@ -241,6 +242,17 @@ export default function LoginScreen() {
     });
   }, [normalizedPhone, pendingPhone, verificationCode, verifyCodeMutation]);
 
+  const handleResendCode = useCallback(() => {
+    const targetPhone = pendingPhone || normalizedPhone;
+    const phoneValidationError = getTurkishPhoneValidationError(targetPhone);
+    if (phoneValidationError) {
+      Alert.alert('Uyarı', phoneValidationError);
+      return;
+    }
+
+    sendCodeMutation.mutate(targetPhone);
+  }, [normalizedPhone, pendingPhone, sendCodeMutation]);
+
   const indicatorTranslate = slideAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0, tabWidth],
@@ -375,7 +387,7 @@ export default function LoginScreen() {
         onCodeChange={setVerificationCode}
         onClose={() => setShowVerificationModal(false)}
         onConfirm={handleVerifyCode}
-        onResend={() => sendCodeMutation.mutate(pendingPhone || normalizedPhone)}
+        onResend={handleResendCode}
         isConfirming={verifyCodeMutation.isPending}
         isResending={sendCodeMutation.isPending}
         maskedPhone={maskedPhone}
