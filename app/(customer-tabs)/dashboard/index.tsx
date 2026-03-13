@@ -360,6 +360,24 @@ export default function CustomerHomeScreen() {
     }
   );
   const onlineDrivers = onlineDriversQuery.data ?? [];
+  const hasOnlineDrivers = onlineDrivers.length > 0;
+  const showRideStartSearchingState = Boolean(
+    selectedDest
+    && user?.city
+    && !rideRequested
+    && !findingDriver
+    && !onlineDriversQuery.isLoading
+    && !onlineDriversQuery.isError
+    && !hasOnlineDrivers
+  );
+  const isConfirmButtonBusy = paymentLoading || showRideStartSearchingState;
+  const confirmButtonLabel = showRideStartSearchingState
+    ? 'Şoför aranıyor'
+    : isFreeRide() && selectedDest
+      ? 'Ücretsiz Sürüş Başlat'
+      : paymentMethod === 'card'
+        ? 'Kart ile Öde & Çağır'
+        : 'Şoför Çağır';
 
   const couriersByCityQuery = trpc.drivers.getCouriersByCity.useQuery(
     { city: user?.city ?? '', district: user?.district ?? '' },
@@ -3222,18 +3240,25 @@ export default function CustomerHomeScreen() {
                 </ScrollView>
 
                 <TouchableOpacity
-                  style={[styles.confirmButton, styles.routePickerConfirmButton, !selectedDest && styles.confirmButtonDisabled]}
+                  style={[
+                    styles.confirmButton,
+                    paymentMethod === 'cash' && styles.confirmButtonCash,
+                    showRideStartSearchingState && styles.confirmButtonSearching,
+                    styles.routePickerConfirmButton,
+                    !selectedDest && styles.confirmButtonDisabled,
+                  ]}
                   onPress={handleRequestRide}
-                  disabled={!selectedDest || paymentLoading}
+                  disabled={!selectedDest || isConfirmButtonBusy}
                   activeOpacity={0.85}
                   testID="route-picker-confirm"
                 >
-                  {paymentLoading ? (
-                    <ActivityIndicator color="#FFF" size="small" />
+                  {isConfirmButtonBusy ? (
+                    <View style={styles.confirmButtonContent}>
+                      <ActivityIndicator color="#FFF" size="small" testID="route-picker-confirm-spinner" />
+                      <Text style={styles.confirmButtonText}>{confirmButtonLabel}</Text>
+                    </View>
                   ) : (
-                    <Text style={styles.confirmButtonText}>
-                      {isFreeRide() && selectedDest ? 'Ücretsiz Sürüş Başlat' : paymentMethod === 'card' ? 'Kart ile Öde & Çağır' : 'Şoför Çağır'}
-                    </Text>
+                    <Text style={styles.confirmButtonText}>{confirmButtonLabel}</Text>
                   )}
                 </TouchableOpacity>
               </View>
@@ -4771,11 +4796,26 @@ const styles = StyleSheet.create({
     paddingVertical: 17,
     borderRadius: 18,
     alignItems: 'center',
+    justifyContent: 'center',
     shadowColor: Colors.dark.primary,
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.22,
     shadowRadius: 16,
     elevation: 6,
+  },
+  confirmButtonCash: {
+    backgroundColor: '#16A34A',
+    shadowColor: '#16A34A',
+  },
+  confirmButtonSearching: {
+    backgroundColor: '#15803D',
+    shadowColor: '#15803D',
+  },
+  confirmButtonContent: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 10,
   },
   confirmButtonDisabled: {
     opacity: 0.4,

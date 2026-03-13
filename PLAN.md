@@ -16,3 +16,5 @@
 **Pages / Screens**
 - [x] Müşteri dashboard: sürüş oluştururken istenen araç tipi backend'e gönderilir.
 - [x] Müşteri dashboard: "Şoför aranıyor" metni canlı eşleştirme durumunu yansıtır.
+- [x] Müşteri dashboard: nakit ödeme seçiliyken sürüş başlat alanı yeşil tema kullanır.
+- [x] Müşteri dashboard: sistemde şoför yoksa sürüş başlat alanı spinner ile "Şoför aranıyor" durumunu gösterir.
