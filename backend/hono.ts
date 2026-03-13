@@ -2686,10 +2686,22 @@ const ensureTrpcRequestReady = async (c: Context, next: Next) => {
   await next();
 };
 
+const trpcMiddleware = trpcServer({
+  router: appRouter,
+  createContext,
+});
+
+const logTrpcRequest = async (c: Context, next: Next) => {
+  console.log('[TRPC] Incoming request:', c.req.method, c.req.path, c.req.url);
+  await next();
+};
+
 app.use("/api/trpc/*", ensureTrpcRequestReady);
-app.use("/api/trpc/*", trpcServer({ endpoint: "/api/trpc", router: appRouter, createContext }));
+app.use("/api/trpc/*", logTrpcRequest);
+app.use("/api/trpc/*", trpcMiddleware);
 app.use("/trpc/*", ensureTrpcRequestReady);
-app.use("/trpc/*", trpcServer({ endpoint: "/trpc", router: appRouter, createContext }));
+app.use("/trpc/*", logTrpcRequest);
+app.use("/trpc/*", trpcMiddleware);
 
 app.post("/iyzico/callback", async (c) => {
   try {

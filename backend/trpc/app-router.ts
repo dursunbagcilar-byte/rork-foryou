@@ -10,7 +10,7 @@ import { adminRouter } from "./routes/admin";
 import { scheduledRidesRouter } from "./routes/scheduled-rides";
 import { businessesRouter } from "./routes/businesses";
 
-export const appRouter = createTRPCRouter({
+const sharedRouters = {
   auth: authRouter,
   rides: ridesRouter,
   ratings: ratingsRouter,
@@ -21,6 +21,11 @@ export const appRouter = createTRPCRouter({
   admin: adminRouter,
   scheduledRides: scheduledRidesRouter,
   businesses: businessesRouter,
+};
+
+export const appRouter = createTRPCRouter({
+  ...sharedRouters,
+  trpc: createTRPCRouter(sharedRouters),
 });
 
 export type AppRouter = typeof appRouter;
