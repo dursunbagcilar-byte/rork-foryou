@@ -17,7 +17,7 @@ import * as Speech from 'expo-speech';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Colors } from '@/constants/colors';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from '@/hooks/useLocation';
 import { ISTANBUL_REGION, generateHeatPoints } from '@/constants/mockData';
@@ -183,6 +183,7 @@ export default function DriverHomeScreen() {
   const { user, customVehicleImage, updateCustomVehicleImage, profilePhoto, updateProfilePhoto } = useAuth();
   const router = useRouter();
   const driver = user as Driver | null;
+  const [isScreenFocused, setIsScreenFocused] = useState<boolean>(true);
 
   const { location: gpsLocation, permissionGranted: _permissionGranted, isLoading: _locationLoading } = useLocation(true, 5000);
 
@@ -205,6 +206,17 @@ export default function DriverHomeScreen() {
   const mapRegion = gpsLocation
     ? { latitude: gpsLocation.latitude, longitude: gpsLocation.longitude, latitudeDelta: 0.008, longitudeDelta: 0.008 }
     : { ...fallbackRegion, latitudeDelta: 0.008, longitudeDelta: 0.008 };
+
+  useFocusEffect(
+    useCallback(() => {
+      console.log('[Driver] Map focused - realtime polling resumed');
+      setIsScreenFocused(true);
+      return () => {
+        console.log('[Driver] Map blurred - idle polling paused');
+        setIsScreenFocused(false);
+      };
+    }, [])
+  );
 
   const { driverApproved: isApproved } = useAuth();
   const [isOnline, setIsOnline] = useState<boolean>(false);
@@ -279,7 +291,11 @@ export default function DriverHomeScreen() {
   const sendMessageMutation = trpc.messages.send.useMutation();
   const rideMessagesQuery = trpc.messages.getByRide.useQuery(
     { rideId: currentRideId ?? '' },
-    { enabled: !!currentRideId && showDriverChatModal, refetchInterval: 8000, staleTime: 6000 }
+    {
+      enabled: !!currentRideId && showDriverChatModal && isScreenFocused,
+      refetchInterval: isScreenFocused ? 12000 : false,
+      staleTime: 10000,
+    }
   );
 
   const pendingRidesQuery = trpc.rides.getPendingByCity.useQuery(
@@ -289,18 +305,18 @@ export default function DriverHomeScreen() {
       driverId: driver?.id ?? '',
     },
     {
-      enabled: isOnline && !!driver?.city && !rideAccepted && !hasRideRequest,
-      refetchInterval: 5000,
-      staleTime: 3000,
+      enabled: isScreenFocused && isOnline && !!driver?.city && !rideAccepted && !hasRideRequest,
+      refetchInterval: isScreenFocused ? 10000 : false,
+      staleTime: 8000,
     }
   );
 
   const activeRideQuery = trpc.rides.getActiveRide.useQuery(
     { userId: driver?.id ?? '', type: 'driver' as const },
     {
-      enabled: !!driver?.id && isOnline,
-      refetchInterval: rideAccepted ? 20000 : 30000,
-      staleTime: 15000,
+      enabled: !!driver?.id && isOnline && isScreenFocused,
+      refetchInterval: isScreenFocused ? (rideAccepted ? 30000 : 45000) : false,
+      staleTime: 20000,
     }
   );
 
@@ -408,15 +424,18 @@ export default function DriverHomeScreen() {
   }, [isOnline, driver?.id, setOnlineStatusMutation]);
 
   const lastSentLocationRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
+  const isLocationSyncInFlightRef = useRef<boolean>(false);
 
   const locationSendInterval = React.useMemo(() => {
-    if (rideAccepted && !arrivedAtPickup) return 3000;
-    if (customerPickedUp && navigatingToDropoff) return 3000;
-    return 8000;
+    if (rideAccepted && !arrivedAtPickup) return 5000;
+    if (customerPickedUp && navigatingToDropoff) return 5000;
+    return 15000;
   }, [rideAccepted, arrivedAtPickup, customerPickedUp, navigatingToDropoff]);
 
+  const shouldSyncDriverLocation = isOnline && !!driver?.id && (isScreenFocused || rideAccepted || customerPickedUp);
+
   useEffect(() => {
-    if (!isOnline || !driver?.id) return;
+    if (!shouldSyncDriverLocation || !driver?.id) return;
     const driverId = driver.id;
     const MIN_DISTANCE_METERS = 5;
 
@@ -445,11 +464,19 @@ export default function DriverHomeScreen() {
       }
 
       if (hasMoved(lat, lng)) {
+        if (isLocationSyncInFlightRef.current) {
+          console.log('[Driver] Skipping location sync because previous request is still in flight');
+          return;
+        }
+        isLocationSyncInFlightRef.current = true;
         updateLocationMutation.mutate(
           { driverId, latitude: lat, longitude: lng },
           {
             onError: (error: unknown) => {
               console.log('[Driver] Location sync error:', error);
+            },
+            onSettled: () => {
+              isLocationSyncInFlightRef.current = false;
             },
           }
         );
@@ -457,12 +484,20 @@ export default function DriverHomeScreen() {
         console.log('[Driver] Location broadcast:', lat.toFixed(5), lng.toFixed(5), 'interval:', locationSendInterval);
       } else {
         const timeSinceLast = lastSentLocationRef.current ? Date.now() - lastSentLocationRef.current.time : 999999;
-        if (timeSinceLast > 30000) {
+        if (timeSinceLast > 45000) {
+          if (isLocationSyncInFlightRef.current) {
+            console.log('[Driver] Skipping heartbeat sync because previous request is still in flight');
+            return;
+          }
+          isLocationSyncInFlightRef.current = true;
           updateLocationMutation.mutate(
             { driverId, latitude: lat, longitude: lng },
             {
               onError: (error: unknown) => {
                 console.log('[Driver] Heartbeat location sync error:', error);
+              },
+              onSettled: () => {
+                isLocationSyncInFlightRef.current = false;
               },
             }
           );
@@ -474,7 +509,7 @@ export default function DriverHomeScreen() {
     sendLocation();
     const locationInterval = setInterval(sendLocation, locationSendInterval);
     return () => clearInterval(locationInterval);
-  }, [isOnline, driver?.id, gpsLocation, fallbackRegion.latitude, fallbackRegion.longitude, locationSendInterval, updateLocationMutation]);
+  }, [shouldSyncDriverLocation, driver?.id, gpsLocation, fallbackRegion.latitude, fallbackRegion.longitude, locationSendInterval, updateLocationMutation]);
 
   const pickupAddress = pickupAddressResolved || pendingRide?.pickupAddress || activeRideQuery.data?.pickupAddress || (driver?.district ? `${driver.district} Merkez` : (isBusinessDelivery ? 'İşletme Adresi' : 'Alış Noktası'));
   const dropoffAddress = dropoffAddressResolved || pendingRide?.dropoffAddress || activeRideQuery.data?.dropoffAddress || 'Varış Noktası';

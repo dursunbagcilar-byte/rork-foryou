@@ -26,3 +26,9 @@
 - [x] Müşteri dashboard: sistemde şoför yoksa sürüş başlat alanı spinner ile "Şoför aranıyor" durumunu gösterir.
 - [x] Müşteri dashboard: meşgul aynı ilçe şoförü için sıra onayı uyarısı gösterir ve kabul sonrası durum metnini günceller.
 - [x] Şoför haritası: yolculuk tamamlanınca aktif/sıradaki talepleri yenileyip hedef müşteriyi ilk yeni talep gibi gösterir.
+
+**Stability / Load**
+- [x] Müşteri dashboard: arka planda ve odak dışındayken gereksiz polling durduruldu.
+- [x] Müşteri dashboard: kurye ve işletme sorguları yalnızca ilgili panel açıkken çalışır hale getirildi.
+- [x] Şoför haritası: bekleyen/aktif yolculuk polling sıklığı düşürüldü ve focus bazlı hale getirildi.
+- [x] Şoför haritası: konum senkronizasyonu seyrekleştirildi ve eşzamanlı istek yığılması engellendi.

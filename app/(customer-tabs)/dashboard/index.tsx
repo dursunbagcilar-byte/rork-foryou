@@ -8,7 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import WebMapFallback from '@/components/WebMapFallback';
 import type { WebMapMarker, WebMapPolyline } from '@/components/WebMapFallback';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { MapPin, Navigation, Search, X, Clock, Banknote, Gift, ChevronRight, ChevronLeft, Car, Phone, MessageCircle, Star, Send, AlertTriangle, Share2, FileText, Shield, Bike, Package, Plus, Minus, CheckCircle, Store, Camera, ImagePlus, Edit3, MapPinned, CreditCard, Menu, CloudRain, Bird, ArrowUpDown } from 'lucide-react-native';
 
 import * as WebBrowser from 'expo-web-browser';
@@ -189,6 +189,7 @@ export default function CustomerHomeScreen() {
   const [alternativeVehicle, setAlternativeVehicle] = useState<{ driver: MockDriverInfo; vehicleType: string } | null>(null);
   const [showCustomOrder, setShowCustomOrder] = useState<boolean>(false);
   const [currentBackendRideId, setCurrentBackendRideId] = useState<string | null>(null);
+  const [isScreenFocused, setIsScreenFocused] = useState<boolean>(true);
   const lastBackendRideStatusRef = useRef<string | null>(null);
   const completionHandledRideIdRef = useRef<string | null>(null);
   const cancellationHandledRideIdRef = useRef<string | null>(null);
@@ -263,6 +264,17 @@ export default function CustomerHomeScreen() {
 
   const userCityName = user?.city ?? '';
   const isUserInIstanbul = userCityName === 'İstanbul';
+
+  useFocusEffect(
+    useCallback(() => {
+      console.log('[Customer] Dashboard focused - polling resumed');
+      setIsScreenFocused(true);
+      return () => {
+        console.log('[Customer] Dashboard blurred - polling paused');
+        setIsScreenFocused(false);
+      };
+    }, [])
+  );
 
   const cityVenues = useMemo(() => {
     return getNightlifeVenuesByCity(user?.city ?? '', user?.district ?? '');
@@ -354,9 +366,9 @@ export default function CustomerHomeScreen() {
   const onlineDriversQuery = trpc.drivers.getOnlineByCity.useQuery(
     { city: user?.city ?? '' },
     {
-      enabled: !!user?.city && !rideRequested,
-      refetchInterval: 30000,
-      staleTime: 25000,
+      enabled: !!user?.city && !rideRequested && isScreenFocused,
+      refetchInterval: isScreenFocused ? 60000 : false,
+      staleTime: 55000,
     }
   );
   const onlineDrivers = onlineDriversQuery.data ?? [];
@@ -382,17 +394,17 @@ export default function CustomerHomeScreen() {
   const couriersByCityQuery = trpc.drivers.getCouriersByCity.useQuery(
     { city: user?.city ?? '', district: user?.district ?? '' },
     {
-      enabled: !!user?.city && !!user?.district,
-      refetchInterval: 45000,
-      staleTime: 40000,
+      enabled: !!user?.city && !!user?.district && isScreenFocused && showCourierPanel,
+      refetchInterval: isScreenFocused && showCourierPanel ? 90000 : false,
+      staleTime: 85000,
     }
   );
   const businessesByCityQuery = trpc.businesses.listByCity.useQuery(
     { city: user?.city ?? '' },
     {
-      enabled: !!user?.city,
-      refetchInterval: 30000,
-      staleTime: 25000,
+      enabled: !!user?.city && isScreenFocused && showCourierPanel,
+      refetchInterval: isScreenFocused && showCourierPanel ? 90000 : false,
+      staleTime: 85000,
     }
   );
   const cityCouriers = couriersByCityQuery.data ?? [];
@@ -784,9 +796,11 @@ export default function CustomerHomeScreen() {
   const customerActiveRideQuery = trpc.rides.getActiveRide.useQuery(
     { userId: user?.id ?? '', type: 'customer' as const },
     {
-      enabled: !!user?.id,
-      refetchInterval: (rideRequested || !!currentBackendRideId || tripStarted) ? 5000 : 20000,
-      staleTime: 4000,
+      enabled: !!user?.id && isScreenFocused,
+      refetchInterval: isScreenFocused
+        ? ((rideRequested || !!currentBackendRideId || tripStarted) ? 8000 : 45000)
+        : false,
+      staleTime: 7000,
     }
   );
   const backendActiveRide = customerActiveRideQuery.data;
@@ -795,9 +809,9 @@ export default function CustomerHomeScreen() {
   const _driverProfileQuery = trpc.drivers.getProfile.useQuery(
     { driverId: backendDriverId },
     {
-      enabled: backendDriverId.length > 0,
-      refetchInterval: tripStarted ? 15000 : 30000,
-      staleTime: 10000,
+      enabled: backendDriverId.length > 0 && isScreenFocused && (driverFound || tripStarted || !!currentBackendRideId),
+      refetchInterval: isScreenFocused ? (tripStarted ? 30000 : 60000) : false,
+      staleTime: 20000,
     }
   );
   const backendDriverProfile = _driverProfileQuery.data;
@@ -805,9 +819,9 @@ export default function CustomerHomeScreen() {
   const _rideDetailsQuery = trpc.rides.getById.useQuery(
     { rideId: currentBackendRideId ?? '' },
     {
-      enabled: !!currentBackendRideId,
-      refetchInterval: currentBackendRideId ? 5000 : false,
-      staleTime: 3000,
+      enabled: !!currentBackendRideId && isScreenFocused && !backendActiveRide,
+      refetchInterval: isScreenFocused && !backendActiveRide ? 8000 : false,
+      staleTime: 7000,
     }
   );
   const backendRideDetails = _rideDetailsQuery.data;
@@ -816,12 +830,12 @@ export default function CustomerHomeScreen() {
   const driverLocationPollQuery = trpc.drivers.getLocation.useQuery(
     { driverId: backendDriverId },
     {
-      enabled: backendDriverId.length > 0 && (
+      enabled: isScreenFocused && backendDriverId.length > 0 && (
         (driverFound && !driverArrived && !tripStarted) ||
         (tripStarted && !tripCompleted)
       ),
-      refetchInterval: 8000,
-      staleTime: 7000,
+      refetchInterval: tripStarted ? 6000 : 12000,
+      staleTime: tripStarted ? 5000 : 10000,
     }
   );
 
@@ -1360,7 +1374,11 @@ export default function CustomerHomeScreen() {
   const [activeRideLiveTracking, setActiveRideLiveTracking] = useState<boolean>(true);
   const rideMessagesQuery = trpc.messages.getByRide.useQuery(
     { rideId: currentBackendRideId ?? '' },
-    { enabled: !!currentBackendRideId && showChatModal, refetchInterval: 8000, staleTime: 6000 }
+    {
+      enabled: !!currentBackendRideId && showChatModal && isScreenFocused,
+      refetchInterval: isScreenFocused ? 12000 : false,
+      staleTime: 10000,
+    }
   );
 
   const isVehicleWeatherRestricted = useMemo(() => {
