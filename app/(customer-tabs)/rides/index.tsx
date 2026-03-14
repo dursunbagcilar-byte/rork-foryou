@@ -5,6 +5,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { Clock, Star, Banknote, CarFront, ArrowLeft, RefreshCw } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAppActive } from '@/hooks/useAppActive';
 import { trpc } from '@/lib/trpc';
 
 interface RideItem {
@@ -26,6 +27,8 @@ export default function RidesScreen() {
   const { user, rideHistory } = useAuth();
   const router = useRouter();
   const [isScreenFocused, setIsScreenFocused] = useState<boolean>(true);
+  const { isAppActive } = useAppActive();
+  const isRealtimeScreenActive = isScreenFocused && isAppActive;
 
   useFocusEffect(
     useCallback(() => {
@@ -40,7 +43,7 @@ export default function RidesScreen() {
 
   const customerRidesQuery = trpc.rides.getCustomerRides.useQuery(
     { customerId: user?.id ?? '', limit: 50 },
-    { enabled: !!user?.id && isScreenFocused, refetchInterval: isScreenFocused ? 120000 : false, staleTime: 110000 }
+    { enabled: !!user?.id && isRealtimeScreenActive, refetchInterval: isRealtimeScreenActive ? 120000 : false, staleTime: 110000 }
   );
 
   const backendRides = customerRidesQuery.data?.rides ?? [];

@@ -19,6 +19,7 @@ import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRideForOthers, type RideForOtherPaymentMode, type RideRecipient } from '@/contexts/RideForOthersContext';
 import { useLocation } from '@/hooks/useLocation';
+import { useAppActive } from '@/hooks/useAppActive';
 import { buildApiUrl, trpc, trpcClient } from '@/lib/trpc';
 import { ISTANBUL_REGION, findBestAlternativeVehicle, getVehicleTypeLabel } from '@/constants/mockData';
 import type { Driver, MockDriverInfo } from '@/constants/mockData';
@@ -190,6 +191,8 @@ export default function CustomerHomeScreen() {
   const [showCustomOrder, setShowCustomOrder] = useState<boolean>(false);
   const [currentBackendRideId, setCurrentBackendRideId] = useState<string | null>(null);
   const [isScreenFocused, setIsScreenFocused] = useState<boolean>(true);
+  const { isAppActive } = useAppActive();
+  const isRealtimeScreenActive = isScreenFocused && isAppActive;
   const lastBackendRideStatusRef = useRef<string | null>(null);
   const completionHandledRideIdRef = useRef<string | null>(null);
   const cancellationHandledRideIdRef = useRef<string | null>(null);
@@ -366,8 +369,8 @@ export default function CustomerHomeScreen() {
   const onlineDriversQuery = trpc.drivers.getOnlineByCity.useQuery(
     { city: user?.city ?? '' },
     {
-      enabled: !!user?.city && !rideRequested && isScreenFocused,
-      refetchInterval: isScreenFocused ? 75000 : false,
+      enabled: !!user?.city && !rideRequested && isRealtimeScreenActive,
+      refetchInterval: isRealtimeScreenActive ? 75000 : false,
       staleTime: 70000,
     }
   );
@@ -394,16 +397,16 @@ export default function CustomerHomeScreen() {
   const couriersByCityQuery = trpc.drivers.getCouriersByCity.useQuery(
     { city: user?.city ?? '', district: user?.district ?? '' },
     {
-      enabled: !!user?.city && !!user?.district && isScreenFocused && showCourierPanel,
-      refetchInterval: isScreenFocused && showCourierPanel ? 120000 : false,
+      enabled: !!user?.city && !!user?.district && isRealtimeScreenActive && showCourierPanel,
+      refetchInterval: isRealtimeScreenActive && showCourierPanel ? 120000 : false,
       staleTime: 115000,
     }
   );
   const businessesByCityQuery = trpc.businesses.listByCity.useQuery(
     { city: user?.city ?? '' },
     {
-      enabled: !!user?.city && isScreenFocused && showCourierPanel,
-      refetchInterval: isScreenFocused && showCourierPanel ? 120000 : false,
+      enabled: !!user?.city && isRealtimeScreenActive && showCourierPanel,
+      refetchInterval: isRealtimeScreenActive && showCourierPanel ? 120000 : false,
       staleTime: 115000,
     }
   );
@@ -796,8 +799,8 @@ export default function CustomerHomeScreen() {
   const customerActiveRideQuery = trpc.rides.getActiveRide.useQuery(
     { userId: user?.id ?? '', type: 'customer' as const },
     {
-      enabled: !!user?.id && isScreenFocused,
-      refetchInterval: isScreenFocused
+      enabled: !!user?.id && isRealtimeScreenActive,
+      refetchInterval: isRealtimeScreenActive
         ? ((rideRequested || !!currentBackendRideId || tripStarted) ? 12000 : 75000)
         : false,
       staleTime: 10000,
@@ -809,8 +812,8 @@ export default function CustomerHomeScreen() {
   const _driverProfileQuery = trpc.drivers.getProfile.useQuery(
     { driverId: backendDriverId },
     {
-      enabled: backendDriverId.length > 0 && isScreenFocused && (driverFound || tripStarted || !!currentBackendRideId),
-      refetchInterval: isScreenFocused ? (tripStarted ? 45000 : 90000) : false,
+      enabled: backendDriverId.length > 0 && isRealtimeScreenActive && (driverFound || tripStarted || !!currentBackendRideId),
+      refetchInterval: isRealtimeScreenActive ? (tripStarted ? 45000 : 90000) : false,
       staleTime: 30000,
     }
   );
@@ -819,8 +822,8 @@ export default function CustomerHomeScreen() {
   const _rideDetailsQuery = trpc.rides.getById.useQuery(
     { rideId: currentBackendRideId ?? '' },
     {
-      enabled: !!currentBackendRideId && isScreenFocused && !backendActiveRide,
-      refetchInterval: isScreenFocused && !backendActiveRide ? 15000 : false,
+      enabled: !!currentBackendRideId && isRealtimeScreenActive && !backendActiveRide,
+      refetchInterval: isRealtimeScreenActive && !backendActiveRide ? 15000 : false,
       staleTime: 12000,
     }
   );
@@ -830,11 +833,11 @@ export default function CustomerHomeScreen() {
   const driverLocationPollQuery = trpc.drivers.getLocation.useQuery(
     { driverId: backendDriverId },
     {
-      enabled: isScreenFocused && backendDriverId.length > 0 && (
+      enabled: isRealtimeScreenActive && backendDriverId.length > 0 && (
         (driverFound && !driverArrived && !tripStarted) ||
         (tripStarted && !tripCompleted)
       ),
-      refetchInterval: tripStarted ? 8000 : 15000,
+      refetchInterval: isRealtimeScreenActive ? (tripStarted ? 8000 : 15000) : false,
       staleTime: tripStarted ? 7000 : 12000,
     }
   );
@@ -1375,8 +1378,8 @@ export default function CustomerHomeScreen() {
   const rideMessagesQuery = trpc.messages.getByRide.useQuery(
     { rideId: currentBackendRideId ?? '' },
     {
-      enabled: !!currentBackendRideId && showChatModal && isScreenFocused,
-      refetchInterval: isScreenFocused ? 15000 : false,
+      enabled: !!currentBackendRideId && showChatModal && isRealtimeScreenActive,
+      refetchInterval: isRealtimeScreenActive ? 15000 : false,
       staleTime: 12000,
     }
   );

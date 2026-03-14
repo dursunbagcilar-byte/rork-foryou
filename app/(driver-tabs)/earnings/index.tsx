@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { TrendingUp, TrendingDown, Car, Clock, MapPin, CheckCircle, XCircle, Navigation } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAppActive } from '@/hooks/useAppActive';
 import { trpc } from '@/lib/trpc';
 import { useFocusEffect } from 'expo-router';
 import type { Driver } from '@/constants/mockData';
@@ -15,6 +16,8 @@ export default function EarningsScreen() {
   const driver = user as Driver | null;
   const [period, setPeriod] = useState<Period>('daily');
   const [isScreenFocused, setIsScreenFocused] = useState<boolean>(true);
+  const { isAppActive } = useAppActive();
+  const isRealtimeScreenActive = isScreenFocused && isAppActive;
 
   useFocusEffect(
     useCallback(() => {
@@ -29,7 +32,7 @@ export default function EarningsScreen() {
 
   const earningsQuery = trpc.drivers.getEarningsHistory.useQuery(
     { driverId: driver?.id ?? '', days: 7 },
-    { enabled: !!driver?.id && isScreenFocused, refetchInterval: isScreenFocused ? 120000 : false, staleTime: 110000 }
+    { enabled: !!driver?.id && isRealtimeScreenActive, refetchInterval: isRealtimeScreenActive ? 120000 : false, staleTime: 110000 }
   );
 
   const earningsData = earningsQuery.data;
@@ -42,7 +45,7 @@ export default function EarningsScreen() {
 
   const driverRidesQuery = trpc.rides.getDriverRides.useQuery(
     { driverId: driver?.id ?? '' },
-    { enabled: !!driver?.id && isScreenFocused, refetchInterval: isScreenFocused ? 120000 : false, staleTime: 110000 }
+    { enabled: !!driver?.id && isRealtimeScreenActive, refetchInterval: isRealtimeScreenActive ? 120000 : false, staleTime: 110000 }
   );
 
   const ridesData = driverRidesQuery.data;
