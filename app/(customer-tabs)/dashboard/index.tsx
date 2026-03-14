@@ -4814,6 +4814,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800' as const,
     color: '#1A1A2E',
+    includeFontPadding: false,
   },
   rideSummaryDivider: {
     width: 1,
@@ -4898,10 +4899,12 @@ const styles = StyleSheet.create({
   confirmButtonCash: {
     backgroundColor: '#16A34A',
     shadowColor: '#16A34A',
+    elevation: 6,
   },
   confirmButtonSearching: {
     backgroundColor: '#15803D',
     shadowColor: '#15803D',
+    elevation: 6,
   },
   confirmButtonContent: {
     flexDirection: 'row' as const,
@@ -4916,6 +4919,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700' as const,
     color: '#FFF',
+    includeFontPadding: false,
   },
   statusPanel: {
     position: 'absolute',
@@ -4941,6 +4945,7 @@ const styles = StyleSheet.create({
   statusTitle: {
     fontSize: 20,
     fontWeight: '700' as const,
+    includeFontPadding: false,
     color: '#1A1A2E',
     marginTop: 16,
   },
@@ -6025,6 +6030,7 @@ const styles = StyleSheet.create({
   tripCarMarker: {
     backgroundColor: '#2ECC71',
     shadowColor: '#2ECC71',
+    elevation: 6,
   },
   paymentObligationBanner: {
     flexDirection: 'row' as const,

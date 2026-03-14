@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Tabs } from 'expo-router';
 import { Map, Wallet, User, Clock, ShieldCheck, FileText, X, PartyPopper, CheckCircle2 } from 'lucide-react-native';
-import { View, Text, StyleSheet, Animated, Easing, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Animated, Easing, TouchableOpacity, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
@@ -412,9 +412,18 @@ export default function DriverTabsLayout() {
             backgroundColor: colors.background,
             borderTopColor: colors.cardBorder,
             borderTopWidth: 1,
+            ...(Platform.OS === 'android' ? {
+              elevation: 8,
+              borderTopWidth: 0,
+            } : {}),
           },
           tabBarActiveTintColor: colors.primary,
           tabBarInactiveTintColor: colors.textMuted,
+          tabBarLabelStyle: {
+            fontSize: 11,
+            fontWeight: '600' as const,
+            ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
+          },
         }}
       >
         <Tabs.Screen

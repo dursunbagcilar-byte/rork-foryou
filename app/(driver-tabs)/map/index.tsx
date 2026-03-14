@@ -2943,12 +2943,12 @@ const styles = StyleSheet.create({
     flex: 1, paddingVertical: 16, borderRadius: 14,
     borderWidth: 1, borderColor: Colors.dark.accent, alignItems: 'center',
   },
-  declineButtonText: { fontSize: 16, fontWeight: '600' as const, color: Colors.dark.accent },
+  declineButtonText: { fontSize: 16, fontWeight: '600' as const, color: Colors.dark.accent, includeFontPadding: false },
   acceptButton: {
     flex: 2, paddingVertical: 16, borderRadius: 14,
     backgroundColor: Colors.dark.success, alignItems: 'center',
   },
-  acceptButtonText: { fontSize: 16, fontWeight: '700' as const, color: '#FFF' },
+  acceptButtonText: { fontSize: 16, fontWeight: '700' as const, color: '#FFF', includeFontPadding: false },
   activeRidePanel: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24,
@@ -2985,13 +2985,13 @@ const styles = StyleSheet.create({
   },
   activeRideAvatarText: { fontSize: 16, fontWeight: '700' as const, color: '#FFF' },
   activeRideInfo: { flex: 1 },
-  activeRideName: { fontSize: 17, fontWeight: '700' as const, color: '#1A1A2E' },
-  activeRideSub: { fontSize: 13, color: '#888', marginTop: 2 },
+  activeRideName: { fontSize: 17, fontWeight: '700' as const, color: '#1A1A2E', includeFontPadding: false },
+  activeRideSub: { fontSize: 13, color: '#888', marginTop: 2, includeFontPadding: false },
   completeButton: {
     backgroundColor: Colors.dark.success, paddingVertical: 18, borderRadius: 16,
     alignItems: 'center', width: '100%', marginTop: 8,
   },
-  completeButtonText: { fontSize: 17, fontWeight: '700' as const, color: '#FFF' },
+  completeButtonText: { fontSize: 17, fontWeight: '700' as const, color: '#FFF', includeFontPadding: false },
   pickupMarker: {
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: Colors.dark.success, justifyContent: 'center', alignItems: 'center',

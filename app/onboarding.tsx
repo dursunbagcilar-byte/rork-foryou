@@ -225,6 +225,7 @@ const styles = StyleSheet.create({
     fontWeight: '800' as const,
     color: '#FFFFFF',
     letterSpacing: 3,
+    includeFontPadding: false,
   },
   skipBtn: {
     paddingVertical: 8,
@@ -251,12 +252,14 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     marginBottom: 10,
     letterSpacing: 0.3,
+    includeFontPadding: false,
   },
   slideSubtitle: {
     fontSize: 15,
     color: 'rgba(255,255,255,0.7)',
     lineHeight: 22,
     fontWeight: '400' as const,
+    includeFontPadding: false,
   },
   controlsSection: {
     paddingHorizontal: 24,
@@ -303,5 +306,6 @@ const styles = StyleSheet.create({
     fontWeight: '700' as const,
     color: '#FFFFFF',
     letterSpacing: 0.5,
+    includeFontPadding: false,
   },
 });

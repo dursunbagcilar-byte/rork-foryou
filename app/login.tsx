@@ -496,7 +496,7 @@ export default function LoginScreen() {
       />
       <View style={[styles.bgOverlay, { width, height: imgHeight }]} />
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.flex}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
       >
@@ -689,14 +689,16 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(245,166,35,0.15)',
   },
   title: {
-    fontWeight: '800',
+    fontWeight: '800' as const,
     color: '#FFFFFF',
     letterSpacing: -0.5,
+    includeFontPadding: false,
   },
   subtitle: {
     color: 'rgba(255,255,255,0.45)',
     marginTop: 6,
     marginBottom: 24,
+    includeFontPadding: false,
   },
   tabContainer: {
     flexDirection: 'row',
@@ -725,8 +727,9 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   tabText: {
-    fontWeight: '600',
+    fontWeight: '600' as const,
     color: 'rgba(255,255,255,0.5)',
+    includeFontPadding: false,
   },
   tabTextActive: {
     color: '#0A0A12',
@@ -745,6 +748,7 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     color: '#FFFFFF',
+    includeFontPadding: false,
   },
   infoCard: {
     flexDirection: 'row',
@@ -791,8 +795,9 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   loginButtonText: {
-    fontWeight: '700',
+    fontWeight: '700' as const,
     color: '#0A0A12',
+    includeFontPadding: false,
   },
   registerRow: {
     flexDirection: 'row',

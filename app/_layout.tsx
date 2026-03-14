@@ -3,7 +3,7 @@ import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Platform, StatusBar } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
@@ -69,10 +69,16 @@ function NotificationOverlay() {
 }
 
 function RootLayoutNav() {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   console.log('[Layout] RootLayoutNav rendering');
   return (
-    <Stack
+    <>
+      <StatusBar
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={colors.background}
+        translucent={Platform.OS === 'android'}
+      />
+      <Stack
       screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: colors.background },
@@ -99,6 +105,7 @@ function RootLayoutNav() {
       <Stack.Screen name="(driver-tabs)" />
       <Stack.Screen name="+not-found" />
     </Stack>
+    </>
   );
 }
 

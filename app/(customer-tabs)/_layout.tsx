@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { Platform } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Home, Clock, User } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,9 +25,18 @@ export default function CustomerTabsLayout() {
           backgroundColor: colors.background,
           borderTopColor: colors.cardBorder,
           borderTopWidth: 1,
+          ...(Platform.OS === 'android' ? {
+            elevation: 8,
+            borderTopWidth: 0,
+          } : {}),
         },
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '600' as const,
+          ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
+        },
       }}
     >
       <Tabs.Screen

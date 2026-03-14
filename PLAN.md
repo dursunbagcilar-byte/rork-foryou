@@ -1,36 +1,25 @@
-# Gerçek müşteri sürüş oluşturma ve eşleştirme akışı
+# Android Uyumluluğu İyileştirmeleri
 
-**Features**
-- [x] Müşteri sürüş talebi yalnızca canlı ve müsait şoför varsa oluşturulur.
-- [x] Seçilen araç tipine göre uygun şoför kategorisi filtrelenir.
-- [x] Sürüş talebi en uygun canlı şoförlere bildirim olarak gönderilir.
-- [x] Müşteri ekranı kaç şoföre istek gönderildiğini gösterir.
-- [x] Aynı ilçede aktif ama meşgul şoför varsa müşteriye sıraya alınma teklifi sunulur.
-- [x] Müşteri sırayı kabul ederse talep hedef şoföre bildirim olarak gider.
-- [x] Şoför mevcut yolculuğunu tamamlayınca sıradaki müşteri ilk yeni talep gibi görünür.
+Uygulamanın Android cihazlarda iOS ile aynı kalitede görünmesi için aşağıdaki iyileştirmeler yapılacak:
 
-**Backend**
-- [x] `rides.create` gerçek canlı şoför uygunluğunu kontrol eder.
-- [x] `rides.getPendingByCity` şoföre yalnızca kendi kategorisine uygun talepleri döndürür.
-- [x] `rides.findBestDriver` araç kategorisine göre gerçek adayları filtreler.
-- [x] Sürüş kaydında istenen şoför kategorisi saklanır.
-- [x] İl ve ilçe eşleşmeleri boşluk/büyük-küçük harf/Türkçe karakter farklarına dayanıklı hale getirildi.
-- [x] `rides.create` aynı ilçedeki meşgul şoförü bulursa sıra teklifi döndürür.
-- [x] `rides.createQueued` hedef şoförlü sıradaki yolculuk kaydı oluşturur ve şoföre bildirim yollar.
-- [x] `rides.getPendingByCity` hedef şoföre ait sıradaki talepleri öncelikli döndürür.
+**Gölge & Derinlik Düzeltmeleri**
+- [x] Tüm ekranlarda eksik `elevation` değerleri eklenerek Android'de gölgelerin düzgün görünmesi sağlanacak
+- [x] Kartlar, butonlar ve panellerde tutarlı derinlik efektleri
 
-**Pages / Screens**
-- [x] Müşteri dashboard: sürüş oluştururken istenen araç tipi backend'e gönderilir.
-- [x] Müşteri dashboard: "Şoför aranıyor" metni canlı eşleştirme durumunu yansıtır.
-- [x] Müşteri dashboard: nakit ödeme seçiliyken sürüş başlat alanı yeşil tema kullanır.
-- [x] Müşteri dashboard: sistemde şoför yoksa sürüş başlat alanı spinner ile "Şoför aranıyor" durumunu gösterir.
-- [x] Müşteri dashboard: meşgul aynı ilçe şoförü için sıra onayı uyarısı gösterir ve kabul sonrası durum metnini günceller.
-- [x] Şoför haritası: yolculuk tamamlanınca aktif/sıradaki talepleri yenileyip hedef müşteriyi ilk yeni talep gibi gösterir.
+**Yazı Tipi & Metin İyileştirmeleri**
+- [x] Android'de satır yüksekliği (lineHeight) farklılıkları düzeltilecek
+- [x] Font ağırlığı (bold, semibold vb.) Android'e uygun şekilde ayarlanacak
+- [x] `includeFontPadding: false` eklenerek Android'deki fazladan metin boşlukları giderilecek
 
-**Stability / Load**
-- [x] Müşteri dashboard: arka planda ve odak dışındayken gereksiz polling durduruldu.
-- [x] Müşteri dashboard: kurye ve işletme sorguları yalnızca ilgili panel açıkken çalışır hale getirildi.
-- [x] Şoför haritası: bekleyen/aktif yolculuk polling sıklığı düşürüldü ve focus bazlı hale getirildi.
-- [x] Şoför haritası: konum senkronizasyonu seyrekleştirildi ve eşzamanlı istek yığılması engellendi.
-- [x] Yolculuk geçmişi ve kazanç ekranları: ekran odakta değilken periyodik sorgular durduruldu.
-- [x] Şoför haritası: online durum / konum senkronizasyonunda mutation referansları sabitlenerek tekrar istek riski azaltıldı.
+**Buton & Dokunma Efektleri**
+- [x] Buton basma animasyonları her iki platformda tutarlı olacak
+
+**Durum Çubuğu (Status Bar)**
+- [x] Android'de durum çubuğu rengi ve stili uygulama temasına uygun ayarlanacak
+- [x] Koyu/açık tema geçişlerinde durum çubuğu otomatik güncellenecek
+
+**Genel Platform Uyumu**
+- [x] `KeyboardAvoidingView` davranışı Android için optimize edilecek
+- [x] Harita bileşenlerinde Android'e özel sağlayıcı (Google Maps) kullanımı kontrol edilecek
+- [x] Tab bar Android için elevation ve label style iyileştirmeleri yapıldı
+- [x] Cross-platform shadow utility oluşturuldu (`utils/platform.ts`)
