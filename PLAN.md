@@ -22,3 +22,5 @@
 - [x] **Müşteri rota ekranı:** Haritadan hedef seçildikten sonra sürüş başlatma akışı daha net çalışacak.
 - [x] **Şoför aranıyor durumu:** Arama, uyarı ve bekleme bilgisi tek mantıklı akışta gösterilecek.
 - [x] **Meşgul şoför uyarısı:** Tahmini müsaitlik süresi ve sıraya alınma seçimi burada sunulacak.
+- [x] **Sürüş başlat performansı:** Basış sonrası pickup çözümleme önbellekten ve paralel doğrulama ile daha hızlı ilerleyecek.
+- [x] **Ücretsiz sürüş alanı:** Buton ve ücret alanı sabit yükseklikle ve kilitli ücretsiz durum gösterimiyle titreşmeden kalacak.

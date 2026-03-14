@@ -153,6 +153,12 @@ interface ResolvedPickupLocation {
   pickupAddress: string;
 }
 
+const resolvedPickupLocationCache = new Map<string, ResolvedPickupLocation>();
+
+function buildLocationCacheKey(latitude: number, longitude: number): string {
+  return `${latitude.toFixed(4)},${longitude.toFixed(4)}`;
+}
+
 function findAddressComponent(components: GeocodingAddressComponent[], preferredTypes: string[]): string {
   for (const preferredType of preferredTypes) {
     const match = components.find((component) => component.types?.includes(preferredType));
@@ -173,15 +179,28 @@ async function resolvePickupLocationFromCoordinates(
   const fallbackPickupAddress = fallbackCity
     ? `${fallbackCity}${fallbackDistrict ? ` / ${fallbackDistrict}` : ''}`
     : 'Mevcut Konum';
+  const cacheKey = buildLocationCacheKey(latitude, longitude);
+  const cachedPickupLocation = resolvedPickupLocationCache.get(cacheKey);
+
+  if (cachedPickupLocation) {
+    console.log('[Customer] Pickup reverse geocode cache hit:', cacheKey, cachedPickupLocation.pickupAddress);
+    return cachedPickupLocation;
+  }
+
+  const commitResolvedPickupLocation = (value: ResolvedPickupLocation): ResolvedPickupLocation => {
+    resolvedPickupLocationCache.set(cacheKey, value);
+    return value;
+  };
+
   const geocodingUrl = getGeocodingUrl(latitude, longitude);
 
   if (!geocodingUrl) {
     console.log('[Customer] Pickup reverse geocode skipped - missing API key');
-    return {
+    return commitResolvedPickupLocation({
       city: fallbackCity,
       district: fallbackDistrict,
       pickupAddress: fallbackPickupAddress,
-    };
+    });
   }
 
   try {
@@ -190,11 +209,11 @@ async function resolvePickupLocationFromCoordinates(
 
     if (data.status !== 'OK' || !Array.isArray(data.results) || data.results.length === 0) {
       console.log('[Customer] Pickup reverse geocode failed:', data.status, data.error_message ?? 'unknown');
-      return {
+      return commitResolvedPickupLocation({
         city: fallbackCity,
         district: fallbackDistrict,
         pickupAddress: fallbackPickupAddress,
-      };
+      });
     }
 
     const primaryResult = data.results[0];
@@ -208,18 +227,18 @@ async function resolvePickupLocationFromCoordinates(
 
     console.log('[Customer] Pickup reverse geocode resolved:', pickupAddress, 'city:', resolvedCity, 'district:', resolvedDistrict);
 
-    return {
+    return commitResolvedPickupLocation({
       city: resolvedCity,
       district: resolvedDistrict,
       pickupAddress,
-    };
+    });
   } catch (error) {
     console.log('[Customer] Pickup reverse geocode error:', error);
-    return {
+    return commitResolvedPickupLocation({
       city: fallbackCity,
       district: fallbackDistrict,
       pickupAddress: fallbackPickupAddress,
-    };
+    });
   }
 }
 
@@ -255,7 +274,11 @@ export default function CustomerHomeScreen() {
   const [currentRideRewardSource, setCurrentRideRewardSource] = useState<'account' | 'promo' | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash');
   const [paymentLoading, setPaymentLoading] = useState<boolean>(false);
+  const [rideRequestSubmitting, setRideRequestSubmitting] = useState<boolean>(false);
   const [placesLoading, setPlacesLoading] = useState<boolean>(false);
+  const [selectedRouteFreeRideLocked, setSelectedRouteFreeRideLocked] = useState<boolean>(false);
+  const prefetchedPickupLocationRef = useRef<ResolvedPickupLocation | null>(null);
+  const prefetchedPickupLocationKeyRef = useRef<string>('');
   const [driverLocation, setDriverLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [driverRoutePath, setDriverRoutePath] = useState<{ latitude: number; longitude: number }[]>([]);
   const [driverEta, setDriverEta] = useState<number>(0);
@@ -524,8 +547,11 @@ export default function CustomerHomeScreen() {
     }
   );
   const onlineDrivers = onlineDriversQuery.data ?? [];
-  const isConfirmButtonBusy = paymentLoading;
-  const confirmButtonLabel = isFreeRide() && selectedDest
+  const freeRidesLeft = remainingFreeRides();
+  const hasFreeRideAvailable = useMemo<boolean>(() => freeRidesLeft > 0, [freeRidesLeft]);
+  const displayFreeRideAvailable = selectedDest ? selectedRouteFreeRideLocked : hasFreeRideAvailable;
+  const isConfirmButtonBusy = paymentLoading || rideRequestSubmitting;
+  const confirmButtonLabel = displayFreeRideAvailable && selectedDest
     ? 'Ücretsiz Sürüş Başlat'
     : paymentMethod === 'card'
       ? 'Kart ile Öde & Çağır'
@@ -554,6 +580,47 @@ export default function CustomerHomeScreen() {
   const onlineCouriersCount = cityCouriers.filter(c => c.isOnline).length;
   const hasAnimatedToGps = useRef(false);
   const lastCenteredLocation = useRef<{ latitude: number; longitude: number } | null>(null);
+  const pickupLocationCacheKey = useMemo(() => buildLocationCacheKey(mapRegion.latitude, mapRegion.longitude), [mapRegion.latitude, mapRegion.longitude]);
+
+  useEffect(() => {
+    if (!selectedDest) {
+      setSelectedRouteFreeRideLocked(hasFreeRideAvailable);
+    }
+  }, [hasFreeRideAvailable, selectedDest]);
+
+  useEffect(() => {
+    if (rideRequested) {
+      return;
+    }
+
+    const cachedPickupLocation = resolvedPickupLocationCache.get(pickupLocationCacheKey);
+    if (cachedPickupLocation) {
+      prefetchedPickupLocationKeyRef.current = pickupLocationCacheKey;
+      prefetchedPickupLocationRef.current = cachedPickupLocation;
+      return;
+    }
+
+    let cancelled = false;
+    const latitude = mapRegion.latitude;
+    const longitude = mapRegion.longitude;
+
+    void resolvePickupLocationFromCoordinates(latitude, longitude, user?.city ?? '', user?.district ?? '')
+      .then((resolvedPickupLocation) => {
+        if (cancelled) {
+          return;
+        }
+        prefetchedPickupLocationKeyRef.current = pickupLocationCacheKey;
+        prefetchedPickupLocationRef.current = resolvedPickupLocation;
+        console.log('[Customer] Prefetched pickup location for fast ride request:', resolvedPickupLocation.pickupAddress);
+      })
+      .catch((error) => {
+        console.log('[Customer] Pickup prefetch error:', error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pickupLocationCacheKey, mapRegion.latitude, mapRegion.longitude, user?.city, user?.district, rideRequested]);
 
   useEffect(() => {
     if (!gpsLocation || !mapRef.current || rideRequested) return;
@@ -1502,6 +1569,7 @@ export default function CustomerHomeScreen() {
   const selectDestination = useCallback(async (dest: DestinationOption) => {
     setDestination(dest.name);
     setSelectedDest(dest);
+    setSelectedRouteFreeRideLocked(hasFreeRideAvailable);
 
     const haversineDist = calculateDistance(
       mapRegion.latitude,
@@ -1526,7 +1594,7 @@ export default function CustomerHomeScreen() {
     } else {
       console.log(`Selected: ${dest.name}, Haversine Distance: ${haversineDist}km, Price: ₺${calculatePrice(haversineDist, selectedVehiclePackage as VehicleType)}, Vehicle: ${selectedVehiclePackage}`);
     }
-  }, [mapRegion.latitude, mapRegion.longitude, selectedVehiclePackage, fetchDrivingDistance]);
+  }, [mapRegion.latitude, mapRegion.longitude, selectedVehiclePackage, fetchDrivingDistance, hasFreeRideAvailable]);
 
   const handleSelectRoutePickerItem = useCallback((item: RoutePickerRecentItem) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -1612,7 +1680,7 @@ export default function CustomerHomeScreen() {
   }, [isRainy, selectedVehiclePackage]);
 
   const handleRequestRide = useCallback(async () => {
-    if (!destination || !selectedDest) return;
+    if (!destination || !selectedDest || rideRequestSubmitting) return;
     if (isVehicleWeatherRestricted) {
       Alert.alert(
         'Hava Durumu Uyarısı',
@@ -1621,81 +1689,101 @@ export default function CustomerHomeScreen() {
       return;
     }
 
+    setRideRequestSubmitting(true);
+
+    const fallbackPickupLocation: ResolvedPickupLocation = {
+      city: user?.city ?? '',
+      district: user?.district ?? '',
+      pickupAddress: user?.city
+        ? `${user.city}${user?.district ? ` / ${user.district}` : ''}`
+        : 'Mevcut Konum',
+    };
+
     try {
-      await ensureServerSession('customer-dashboard-create-ride');
-    } catch (sessionError) {
-      const sessionMessage = sessionError instanceof Error ? sessionError.message : 'Oturum doğrulanamadı. Lütfen tekrar giriş yapın.';
-      console.log('[Customer] Ride request blocked by session validation:', sessionMessage);
-      Alert.alert('Yolculuk Başlatılamadı', sessionMessage);
-      return;
-    }
+      let resolvedPickupLocation = fallbackPickupLocation;
 
-    const accountFreeRides = user?.type === 'customer' ? Math.max(0, user.freeRidesRemaining ?? 0) : 0;
-    const free = isFreeRide();
-    const freeRideSource: 'account' | 'promo' | null = free
-      ? (accountFreeRides > 0 ? 'account' : 'promo')
-      : null;
-    setCurrentRideFree(free);
-    setCurrentRideRewardSource(freeRideSource);
-
-    const rideForOtherEnabled = Boolean(rideForOtherDraft.enabled && rideForOtherDraft.recipient);
-    const selectedRideRecipient = rideForOtherEnabled ? rideForOtherDraft.recipient : null;
-    setActiveRideForOther(rideForOtherEnabled);
-    setActiveRideRecipient(selectedRideRecipient);
-    setActiveRidePaymentMode(rideForOtherDraft.paymentMode);
-    setActiveRideShareBySms(rideForOtherDraft.shareBySms);
-    setActiveRideShareByWhatsApp(rideForOtherDraft.shareByWhatsApp);
-    setActiveRideLiveTracking(rideForOtherDraft.liveTrackingEnabled);
-
-    if (paymentMethod === 'card' && !free && ridePrice > 0) {
-      setPaymentLoading(true);
-      console.log('[PAYMENT] Starting card payment flow, price:', ridePrice);
       try {
-        const callbackUrl = buildApiUrl('/api/iyzico/callback');
-        console.log('[PAYMENT] Using callback URL:', callbackUrl);
-        const result = await initializePaymentMutation.mutateAsync({
-          rideId: 'r_' + Date.now(),
-          customerId: user?.id ?? '',
-          customerName: user?.name ?? 'Müşteri',
-          customerEmail: user?.email ?? '',
-          customerPhone: user?.phone ?? '',
-          customerCity: user?.city ?? '',
-          price: ridePrice,
-          callbackUrl,
-        });
+        const prefetchedPickupLocation = prefetchedPickupLocationKeyRef.current === pickupLocationCacheKey
+          ? prefetchedPickupLocationRef.current
+          : null;
+        const [, nextResolvedPickupLocation] = await Promise.all([
+          ensureServerSession('customer-dashboard-create-ride'),
+          prefetchedPickupLocation
+            ? Promise.resolve(prefetchedPickupLocation)
+            : resolvePickupLocationFromCoordinates(
+              mapRegion.latitude,
+              mapRegion.longitude,
+              user?.city ?? '',
+              user?.district ?? '',
+            ),
+        ]);
+        resolvedPickupLocation = nextResolvedPickupLocation;
+      } catch (sessionError) {
+        const sessionMessage = sessionError instanceof Error ? sessionError.message : 'Oturum doğrulanamadı. Lütfen tekrar giriş yapın.';
+        console.log('[Customer] Ride request blocked by session validation:', sessionMessage);
+        Alert.alert('Yolculuk Başlatılamadı', sessionMessage);
+        return;
+      }
 
-        if (result.success && result.paymentPageUrl) {
-          console.log('[PAYMENT] Opening iyzico payment page');
-          await WebBrowser.openBrowserAsync(result.paymentPageUrl);
-          console.log('[PAYMENT] Browser closed, proceeding with ride');
-        } else if (result.success && result.checkoutFormContent) {
-          console.log('[PAYMENT] Got checkout form content, proceeding');
-        } else {
-          Alert.alert('Ödeme Hatası', result.error || 'Kart ödeme başlatılamadı. Nakit ile devam edebilirsiniz.');
+      const accountFreeRides = user?.type === 'customer' ? Math.max(0, user.freeRidesRemaining ?? 0) : 0;
+      const free = isFreeRide();
+      const freeRideSource: 'account' | 'promo' | null = free
+        ? (accountFreeRides > 0 ? 'account' : 'promo')
+        : null;
+      setCurrentRideFree(free);
+      setCurrentRideRewardSource(freeRideSource);
+
+      const rideForOtherEnabled = Boolean(rideForOtherDraft.enabled && rideForOtherDraft.recipient);
+      const selectedRideRecipient = rideForOtherEnabled ? rideForOtherDraft.recipient : null;
+      setActiveRideForOther(rideForOtherEnabled);
+      setActiveRideRecipient(selectedRideRecipient);
+      setActiveRidePaymentMode(rideForOtherDraft.paymentMode);
+      setActiveRideShareBySms(rideForOtherDraft.shareBySms);
+      setActiveRideShareByWhatsApp(rideForOtherDraft.shareByWhatsApp);
+      setActiveRideLiveTracking(rideForOtherDraft.liveTrackingEnabled);
+
+      if (paymentMethod === 'card' && !free && ridePrice > 0) {
+        setPaymentLoading(true);
+        console.log('[PAYMENT] Starting card payment flow, price:', ridePrice);
+        try {
+          const callbackUrl = buildApiUrl('/api/iyzico/callback');
+          console.log('[PAYMENT] Using callback URL:', callbackUrl);
+          const result = await initializePaymentMutation.mutateAsync({
+            rideId: 'r_' + Date.now(),
+            customerId: user?.id ?? '',
+            customerName: user?.name ?? 'Müşteri',
+            customerEmail: user?.email ?? '',
+            customerPhone: user?.phone ?? '',
+            customerCity: user?.city ?? '',
+            price: ridePrice,
+            callbackUrl,
+          });
+
+          if (result.success && result.paymentPageUrl) {
+            console.log('[PAYMENT] Opening iyzico payment page');
+            await WebBrowser.openBrowserAsync(result.paymentPageUrl);
+            console.log('[PAYMENT] Browser closed, proceeding with ride');
+          } else if (result.success && result.checkoutFormContent) {
+            console.log('[PAYMENT] Got checkout form content, proceeding');
+          } else {
+            Alert.alert('Ödeme Hatası', result.error || 'Kart ödeme başlatılamadı. Nakit ile devam edebilirsiniz.');
+            setPaymentLoading(false);
+            return;
+          }
+        } catch (err) {
+          console.log('[PAYMENT] Error:', err);
+          Alert.alert('Ödeme Hatası', 'Kart ödeme sistemi şu an kullanılamıyor. Nakit ile devam edebilirsiniz.');
           setPaymentLoading(false);
           return;
         }
-      } catch (err) {
-        console.log('[PAYMENT] Error:', err);
-        Alert.alert('Ödeme Hatası', 'Kart ödeme sistemi şu an kullanılamıyor. Nakit ile devam edebilirsiniz.');
         setPaymentLoading(false);
-        return;
       }
-      setPaymentLoading(false);
-    }
 
-    try {
       const requestedDriverCategory: 'driver' | 'scooter' | 'courier' = selectedVehiclePackage === 'scooter'
         ? 'scooter'
         : selectedVehiclePackage === 'motorcycle'
           ? 'courier'
           : 'driver';
-      const resolvedPickupLocation = await resolvePickupLocationFromCoordinates(
-        mapRegion.latitude,
-        mapRegion.longitude,
-        user?.city ?? '',
-        user?.district ?? '',
-      );
       const rideRequestPayload: Parameters<typeof createRideMutation.mutateAsync>[0] = {
         customerId: user?.id ?? '',
         customerName: user?.name ?? 'Müşteri',
@@ -1868,6 +1956,7 @@ export default function CustomerHomeScreen() {
       setTripStarted(false);
       toggleSearch(false);
       console.log('[Customer] Ride created on backend, waiting for driver acceptance:', result.ride.id, 'availableDrivers:', availableDriversCount, 'notifiedDrivers:', notifiedDriversCount);
+      console.log(`Ride requested: ${destination}, Free: ${free}, Payment: ${paymentMethod}, Price: ₺${free ? 0 : ridePrice}, ForOther: ${rideForOtherEnabled}`);
     } catch (err) {
       console.log('[Customer] Backend ride creation error:', err);
       setCurrentBackendRideId(null);
@@ -1877,10 +1966,10 @@ export default function CustomerHomeScreen() {
       const errorMessage = err instanceof Error ? err.message : 'Yolculuk talebi şu an oluşturulamadı. Lütfen tekrar deneyin.';
       Alert.alert('Yolculuk Başlatılamadı', errorMessage);
       return;
+    } finally {
+      setRideRequestSubmitting(false);
     }
-
-    console.log(`Ride requested: ${destination}, Free: ${free}, Payment: ${paymentMethod}, Price: ₺${free ? 0 : ridePrice}, ForOther: ${rideForOtherEnabled}`);
-  }, [destination, selectedDest, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, createQueuedRideMutation, mapRegion.latitude, mapRegion.longitude, rideForOtherDraft, selectedVehiclePackage, ensureServerSession, showNoDriverAvailabilityPanel]);
+  }, [destination, selectedDest, rideRequestSubmitting, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, createQueuedRideMutation, mapRegion.latitude, mapRegion.longitude, rideForOtherDraft, selectedVehiclePackage, ensureServerSession, pickupLocationCacheKey, showNoDriverAvailabilityPanel]);
 
   const handleCompleteRide = useCallback(async () => {
     if (currentBackendRideId) {
@@ -2346,8 +2435,6 @@ export default function CustomerHomeScreen() {
     }).start();
   }, [showPromo, promoAnim]);
 
-
-  const freeRidesLeft = remainingFreeRides();
 
   const cityBusinesses = useMemo<CourierBusiness[]>(() => {
     const backendBusinesses = businessesByCityQuery.data as CourierBusiness[] | undefined;
@@ -3504,7 +3591,7 @@ export default function CustomerHomeScreen() {
                           </View>
                         </View>
                         <View style={styles.routePickerSelectedPriceWrap}>
-                          <Text style={styles.routePickerSelectedPrice}>{isFreeRide() ? 'Ücretsiz' : `₺${ridePrice}`}</Text>
+                          <Text style={styles.routePickerSelectedPrice}>{displayFreeRideAvailable ? 'Ücretsiz' : `₺${ridePrice}`}</Text>
                         </View>
                       </View>
                     </View>
@@ -3551,7 +3638,7 @@ export default function CustomerHomeScreen() {
                                 isSelected && { color: config.color },
                                 isRestricted && { color: '#CCC' },
                               ]}>
-                                {isFreeRide() ? 'Ücretsiz' : `₺${config.price}`}
+                                {displayFreeRideAvailable ? 'Ücretsiz' : `₺${config.price}`}
                               </Text>
                             </TouchableOpacity>
                           );
@@ -3576,7 +3663,7 @@ export default function CustomerHomeScreen() {
                         <View style={styles.rideSummaryDivider} />
                         <View style={styles.rideSummaryItem}>
                           <Text style={styles.rideSummaryLabel}>Ücret</Text>
-                          {isFreeRide() ? (
+                          {displayFreeRideAvailable ? (
                             <View style={styles.freePriceRow}>
                               <Text style={styles.rideSummaryValueStrike}>₺{ridePrice}</Text>
                               <Text style={styles.rideSummaryValueFree}>ÜCRETSİZ</Text>
@@ -5172,6 +5259,8 @@ const styles = StyleSheet.create({
   },
   freePriceRow: {
     alignItems: 'center',
+    minHeight: 32,
+    justifyContent: 'center',
   },
   rideSummaryValueStrike: {
     fontSize: 12,
@@ -5236,6 +5325,7 @@ const styles = StyleSheet.create({
   confirmButton: {
     backgroundColor: Colors.dark.primary,
     paddingVertical: 17,
+    minHeight: 58,
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
@@ -7047,6 +7137,9 @@ const styles = StyleSheet.create({
   },
   routePickerSelectedPriceWrap: {
     alignItems: 'flex-end' as const,
+    justifyContent: 'center' as const,
+    minWidth: 92,
+    minHeight: 56,
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
     paddingHorizontal: 12,
