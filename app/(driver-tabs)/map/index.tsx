@@ -273,12 +273,12 @@ export default function DriverHomeScreen() {
     lat: (Math.random() - 0.5) * 0.01,
     lng: (Math.random() - 0.5) * 0.01,
   });
-  const updateLocationMutation = useMutation({
+  const { mutate: syncDriverLocation } = useMutation({
     mutationFn: async (payload: { driverId: string; latitude: number; longitude: number }) => {
       return postDriverSync('/drivers/update-location', payload);
     },
   });
-  const setOnlineStatusMutation = useMutation({
+  const { mutate: syncDriverOnlineStatus } = useMutation({
     mutationFn: async (payload: { driverId: string; isOnline: boolean }) => {
       return postDriverSync('/drivers/set-online-status', payload);
     },
@@ -293,8 +293,8 @@ export default function DriverHomeScreen() {
     { rideId: currentRideId ?? '' },
     {
       enabled: !!currentRideId && showDriverChatModal && isScreenFocused,
-      refetchInterval: isScreenFocused ? 12000 : false,
-      staleTime: 10000,
+      refetchInterval: isScreenFocused ? 15000 : false,
+      staleTime: 12000,
     }
   );
 
@@ -306,8 +306,8 @@ export default function DriverHomeScreen() {
     },
     {
       enabled: isScreenFocused && isOnline && !!driver?.city && !rideAccepted && !hasRideRequest,
-      refetchInterval: isScreenFocused ? 10000 : false,
-      staleTime: 8000,
+      refetchInterval: isScreenFocused ? 15000 : false,
+      staleTime: 12000,
     }
   );
 
@@ -315,8 +315,8 @@ export default function DriverHomeScreen() {
     { userId: driver?.id ?? '', type: 'driver' as const },
     {
       enabled: !!driver?.id && isOnline && isScreenFocused,
-      refetchInterval: isScreenFocused ? (rideAccepted ? 30000 : 45000) : false,
-      staleTime: 20000,
+      refetchInterval: isScreenFocused ? (rideAccepted ? 45000 : 75000) : false,
+      staleTime: 30000,
     }
   );
 
@@ -395,7 +395,7 @@ export default function DriverHomeScreen() {
 
   useEffect(() => {
     if (driver?.id) {
-      setOnlineStatusMutation.mutate(
+      syncDriverOnlineStatus(
         { driverId: driver.id, isOnline },
         {
           onSuccess: () => {
@@ -421,7 +421,7 @@ export default function DriverHomeScreen() {
       }
       console.log('[Voice] Sesli yanıt sistemi kapalı - şoför meşgul');
     }
-  }, [isOnline, driver?.id, setOnlineStatusMutation]);
+  }, [isOnline, driver?.id, syncDriverOnlineStatus]);
 
   const lastSentLocationRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
   const isLocationSyncInFlightRef = useRef<boolean>(false);
@@ -429,7 +429,7 @@ export default function DriverHomeScreen() {
   const locationSendInterval = React.useMemo(() => {
     if (rideAccepted && !arrivedAtPickup) return 5000;
     if (customerPickedUp && navigatingToDropoff) return 5000;
-    return 15000;
+    return 20000;
   }, [rideAccepted, arrivedAtPickup, customerPickedUp, navigatingToDropoff]);
 
   const shouldSyncDriverLocation = isOnline && !!driver?.id && (isScreenFocused || rideAccepted || customerPickedUp);
@@ -469,7 +469,7 @@ export default function DriverHomeScreen() {
           return;
         }
         isLocationSyncInFlightRef.current = true;
-        updateLocationMutation.mutate(
+        syncDriverLocation(
           { driverId, latitude: lat, longitude: lng },
           {
             onError: (error: unknown) => {
@@ -490,7 +490,7 @@ export default function DriverHomeScreen() {
             return;
           }
           isLocationSyncInFlightRef.current = true;
-          updateLocationMutation.mutate(
+          syncDriverLocation(
             { driverId, latitude: lat, longitude: lng },
             {
               onError: (error: unknown) => {
@@ -509,7 +509,7 @@ export default function DriverHomeScreen() {
     sendLocation();
     const locationInterval = setInterval(sendLocation, locationSendInterval);
     return () => clearInterval(locationInterval);
-  }, [shouldSyncDriverLocation, driver?.id, gpsLocation, fallbackRegion.latitude, fallbackRegion.longitude, locationSendInterval, updateLocationMutation]);
+  }, [shouldSyncDriverLocation, driver?.id, gpsLocation, fallbackRegion.latitude, fallbackRegion.longitude, locationSendInterval, syncDriverLocation]);
 
   const pickupAddress = pickupAddressResolved || pendingRide?.pickupAddress || activeRideQuery.data?.pickupAddress || (driver?.district ? `${driver.district} Merkez` : (isBusinessDelivery ? 'İşletme Adresi' : 'Alış Noktası'));
   const dropoffAddress = dropoffAddressResolved || pendingRide?.dropoffAddress || activeRideQuery.data?.dropoffAddress || 'Varış Noktası';

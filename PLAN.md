@@ -32,3 +32,5 @@
 - [x] Müşteri dashboard: kurye ve işletme sorguları yalnızca ilgili panel açıkken çalışır hale getirildi.
 - [x] Şoför haritası: bekleyen/aktif yolculuk polling sıklığı düşürüldü ve focus bazlı hale getirildi.
 - [x] Şoför haritası: konum senkronizasyonu seyrekleştirildi ve eşzamanlı istek yığılması engellendi.
+- [x] Yolculuk geçmişi ve kazanç ekranları: ekran odakta değilken periyodik sorgular durduruldu.
+- [x] Şoför haritası: online durum / konum senkronizasyonunda mutation referansları sabitlenerek tekrar istek riski azaltıldı.

@@ -1,10 +1,11 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { TrendingUp, TrendingDown, Car, Clock, MapPin, ArrowRight, CheckCircle, XCircle, Navigation } from 'lucide-react-native';
+import { TrendingUp, TrendingDown, Car, Clock, MapPin, CheckCircle, XCircle, Navigation } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { trpc } from '@/lib/trpc';
+import { useFocusEffect } from 'expo-router';
 import type { Driver } from '@/constants/mockData';
 
 type Period = 'daily' | 'weekly' | 'monthly';
@@ -13,9 +14,22 @@ export default function EarningsScreen() {
   const { user } = useAuth();
   const driver = user as Driver | null;
   const [period, setPeriod] = useState<Period>('daily');
+  const [isScreenFocused, setIsScreenFocused] = useState<boolean>(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      console.log('[DriverEarnings] Screen focused - polling resumed');
+      setIsScreenFocused(true);
+      return () => {
+        console.log('[DriverEarnings] Screen blurred - polling paused');
+        setIsScreenFocused(false);
+      };
+    }, [])
+  );
+
   const earningsQuery = trpc.drivers.getEarningsHistory.useQuery(
     { driverId: driver?.id ?? '', days: 7 },
-    { enabled: !!driver?.id, refetchInterval: 60000, staleTime: 50000 }
+    { enabled: !!driver?.id && isScreenFocused, refetchInterval: isScreenFocused ? 120000 : false, staleTime: 110000 }
   );
 
   const earningsData = earningsQuery.data;
@@ -28,7 +42,7 @@ export default function EarningsScreen() {
 
   const driverRidesQuery = trpc.rides.getDriverRides.useQuery(
     { driverId: driver?.id ?? '' },
-    { enabled: !!driver?.id, refetchInterval: 60000, staleTime: 50000 }
+    { enabled: !!driver?.id && isScreenFocused, refetchInterval: isScreenFocused ? 120000 : false, staleTime: 110000 }
   );
 
   const ridesData = driverRidesQuery.data;

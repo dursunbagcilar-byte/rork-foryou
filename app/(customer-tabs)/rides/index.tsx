@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Clock, Star, Banknote, CarFront, ArrowLeft, RefreshCw } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
@@ -25,10 +25,22 @@ interface RideItem {
 export default function RidesScreen() {
   const { user, rideHistory } = useAuth();
   const router = useRouter();
+  const [isScreenFocused, setIsScreenFocused] = useState<boolean>(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      console.log('[CustomerRides] Screen focused - polling resumed');
+      setIsScreenFocused(true);
+      return () => {
+        console.log('[CustomerRides] Screen blurred - polling paused');
+        setIsScreenFocused(false);
+      };
+    }, [])
+  );
 
   const customerRidesQuery = trpc.rides.getCustomerRides.useQuery(
     { customerId: user?.id ?? '', limit: 50 },
-    { enabled: !!user?.id, refetchInterval: 60000, staleTime: 50000 }
+    { enabled: !!user?.id && isScreenFocused, refetchInterval: isScreenFocused ? 120000 : false, staleTime: 110000 }
   );
 
   const backendRides = customerRidesQuery.data?.rides ?? [];

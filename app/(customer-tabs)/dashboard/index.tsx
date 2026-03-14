@@ -367,8 +367,8 @@ export default function CustomerHomeScreen() {
     { city: user?.city ?? '' },
     {
       enabled: !!user?.city && !rideRequested && isScreenFocused,
-      refetchInterval: isScreenFocused ? 60000 : false,
-      staleTime: 55000,
+      refetchInterval: isScreenFocused ? 75000 : false,
+      staleTime: 70000,
     }
   );
   const onlineDrivers = onlineDriversQuery.data ?? [];
@@ -395,16 +395,16 @@ export default function CustomerHomeScreen() {
     { city: user?.city ?? '', district: user?.district ?? '' },
     {
       enabled: !!user?.city && !!user?.district && isScreenFocused && showCourierPanel,
-      refetchInterval: isScreenFocused && showCourierPanel ? 90000 : false,
-      staleTime: 85000,
+      refetchInterval: isScreenFocused && showCourierPanel ? 120000 : false,
+      staleTime: 115000,
     }
   );
   const businessesByCityQuery = trpc.businesses.listByCity.useQuery(
     { city: user?.city ?? '' },
     {
       enabled: !!user?.city && isScreenFocused && showCourierPanel,
-      refetchInterval: isScreenFocused && showCourierPanel ? 90000 : false,
-      staleTime: 85000,
+      refetchInterval: isScreenFocused && showCourierPanel ? 120000 : false,
+      staleTime: 115000,
     }
   );
   const cityCouriers = couriersByCityQuery.data ?? [];
@@ -798,9 +798,9 @@ export default function CustomerHomeScreen() {
     {
       enabled: !!user?.id && isScreenFocused,
       refetchInterval: isScreenFocused
-        ? ((rideRequested || !!currentBackendRideId || tripStarted) ? 8000 : 45000)
+        ? ((rideRequested || !!currentBackendRideId || tripStarted) ? 12000 : 75000)
         : false,
-      staleTime: 7000,
+      staleTime: 10000,
     }
   );
   const backendActiveRide = customerActiveRideQuery.data;
@@ -810,8 +810,8 @@ export default function CustomerHomeScreen() {
     { driverId: backendDriverId },
     {
       enabled: backendDriverId.length > 0 && isScreenFocused && (driverFound || tripStarted || !!currentBackendRideId),
-      refetchInterval: isScreenFocused ? (tripStarted ? 30000 : 60000) : false,
-      staleTime: 20000,
+      refetchInterval: isScreenFocused ? (tripStarted ? 45000 : 90000) : false,
+      staleTime: 30000,
     }
   );
   const backendDriverProfile = _driverProfileQuery.data;
@@ -820,8 +820,8 @@ export default function CustomerHomeScreen() {
     { rideId: currentBackendRideId ?? '' },
     {
       enabled: !!currentBackendRideId && isScreenFocused && !backendActiveRide,
-      refetchInterval: isScreenFocused && !backendActiveRide ? 8000 : false,
-      staleTime: 7000,
+      refetchInterval: isScreenFocused && !backendActiveRide ? 15000 : false,
+      staleTime: 12000,
     }
   );
   const backendRideDetails = _rideDetailsQuery.data;
@@ -834,8 +834,8 @@ export default function CustomerHomeScreen() {
         (driverFound && !driverArrived && !tripStarted) ||
         (tripStarted && !tripCompleted)
       ),
-      refetchInterval: tripStarted ? 6000 : 12000,
-      staleTime: tripStarted ? 5000 : 10000,
+      refetchInterval: tripStarted ? 8000 : 15000,
+      staleTime: tripStarted ? 7000 : 12000,
     }
   );
 
@@ -1376,8 +1376,8 @@ export default function CustomerHomeScreen() {
     { rideId: currentBackendRideId ?? '' },
     {
       enabled: !!currentBackendRideId && showChatModal && isScreenFocused,
-      refetchInterval: isScreenFocused ? 12000 : false,
-      staleTime: 10000,
+      refetchInterval: isScreenFocused ? 15000 : false,
+      staleTime: 12000,
     }
   );
 
