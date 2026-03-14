@@ -473,6 +473,12 @@ export default function CustomerHomeScreen() {
     return items.slice(0, 5);
   }, [rideHistory, currentLocationLabel, user?.city, user?.district, userCity, filteredDestinations]);
 
+  const noDriversHintVisibilityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const liveAvailabilityRefreshShowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const liveAvailabilityRefreshHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showNoAvailableDriversHintStable, setShowNoAvailableDriversHintStable] = useState<boolean>(false);
+  const [showLiveAvailabilityRefreshing, setShowLiveAvailabilityRefreshing] = useState<boolean>(false);
+
   const onlineDriversQuery = trpc.drivers.getOnlineByCity.useQuery(
     { city: user?.city ?? '', requestedDriverCategory: selectedRequestedDriverCategory },
     {
@@ -483,7 +489,7 @@ export default function CustomerHomeScreen() {
   );
   const onlineDrivers = onlineDriversQuery.data ?? [];
   const hasOnlineDrivers = onlineDrivers.length > 0;
-  const showNoAvailableDriversHint = Boolean(
+  const rawNoAvailableDriversHint = Boolean(
     selectedDest
     && user?.city
     && !rideRequested
@@ -492,6 +498,9 @@ export default function CustomerHomeScreen() {
     && !onlineDriversQuery.isError
     && !hasOnlineDrivers
   );
+  const shouldForceHideNoAvailableDriversHint = !selectedDest || rideRequested || findingDriver;
+  const showNoAvailableDriversHint = rawNoAvailableDriversHint || showNoAvailableDriversHintStable;
+  const isLiveAvailabilityRefreshing = showLiveAvailabilityRefreshing;
   const isConfirmButtonBusy = paymentLoading;
   const confirmButtonLabel = showNoAvailableDriversHint
     ? 'Müsaitliği Kontrol Et'
@@ -505,14 +514,100 @@ export default function CustomerHomeScreen() {
     : user?.city ?? 'bulunduğunuz bölge';
   const noDriversHintStatusLabel = onlineDriversQuery.isError
     ? 'Tarama tamamlanamadı'
-    : onlineDriversQuery.isFetching
+    : isLiveAvailabilityRefreshing
       ? 'Canlı tarama sürüyor'
       : '75 sn içinde otomatik yenilenir';
   const noDriversHintMessage = onlineDriversQuery.isError
     ? `${noDriversHintScopeLabel} için son müsaitlik taraması tamamlanamadı. Tekrar Tara ile yeni sorgu başlatabilir veya talebinizi yine de oluşturabilirsiniz.`
     : `${noDriversHintScopeLabel} için şu anda çevrimiçi ve müsait bir şoför görünmüyor. Yine de talep oluşturabilirsiniz; sistem sıraya alma ve alternatif müsaitliği kontrol etmeyi sürdürür.`;
   const noDriversHintAvailabilityValue = onlineDriversQuery.isError ? '—' : '0';
-  const noDriversHintRefreshActionLabel = onlineDriversQuery.isFetching ? 'Yenileniyor...' : 'Tekrar Tara';
+  const noDriversHintRefreshActionLabel = isLiveAvailabilityRefreshing ? 'Yenileniyor...' : 'Tekrar Tara';
+
+  useEffect(() => {
+    return () => {
+      if (noDriversHintVisibilityTimerRef.current) {
+        clearTimeout(noDriversHintVisibilityTimerRef.current);
+        noDriversHintVisibilityTimerRef.current = null;
+      }
+      if (liveAvailabilityRefreshShowTimerRef.current) {
+        clearTimeout(liveAvailabilityRefreshShowTimerRef.current);
+        liveAvailabilityRefreshShowTimerRef.current = null;
+      }
+      if (liveAvailabilityRefreshHideTimerRef.current) {
+        clearTimeout(liveAvailabilityRefreshHideTimerRef.current);
+        liveAvailabilityRefreshHideTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (shouldForceHideNoAvailableDriversHint) {
+      if (noDriversHintVisibilityTimerRef.current) {
+        clearTimeout(noDriversHintVisibilityTimerRef.current);
+        noDriversHintVisibilityTimerRef.current = null;
+      }
+      if (showNoAvailableDriversHintStable) {
+        console.log('[Customer] Live availability hint hidden immediately');
+      }
+      setShowNoAvailableDriversHintStable(false);
+      return;
+    }
+
+    if (rawNoAvailableDriversHint) {
+      if (noDriversHintVisibilityTimerRef.current) {
+        clearTimeout(noDriversHintVisibilityTimerRef.current);
+        noDriversHintVisibilityTimerRef.current = null;
+      }
+      if (!showNoAvailableDriversHintStable) {
+        console.log('[Customer] Live availability hint shown');
+        setShowNoAvailableDriversHintStable(true);
+      }
+      return;
+    }
+
+    if (!showNoAvailableDriversHintStable || noDriversHintVisibilityTimerRef.current) {
+      return;
+    }
+
+    noDriversHintVisibilityTimerRef.current = setTimeout(() => {
+      setShowNoAvailableDriversHintStable(false);
+      noDriversHintVisibilityTimerRef.current = null;
+      console.log('[Customer] Live availability hint hidden after stabilization');
+    }, 1400);
+  }, [rawNoAvailableDriversHint, shouldForceHideNoAvailableDriversHint, showNoAvailableDriversHintStable]);
+
+  useEffect(() => {
+    if (onlineDriversQuery.isFetching) {
+      if (liveAvailabilityRefreshHideTimerRef.current) {
+        clearTimeout(liveAvailabilityRefreshHideTimerRef.current);
+        liveAvailabilityRefreshHideTimerRef.current = null;
+      }
+      if (showLiveAvailabilityRefreshing || liveAvailabilityRefreshShowTimerRef.current) {
+        return;
+      }
+
+      liveAvailabilityRefreshShowTimerRef.current = setTimeout(() => {
+        setShowLiveAvailabilityRefreshing(true);
+        liveAvailabilityRefreshShowTimerRef.current = null;
+        console.log('[Customer] Live availability status set to refreshing');
+      }, 250);
+      return;
+    }
+
+    if (liveAvailabilityRefreshShowTimerRef.current) {
+      clearTimeout(liveAvailabilityRefreshShowTimerRef.current);
+      liveAvailabilityRefreshShowTimerRef.current = null;
+    }
+    if (!showLiveAvailabilityRefreshing || liveAvailabilityRefreshHideTimerRef.current) {
+      return;
+    }
+
+    liveAvailabilityRefreshHideTimerRef.current = setTimeout(() => {
+      setShowLiveAvailabilityRefreshing(false);
+      liveAvailabilityRefreshHideTimerRef.current = null;
+      console.log('[Customer] Live availability status settled');
+    }, 900);
+  }, [onlineDriversQuery.isFetching, showLiveAvailabilityRefreshing]);
 
   const couriersByCityQuery = trpc.drivers.getCouriersByCity.useQuery(
     { city: user?.city ?? '', district: user?.district ?? '' },
@@ -3617,8 +3712,8 @@ export default function CustomerHomeScreen() {
                       </View>
                     </View>
                     <View style={styles.noDriversHintPillRow}>
-                      <View style={[styles.noDriversHintPill, onlineDriversQuery.isFetching && styles.noDriversHintPillActive]}>
-                        <Text style={[styles.noDriversHintPillText, onlineDriversQuery.isFetching && styles.noDriversHintPillTextActive]}>
+                      <View style={[styles.noDriversHintPill, isLiveAvailabilityRefreshing && styles.noDriversHintPillActive]}>
+                        <Text style={[styles.noDriversHintPillText, isLiveAvailabilityRefreshing && styles.noDriversHintPillTextActive]}>
                           {noDriversHintStatusLabel}
                         </Text>
                       </View>
@@ -3651,7 +3746,7 @@ export default function CustomerHomeScreen() {
                       <ScalePressable
                         style={[
                           styles.noDriversHintSecondaryButton,
-                          onlineDriversQuery.isFetching && styles.noDriversHintSecondaryButtonDisabled,
+                          isLiveAvailabilityRefreshing && styles.noDriversHintSecondaryButtonDisabled,
                         ]}
                         onPress={handleRefreshOnlineDrivers}
                         disabled={onlineDriversQuery.isFetching}
