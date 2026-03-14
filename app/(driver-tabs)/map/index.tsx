@@ -289,6 +289,7 @@ export default function DriverHomeScreen() {
   const syncDriverLocationMutateRef = useRef(syncDriverLocationMutation.mutate);
   const syncDriverOnlineStatusMutateRef = useRef(syncDriverOnlineStatusMutation.mutate);
   const lastOnlineStatusSyncKeyRef = useRef<string | null>(null);
+  const onlineStatusSyncInFlightKeyRef = useRef<string | null>(null);
   const acceptRideMutation = trpc.rides.accept.useMutation();
   const declineBusinessOrderMutation = trpc.rides.declineBusinessOrder.useMutation();
   const startRideMutation = trpc.rides.startRide.useMutation();
@@ -438,7 +439,12 @@ export default function DriverHomeScreen() {
       console.log('[Driver] Online status already synced, skipping duplicate request:', syncKey);
       return;
     }
+    if (onlineStatusSyncInFlightKeyRef.current === syncKey) {
+      console.log('[Driver] Online status sync already in flight, skipping duplicate request:', syncKey);
+      return;
+    }
 
+    onlineStatusSyncInFlightKeyRef.current = syncKey;
     syncDriverOnlineStatusMutateRef.current(
       { driverId: driver.id, isOnline },
       {
@@ -448,6 +454,11 @@ export default function DriverHomeScreen() {
         },
         onError: (error: unknown) => {
           console.log('[Driver] Online status sync error:', error);
+        },
+        onSettled: () => {
+          if (onlineStatusSyncInFlightKeyRef.current === syncKey) {
+            onlineStatusSyncInFlightKeyRef.current = null;
+          }
         },
       }
     );
