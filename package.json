@@ -3,9 +3,9 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
-    "start": "bunx rork start -p qqd36vuy6c1tv9jy9gc6g --tunnel",
-    "start-web": "bunx rork start -p qqd36vuy6c1tv9jy9gc6g --web --tunnel",
-    "start-web-dev": "DEBUG=expo* bunx rork start -p qqd36vuy6c1tv9jy9gc6g --web --tunnel",
+    "start": "bunx rork start -p qqd36vuy6c1tv9jy9gc6g --tunnel --port 8082",
+    "start-web": "bunx rork start -p qqd36vuy6c1tv9jy9gc6g --web --tunnel --port 8082",
+    "start-web-dev": "DEBUG=expo* bunx rork start -p qqd36vuy6c1tv9jy9gc6g --web --tunnel --port 8082",
     "lint": "expo lint"
   },
   "dependencies": {
