@@ -200,7 +200,77 @@ function buildDriverShortName(name: string): string {
   return nameParts[0] ?? 'Şoför';
 }
 
+interface RankedRideDispatchCandidate {
+  id: string;
+  name: string;
+  shortName: string;
+  district?: string;
+  distance: number;
+  matchScore: number;
+}
+
+function buildRideDispatchSummary(ride: Ride): string {
+  return ride.isFreeRide
+    ? `Ücretsiz sürüş • ${ride.pickupAddress} → ${ride.dropoffAddress}`
+    : `₺${ride.price.toFixed(0)} • ${ride.pickupAddress} → ${ride.dropoffAddress}`;
+}
+
+function getRankedRideDispatchCandidates(params: {
+  city: string;
+  district?: string;
+  requestedCategory?: Ride['requestedDriverCategory'];
+  pickupLat?: number;
+  pickupLng?: number;
+  excludeDriverIds?: string[];
+}): RankedRideDispatchCandidate[] {
+  const excludedDriverIds = new Set(params.excludeDriverIds ?? []);
+
+  return sortDriversByDistrictPriority(
+    getAvailableOnlineDriversByCity(params.city, params.requestedCategory)
+      .filter((driver) => !excludedDriverIds.has(driver.id))
+      .map((driver) => {
+        const location = db.driverLocations.get(driver.id);
+        let distance = 999;
+
+        if (location && typeof params.pickupLat === 'number' && typeof params.pickupLng === 'number') {
+          distance = haversineDistance(params.pickupLat, params.pickupLng, location.latitude, location.longitude);
+        } else if (location) {
+          distance = 10;
+        }
+
+        const matchScore = scoreDriver({
+          id: driver.id,
+          name: driver.name,
+          rating: driver.rating,
+          totalRides: driver.totalRides,
+          driverCategory: driver.driverCategory,
+          isApproved: driver.isApproved,
+          isSuspended: driver.isSuspended,
+          distance,
+        }, params.requestedCategory);
+
+        return {
+          id: driver.id,
+          name: driver.name,
+          shortName: buildDriverShortName(driver.name),
+          district: driver.district,
+          distance,
+          matchScore,
+        };
+      }),
+    params.district,
+  );
+}
+
+function isRideRejectedByDriver(ride: Ride, driverId: string): boolean {
+  return Array.isArray(ride.rejectedDriverIds) && ride.rejectedDriverIds.includes(driverId);
+}
+
 function isRideOfferedToDriver(ride: Ride, driverId: string): boolean {
+  if (isRideRejectedByDriver(ride, driverId)) {
+    return false;
+  }
+
   if (!Array.isArray(ride.notifiedDriverIds) || ride.notifiedDriverIds.length === 0) {
     return true;
   }
@@ -780,6 +850,104 @@ export const ridesRouter = createTRPCRouter({
       return { success: true, reassignment };
     }),
 
+  decline: protectedProcedure
+    .input(
+      z.object({
+        rideId: z.string(),
+        driverId: z.string(),
+      })
+    )
+    .mutation(async ({ input, ctx }) => {
+      if (!hasDriverAccess(ctx, input.driverId)) {
+        return buildForbiddenRideResponse('Bu yolculuğu reddetme yetkiniz yok');
+      }
+
+      const ride = db.rides.get(input.rideId);
+      if (!ride) {
+        return buildEmptyRideError('Yolculuk bulunamadı');
+      }
+
+      const rideIsBusiness = ride.orderType === 'business_delivery' || ride.orderType === 'custom_delivery';
+      if (rideIsBusiness) {
+        return buildRideStateError('İşletme siparişleri bu akıştan reddedilemez');
+      }
+
+      if (ride.status !== 'pending') {
+        return buildRideStateError('Yolculuk artık beklemede değil');
+      }
+
+      if (ride.queuedForDriverId && ride.queuedForDriverId !== input.driverId) {
+        return buildForbiddenRideResponse('Bu yolculuk şu anda size atanmış değil');
+      }
+
+      if (!ride.queuedForDriverId && !isRideOfferedToDriver(ride, input.driverId)) {
+        return buildForbiddenRideResponse('Bu yolculuk şu anda size atanmış değil');
+      }
+
+      const rejectedDriverIds = Array.from(new Set([...(ride.rejectedDriverIds ?? []), input.driverId]));
+      const retainedNotifiedDriverIds = (ride.notifiedDriverIds ?? [])
+        .filter((driverId) => driverId !== input.driverId)
+        .filter((driverId) => !rejectedDriverIds.includes(driverId));
+      const rankedFallbackDrivers = getRankedRideDispatchCandidates({
+        city: ride.city,
+        district: ride.district,
+        requestedCategory: ride.requestedDriverCategory ?? 'driver',
+        pickupLat: ride.pickupLat,
+        pickupLng: ride.pickupLng,
+        excludeDriverIds: [...retainedNotifiedDriverIds, ...rejectedDriverIds],
+      });
+      const fallbackPlan = selectDriversToNotifyByDistrictPriority(
+        rankedFallbackDrivers,
+        ride.district,
+        Math.max(0, 5 - retainedNotifiedDriverIds.length),
+      );
+      const additionalDriversToNotify = fallbackPlan.selected;
+      const nextNotifiedDriverIds = [
+        ...retainedNotifiedDriverIds,
+        ...additionalDriversToNotify.map((driver) => driver.id),
+      ];
+      const updated: Ride = {
+        ...ride,
+        notifiedDriverIds: nextNotifiedDriverIds.length > 0 ? nextNotifiedDriverIds : undefined,
+        rejectedDriverIds,
+        queuedForDriverId: undefined,
+        queuedForDriverName: undefined,
+        queuedAt: undefined,
+      };
+
+      await db.rides.setSync(input.rideId, updated);
+
+      const driverRideInfo = buildRideDispatchSummary(ride);
+      for (const driver of additionalDriversToNotify) {
+        void sendPushToUser(driver.id, '🔔 Yeni Yolculuk Talebi!', driverRideInfo, {
+          type: 'new_ride_request',
+          rideId: input.rideId,
+          isFreeRide: ride.isFreeRide ? 'true' : 'false',
+          requestedDriverCategory: ride.requestedDriverCategory ?? 'driver',
+        });
+      }
+
+      console.log(
+        '[RIDES] Ride declined by driver:',
+        input.rideId,
+        'driver:',
+        input.driverId,
+        'retainedNotifiedDrivers:',
+        retainedNotifiedDriverIds.join(','),
+        'newlyNotifiedDrivers:',
+        additionalDriversToNotify.map((driver) => driver.id).join(','),
+        'rejectedDrivers:',
+        rejectedDriverIds.join(','),
+      );
+
+      return {
+        success: true,
+        ride: updated,
+        remainingNotifiedDriversCount: nextNotifiedDriverIds.length,
+        newlyNotifiedDriversCount: additionalDriversToNotify.length,
+      };
+    }),
+
   accept: protectedProcedure
     .input(
       z.object({
@@ -843,6 +1011,7 @@ export const ridesRouter = createTRPCRouter({
         assignedCourierId: undefined,
         courierRequestExpiresAt: undefined,
         notifiedDriverIds: undefined,
+        rejectedDriverIds: undefined,
         queuedForDriverId: undefined,
         queuedForDriverName: undefined,
         queuedAt: undefined,

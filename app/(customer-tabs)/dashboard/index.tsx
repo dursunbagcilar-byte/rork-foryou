@@ -38,7 +38,7 @@ import { useVenuePhotos } from '@/hooks/useVenuePhotos';
 import { getCourierBusinessesByCity } from '@/constants/courierBusinesses';
 import type { CourierBusiness, CourierMenuItem } from '@/constants/courierBusinesses';
 import { useWeather } from '@/hooks/useWeather';
-import { getGoogleMapsApiKey, getDirectionsApiUrl, logMapsKeyStatus } from '@/utils/maps';
+import { getGoogleMapsApiKey, getDirectionsApiUrl, getGeocodingUrl, logMapsKeyStatus } from '@/utils/maps';
 import TrendingMusicPlayer from '@/components/TrendingMusicPlayer';
 
 const GOOGLE_API_KEY = getGoogleMapsApiKey();
@@ -124,6 +124,98 @@ function decodePolyline(encoded: string): { latitude: number; longitude: number 
     points.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
   }
   return points;
+}
+
+interface GeocodingAddressComponent {
+  long_name?: string;
+  types?: string[];
+}
+
+interface GeocodingApiResult {
+  formatted_address?: string;
+  address_components?: GeocodingAddressComponent[];
+}
+
+interface GeocodingApiResponse {
+  status?: string;
+  error_message?: string;
+  results?: GeocodingApiResult[];
+}
+
+interface ResolvedPickupLocation {
+  city: string;
+  district: string;
+  pickupAddress: string;
+}
+
+function findAddressComponent(components: GeocodingAddressComponent[], preferredTypes: string[]): string {
+  for (const preferredType of preferredTypes) {
+    const match = components.find((component) => component.types?.includes(preferredType));
+    if (match?.long_name?.trim()) {
+      return match.long_name.trim();
+    }
+  }
+
+  return '';
+}
+
+async function resolvePickupLocationFromCoordinates(
+  latitude: number,
+  longitude: number,
+  fallbackCity: string,
+  fallbackDistrict: string,
+): Promise<ResolvedPickupLocation> {
+  const fallbackPickupAddress = fallbackCity
+    ? `${fallbackCity}${fallbackDistrict ? ` / ${fallbackDistrict}` : ''}`
+    : 'Mevcut Konum';
+  const geocodingUrl = getGeocodingUrl(latitude, longitude);
+
+  if (!geocodingUrl) {
+    console.log('[Customer] Pickup reverse geocode skipped - missing API key');
+    return {
+      city: fallbackCity,
+      district: fallbackDistrict,
+      pickupAddress: fallbackPickupAddress,
+    };
+  }
+
+  try {
+    const response = await fetch(geocodingUrl);
+    const data = await response.json() as GeocodingApiResponse;
+
+    if (data.status !== 'OK' || !Array.isArray(data.results) || data.results.length === 0) {
+      console.log('[Customer] Pickup reverse geocode failed:', data.status, data.error_message ?? 'unknown');
+      return {
+        city: fallbackCity,
+        district: fallbackDistrict,
+        pickupAddress: fallbackPickupAddress,
+      };
+    }
+
+    const primaryResult = data.results[0];
+    const components = primaryResult.address_components ?? [];
+    const resolvedCity = findAddressComponent(components, ['locality', 'administrative_area_level_1']) || fallbackCity;
+    const resolvedDistrict = findAddressComponent(
+      components,
+      ['administrative_area_level_2', 'administrative_area_level_3', 'sublocality_level_1', 'sublocality', 'neighborhood'],
+    ) || fallbackDistrict;
+    const pickupAddress = primaryResult.formatted_address?.trim() || fallbackPickupAddress;
+
+    console.log('[Customer] Pickup reverse geocode resolved:', pickupAddress, 'city:', resolvedCity, 'district:', resolvedDistrict);
+
+    return {
+      city: resolvedCity,
+      district: resolvedDistrict,
+      pickupAddress,
+    };
+  } catch (error) {
+    console.log('[Customer] Pickup reverse geocode error:', error);
+    return {
+      city: fallbackCity,
+      district: fallbackDistrict,
+      pickupAddress: fallbackPickupAddress,
+    };
+  }
 }
 
 export default function CustomerHomeScreen() {
@@ -801,9 +893,9 @@ export default function CustomerHomeScreen() {
     {
       enabled: !!user?.id && isRealtimeScreenActive,
       refetchInterval: isRealtimeScreenActive
-        ? ((rideRequested || !!currentBackendRideId || tripStarted) ? 12000 : 75000)
+        ? ((rideRequested || !!currentBackendRideId || tripStarted) ? 5000 : 45000)
         : false,
-      staleTime: 10000,
+      staleTime: 4000,
     }
   );
   const backendActiveRide = customerActiveRideQuery.data;
@@ -823,8 +915,8 @@ export default function CustomerHomeScreen() {
     { rideId: currentBackendRideId ?? '' },
     {
       enabled: !!currentBackendRideId && isRealtimeScreenActive && !backendActiveRide,
-      refetchInterval: isRealtimeScreenActive && !backendActiveRide ? 15000 : false,
-      staleTime: 12000,
+      refetchInterval: isRealtimeScreenActive && !backendActiveRide ? 5000 : false,
+      staleTime: 4000,
     }
   );
   const backendRideDetails = _rideDetailsQuery.data;
@@ -837,8 +929,8 @@ export default function CustomerHomeScreen() {
         (driverFound && !driverArrived && !tripStarted) ||
         (tripStarted && !tripCompleted)
       ),
-      refetchInterval: isRealtimeScreenActive ? (tripStarted ? 8000 : 15000) : false,
-      staleTime: tripStarted ? 7000 : 12000,
+      refetchInterval: isRealtimeScreenActive ? (tripStarted ? 3500 : 5000) : false,
+      staleTime: tripStarted ? 3000 : 4000,
     }
   );
 
@@ -1380,8 +1472,8 @@ export default function CustomerHomeScreen() {
     { rideId: currentBackendRideId ?? '' },
     {
       enabled: !!currentBackendRideId && showChatModal && isRealtimeScreenActive,
-      refetchInterval: isRealtimeScreenActive ? 15000 : false,
-      staleTime: 12000,
+      refetchInterval: isRealtimeScreenActive ? 5000 : false,
+      staleTime: 4000,
     }
   );
 
@@ -1468,10 +1560,16 @@ export default function CustomerHomeScreen() {
         : selectedVehiclePackage === 'motorcycle'
           ? 'courier'
           : 'driver';
+      const resolvedPickupLocation = await resolvePickupLocationFromCoordinates(
+        mapRegion.latitude,
+        mapRegion.longitude,
+        user?.city ?? '',
+        user?.district ?? '',
+      );
       const rideRequestPayload: Parameters<typeof createRideMutation.mutateAsync>[0] = {
         customerId: user?.id ?? '',
         customerName: user?.name ?? 'Müşteri',
-        pickupAddress: user?.city ? `${user.city}${user.district ? ' / ' + user.district : ''}` : 'Mevcut Konum',
+        pickupAddress: resolvedPickupLocation.pickupAddress,
         dropoffAddress: selectedDest.name,
         pickupLat: mapRegion.latitude,
         pickupLng: mapRegion.longitude,
@@ -1481,8 +1579,8 @@ export default function CustomerHomeScreen() {
         distance: `${rideDistance} km`,
         duration: `${rideDuration} dk`,
         isFreeRide: free,
-        city: user?.city ?? '',
-        district: user?.district ?? '',
+        city: resolvedPickupLocation.city,
+        district: resolvedPickupLocation.district,
         requestedDriverCategory,
         paymentMethod: paymentMethod,
         rideForOther: rideForOtherEnabled,

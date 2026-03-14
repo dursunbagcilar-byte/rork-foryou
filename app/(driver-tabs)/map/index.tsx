@@ -292,6 +292,7 @@ export default function DriverHomeScreen() {
   const lastOnlineStatusSyncKeyRef = useRef<string | null>(null);
   const onlineStatusSyncInFlightKeyRef = useRef<string | null>(null);
   const acceptRideMutation = trpc.rides.accept.useMutation();
+  const declineRideMutation = trpc.rides.decline.useMutation();
   const declineBusinessOrderMutation = trpc.rides.declineBusinessOrder.useMutation();
   const startRideMutation = trpc.rides.startRide.useMutation();
   const completeRideMutation = trpc.rides.complete.useMutation();
@@ -301,8 +302,8 @@ export default function DriverHomeScreen() {
     { rideId: currentRideId ?? '' },
     {
       enabled: !!currentRideId && showDriverChatModal && isRealtimeScreenActive,
-      refetchInterval: isRealtimeScreenActive ? 15000 : false,
-      staleTime: 12000,
+      refetchInterval: isRealtimeScreenActive ? 5000 : false,
+      staleTime: 4000,
     }
   );
 
@@ -314,8 +315,8 @@ export default function DriverHomeScreen() {
     },
     {
       enabled: isRealtimeScreenActive && isOnline && !!driver?.city && !rideAccepted && !hasRideRequest,
-      refetchInterval: isRealtimeScreenActive ? 15000 : false,
-      staleTime: 12000,
+      refetchInterval: isRealtimeScreenActive ? 5000 : false,
+      staleTime: 4000,
     }
   );
 
@@ -323,8 +324,8 @@ export default function DriverHomeScreen() {
     { userId: driver?.id ?? '', type: 'driver' as const },
     {
       enabled: !!driver?.id && isOnline && isRealtimeScreenActive,
-      refetchInterval: isRealtimeScreenActive ? (rideAccepted ? 45000 : 75000) : false,
-      staleTime: 30000,
+      refetchInterval: isRealtimeScreenActive ? ((rideAccepted || hasRideRequest) ? 5000 : 15000) : false,
+      staleTime: 4000,
     }
   );
 
@@ -1127,23 +1128,57 @@ export default function DriverHomeScreen() {
   }, [fetchDirections, speakInstruction, mapRegion.latitude, mapRegion.longitude, pickupCoord, currentRideId, isBusinessDelivery]);
 
   const handleDeclineRide = useCallback(async () => {
-    if (currentRideId && driver?.id && isBusinessDelivery) {
-      try {
+    if (!currentRideId || !driver?.id) {
+      Alert.alert('Hata', 'Yolculuk bilgisi bulunamadı.');
+      return;
+    }
+
+    try {
+      if (isBusinessDelivery) {
         const result = await declineBusinessOrderMutation.mutateAsync({
           rideId: currentRideId,
           driverId: driver.id,
         });
+        if (!result?.success) {
+          const errorMessage = 'error' in result && typeof result.error === 'string'
+            ? result.error
+            : 'Sipariş şu an reddedilemiyor. Lütfen tekrar deneyin.';
+          Alert.alert('Talep Reddedilemedi', errorMessage);
+          return;
+        }
         const reassigned = 'reassignment' in result && result.reassignment ? result.reassignment.assigned : false;
         console.log('[Driver] Business order declined:', currentRideId, 'reassigned:', reassigned);
-      } catch (error) {
-        console.log('[Driver] Decline business order error:', error);
+      } else {
+        const result = await declineRideMutation.mutateAsync({
+          rideId: currentRideId,
+          driverId: driver.id,
+        });
+        if (!result?.success) {
+          const errorMessage = 'error' in result && typeof result.error === 'string'
+            ? result.error
+            : 'Yolculuk şu an reddedilemiyor. Lütfen tekrar deneyin.';
+          Alert.alert('Talep Reddedilemedi', errorMessage);
+          return;
+        }
+        const reassignedCount = 'newlyNotifiedDriversCount' in result && typeof result.newlyNotifiedDriversCount === 'number'
+          ? result.newlyNotifiedDriversCount
+          : 0;
+        console.log('[Driver] Ride declined:', currentRideId, 'newlyNotifiedDrivers:', reassignedCount);
       }
+    } catch (error) {
+      console.log('[Driver] Decline ride error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Talep şu an reddedilemiyor. Lütfen tekrar deneyin.';
+      Alert.alert('Talep Reddedilemedi', errorMessage);
+      return;
     }
 
     setHasRideRequest(false);
     setCurrentRideId(null);
+    setCurrentCustomerName('');
+    setCurrentRidePrice(0);
     Animated.timing(requestAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
-  }, [currentRideId, declineBusinessOrderMutation, driver?.id, isBusinessDelivery, requestAnim]);
+    void pendingRidesQuery.refetch();
+  }, [currentRideId, declineBusinessOrderMutation, declineRideMutation, driver?.id, isBusinessDelivery, pendingRidesQuery, requestAnim]);
 
   useEffect(() => {
     if (rideAccepted && driverSimLoc && !arrivedAtPickup && driverPathRef.current.length > 0) {
