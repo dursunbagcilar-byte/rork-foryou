@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import * as WebBrowser from 'expo-web-browser';
+import * as SystemUI from 'expo-system-ui';
 import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Platform, StatusBar } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -71,9 +72,18 @@ function NotificationOverlay() {
 function RootLayoutNav() {
   const { colors, isDark } = useTheme();
   console.log('[Layout] RootLayoutNav rendering');
+
+  useEffect(() => {
+    console.log('[Layout] Syncing system background for theme:', isDark ? 'dark' : 'light');
+    SystemUI.setBackgroundColorAsync(colors.background).catch((error) => {
+      console.log('[Layout] SystemUI.setBackgroundColorAsync error:', error);
+    });
+  }, [colors.background, isDark]);
+
   return (
     <>
       <StatusBar
+        animated
         barStyle={isDark ? 'light-content' : 'dark-content'}
         backgroundColor={colors.background}
         translucent={Platform.OS === 'android'}

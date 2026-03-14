@@ -42,7 +42,7 @@ export default function CustomerTabsLayout() {
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: '600' as const,
-          ...androidTextFix(),
+          ...androidTextFix({ lineHeight: 13, fontWeight: '600' }),
         },
       }}
     >

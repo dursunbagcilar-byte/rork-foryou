@@ -161,14 +161,15 @@ const waitStyles = StyleSheet.create({
     color: Colors.dark.text,
     marginBottom: 10,
     textAlign: 'center' as const,
+    ...androidTextFix({ fontWeight: '700' }),
   },
   subtitle: {
     fontSize: 14,
     color: Colors.dark.textSecondary,
     textAlign: 'center' as const,
-    lineHeight: 20,
     marginBottom: 32,
     paddingHorizontal: 8,
+    ...androidTextFix({ lineHeight: 20 }),
   },
   stepsContainer: {
     width: '100%',
@@ -204,11 +205,13 @@ const waitStyles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600' as const,
     color: Colors.dark.text,
+    ...androidTextFix({ fontWeight: '600' }),
   },
   stepDesc: {
     fontSize: 12,
     color: Colors.dark.textMuted,
     marginTop: 2,
+    ...androidTextFix({ lineHeight: 16 }),
   },
   stepLine: {
     width: 2,
@@ -229,7 +232,7 @@ const waitStyles = StyleSheet.create({
     fontSize: 13,
     color: Colors.dark.primary,
     textAlign: 'center' as const,
-    lineHeight: 18,
+    ...androidTextFix({ lineHeight: 18 }),
   },
   closeButton: {
     position: 'absolute' as const,
@@ -348,14 +351,15 @@ const successStyles = StyleSheet.create({
     color: Colors.dark.text,
     textAlign: 'center' as const,
     marginBottom: 12,
+    ...androidTextFix({ fontWeight: '800' }),
   },
   subtitle: {
     fontSize: 15,
     color: Colors.dark.textSecondary,
     textAlign: 'center' as const,
-    lineHeight: 22,
     marginBottom: 28,
     paddingHorizontal: 12,
+    ...androidTextFix({ lineHeight: 22 }),
   },
   badge: {
     flexDirection: 'row' as const,
@@ -372,6 +376,7 @@ const successStyles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700' as const,
     color: Colors.dark.primary,
+    ...androidTextFix({ fontWeight: '700' }),
   },
 });
 
@@ -430,7 +435,7 @@ export default function DriverTabsLayout() {
           tabBarLabelStyle: {
             fontSize: 11,
             fontWeight: '600' as const,
-            ...androidTextFix(),
+            ...androidTextFix({ lineHeight: 13, fontWeight: '600' }),
           },
         }}
       >

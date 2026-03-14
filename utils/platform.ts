@@ -1,5 +1,10 @@
 import { Platform, ViewStyle, TextStyle } from 'react-native';
 
+interface AndroidTextFixOptions {
+  lineHeight?: number;
+  fontWeight?: TextStyle['fontWeight'];
+}
+
 interface ShadowOptions {
   color?: string;
   offsetX?: number;
@@ -26,9 +31,22 @@ export function crossPlatformShadow({
   };
 }
 
-export function androidTextFix(): TextStyle {
+export function androidTextFix(options: AndroidTextFixOptions = {}): TextStyle {
   if (Platform.OS === 'android') {
-    return { includeFontPadding: false };
+    const fixedStyle: TextStyle = {
+      includeFontPadding: false,
+      textAlignVertical: 'center',
+    };
+
+    if (typeof options.lineHeight === 'number') {
+      fixedStyle.lineHeight = options.lineHeight;
+    }
+
+    if (options.fontWeight) {
+      fixedStyle.fontWeight = options.fontWeight;
+    }
+
+    return fixedStyle;
   }
   return {};
 }
