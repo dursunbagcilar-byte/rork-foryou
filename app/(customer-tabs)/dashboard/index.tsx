@@ -1101,6 +1101,7 @@ export default function CustomerHomeScreen() {
       console.log('[Customer] Trying smart backend assignment, city:', user?.city, 'category:', requestedCategory, 'exclude:', excludeIds);
       const data = await trpcClient.rides.findBestDriver.query({
         city: user?.city ?? '',
+        district: user?.district ?? '',
         pickupLat: customerLat,
         pickupLng: customerLng,
         vehicleCategory: requestedCategory,
@@ -1162,7 +1163,7 @@ export default function CustomerHomeScreen() {
       console.log('[Customer] Driver route loaded:', path.length, 'points, dist:', distKm.toFixed(2), 'km');
     }
     return assignedDriver;
-  }, [selectedDest, mapRegion.latitude, mapRegion.longitude, fetchDriverRoute, densifyPath, user?.city]);
+  }, [selectedDest, mapRegion.latitude, mapRegion.longitude, fetchDriverRoute, densifyPath, user?.city, user?.district]);
 
   const handleDriverCancelled = useCallback(async () => {
     console.log('[Customer] Driver cancelled! Reassigning...');
@@ -1571,11 +1572,28 @@ export default function CustomerHomeScreen() {
 
       const availableDriversCount = typeof result.availableDriversCount === 'number' ? result.availableDriversCount : 0;
       const notifiedDriversCount = typeof result.notifiedDriversCount === 'number' ? result.notifiedDriversCount : availableDriversCount;
-      const nextDriverSearchStatus = notifiedDriversCount > 1
-        ? `${notifiedDriversCount} müsait şoföre talebiniz gönderildi`
-        : availableDriversCount > 0
-          ? 'En yakın müsait şoföre talebiniz gönderildi'
-          : 'Yakınlarınızdaki şoförler kontrol ediliyor';
+      const districtMatchedNotifiedDriversCount = typeof result.districtMatchedNotifiedDriversCount === 'number'
+        ? result.districtMatchedNotifiedDriversCount
+        : 0;
+      const notifiedScope = 'notifiedScope' in result
+        && (
+          result.notifiedScope === 'district_only'
+          || result.notifiedScope === 'district_priority_with_city_fallback'
+          || result.notifiedScope === 'city_only'
+        )
+        ? result.notifiedScope
+        : 'city_only';
+      const nextDriverSearchStatus = notifiedScope === 'district_only'
+        ? districtMatchedNotifiedDriversCount > 1
+          ? `İlçenizdeki ${districtMatchedNotifiedDriversCount} şoföre talebiniz gönderildi`
+          : 'İlçenizdeki en uygun şoföre talebiniz gönderildi'
+        : notifiedScope === 'district_priority_with_city_fallback'
+          ? 'İlçeniz önceliklendirildi, yakın ilçeler de aranıyor'
+          : notifiedDriversCount > 1
+            ? `${notifiedDriversCount} müsait şoföre talebiniz gönderildi`
+            : availableDriversCount > 0
+              ? 'En yakın müsait şoföre talebiniz gönderildi'
+              : 'Yakınlarınızdaki şoförler kontrol ediliyor';
 
       lastBackendRideStatusRef.current = result.ride.status;
       completionHandledRideIdRef.current = null;

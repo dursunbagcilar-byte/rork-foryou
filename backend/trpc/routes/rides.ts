@@ -132,6 +132,65 @@ function matchesLocationValue(left: string | undefined | null, right: string | u
   return normalizedLeft === normalizedRight;
 }
 
+function isDistrictMatch(driverDistrict: string | undefined | null, requestedDistrict: string | undefined | null): boolean {
+  return matchesLocationValue(driverDistrict, requestedDistrict);
+}
+
+function sortDriversByDistrictPriority<T extends { district?: string; matchScore: number; distance: number }>(
+  drivers: T[],
+  requestedDistrict?: string,
+): T[] {
+  return [...drivers].sort((firstDriver, secondDriver) => {
+    const firstDistrictMatch = isDistrictMatch(firstDriver.district, requestedDistrict);
+    const secondDistrictMatch = isDistrictMatch(secondDriver.district, requestedDistrict);
+
+    if (firstDistrictMatch !== secondDistrictMatch) {
+      return Number(secondDistrictMatch) - Number(firstDistrictMatch);
+    }
+
+    if (secondDriver.matchScore !== firstDriver.matchScore) {
+      return secondDriver.matchScore - firstDriver.matchScore;
+    }
+
+    return firstDriver.distance - secondDriver.distance;
+  });
+}
+
+function selectDriversToNotifyByDistrictPriority<T extends { district?: string }>(
+  drivers: T[],
+  requestedDistrict?: string,
+  limit = 5,
+): {
+  selected: T[];
+  districtMatchedCount: number;
+  fallbackCount: number;
+  scope: 'district_only' | 'district_priority_with_city_fallback' | 'city_only';
+} {
+  const districtMatchedDrivers = requestedDistrict
+    ? drivers.filter((driver) => isDistrictMatch(driver.district, requestedDistrict))
+    : [];
+
+  if (districtMatchedDrivers.length === 0) {
+    return {
+      selected: drivers.slice(0, limit),
+      districtMatchedCount: 0,
+      fallbackCount: Math.min(drivers.length, limit),
+      scope: 'city_only',
+    };
+  }
+
+  const cityFallbackDrivers = drivers.filter((driver) => !isDistrictMatch(driver.district, requestedDistrict));
+  const selected = [...districtMatchedDrivers, ...cityFallbackDrivers].slice(0, limit);
+  const districtMatchedCount = selected.filter((driver) => isDistrictMatch(driver.district, requestedDistrict)).length;
+
+  return {
+    selected,
+    districtMatchedCount,
+    fallbackCount: selected.length - districtMatchedCount,
+    scope: selected.length > districtMatchedCount ? 'district_priority_with_city_fallback' : 'district_only',
+  };
+}
+
 function buildDriverShortName(name: string): string {
   const nameParts = name.trim().split(' ').filter(Boolean);
   if (nameParts.length > 1) {
@@ -299,35 +358,37 @@ export const ridesRouter = createTRPCRouter({
       }
 
       const requestedDriverCategory = input.requestedDriverCategory ?? 'driver';
-      const rankedDrivers = getAvailableOnlineDriversByCity(input.city, requestedDriverCategory)
-        .map((driver) => {
-          const location = db.driverLocations.get(driver.id);
-          let distance = 999;
+      const rankedDrivers = sortDriversByDistrictPriority(
+        getAvailableOnlineDriversByCity(input.city, requestedDriverCategory)
+          .map((driver) => {
+            const location = db.driverLocations.get(driver.id);
+            let distance = 999;
 
-          if (location && typeof input.pickupLat === 'number' && typeof input.pickupLng === 'number') {
-            distance = haversineDistance(input.pickupLat, input.pickupLng, location.latitude, location.longitude);
-          } else if (location) {
-            distance = 10;
-          }
+            if (location && typeof input.pickupLat === 'number' && typeof input.pickupLng === 'number') {
+              distance = haversineDistance(input.pickupLat, input.pickupLng, location.latitude, location.longitude);
+            } else if (location) {
+              distance = 10;
+            }
 
-          const matchScore = scoreDriver({
-            id: driver.id,
-            name: driver.name,
-            rating: driver.rating,
-            totalRides: driver.totalRides,
-            driverCategory: driver.driverCategory,
-            isApproved: driver.isApproved,
-            isSuspended: driver.isSuspended,
-            distance,
-          }, requestedDriverCategory);
+            const matchScore = scoreDriver({
+              id: driver.id,
+              name: driver.name,
+              rating: driver.rating,
+              totalRides: driver.totalRides,
+              driverCategory: driver.driverCategory,
+              isApproved: driver.isApproved,
+              isSuspended: driver.isSuspended,
+              distance,
+            }, requestedDriverCategory);
 
-          return {
-            ...driver,
-            distance,
-            matchScore,
-          };
-        })
-        .sort((a, b) => b.matchScore - a.matchScore);
+            return {
+              ...driver,
+              distance,
+              matchScore,
+            };
+          }),
+        input.district,
+      );
 
       if (rankedDrivers.length === 0) {
         const queueCandidate = findBusyDriverQueueCandidate({
@@ -399,7 +460,7 @@ export const ridesRouter = createTRPCRouter({
       };
 
       await db.rides.setSync(id, ride);
-      console.log('[RIDES] Created ride:', id, 'city:', input.city, 'category:', requestedDriverCategory, 'payment:', ride.paymentMethod, 'forOther:', input.rideForOther ?? false, 'candidateCount:', rankedDrivers.length);
+      console.log('[RIDES] Created ride:', id, 'city:', input.city, 'district:', input.district ?? '', 'category:', requestedDriverCategory, 'payment:', ride.paymentMethod, 'forOther:', input.rideForOther ?? false, 'candidateCount:', rankedDrivers.length);
 
       setTimeout(() => {
         const currentRide = db.rides.get(id);
@@ -411,7 +472,8 @@ export const ridesRouter = createTRPCRouter({
         }
       }, 5 * 60 * 1000);
 
-      const driversToNotify = rankedDrivers.slice(0, Math.min(rankedDrivers.length, 5));
+      const notificationPlan = selectDriversToNotifyByDistrictPriority(rankedDrivers, input.district);
+      const driversToNotify = notificationPlan.selected;
       const notifiedDriverIds = driversToNotify.map((driver) => driver.id);
       const dispatchedRide: Ride = {
         ...ride,
@@ -431,12 +493,27 @@ export const ridesRouter = createTRPCRouter({
         });
       }
 
-      console.log('[RIDES] Ride request dispatched to live drivers:', id, 'drivers:', driversToNotify.map((driver) => `${driver.name}:${driver.distance.toFixed(2)}km`).join(', '), 'notifiedDriverIds:', notifiedDriverIds.join(','));
+      console.log(
+        '[RIDES] Ride request dispatched to live drivers:',
+        id,
+        'scope:',
+        notificationPlan.scope,
+        'districtMatchedNotified:',
+        notificationPlan.districtMatchedCount,
+        'cityFallbackNotified:',
+        notificationPlan.fallbackCount,
+        'drivers:',
+        driversToNotify.map((driver) => `${driver.name}:${driver.distance.toFixed(2)}km`).join(', '),
+        'notifiedDriverIds:',
+        notifiedDriverIds.join(','),
+      );
       return {
         success: true,
         ride: dispatchedRide,
         availableDriversCount: rankedDrivers.length,
         notifiedDriversCount: driversToNotify.length,
+        districtMatchedNotifiedDriversCount: notificationPlan.districtMatchedCount,
+        notifiedScope: notificationPlan.scope,
       };
     }),
 
@@ -1092,6 +1169,7 @@ export const ridesRouter = createTRPCRouter({
     .input(
       z.object({
         city: z.string(),
+        district: z.string().optional(),
         pickupLat: z.number().optional(),
         pickupLng: z.number().optional(),
         vehicleCategory: z.string().optional(),
@@ -1114,7 +1192,7 @@ export const ridesRouter = createTRPCRouter({
         .map(d => {
           const loc = db.driverLocations.get(d.id);
           let distance = 999;
-          if (loc && input.pickupLat && input.pickupLng) {
+          if (loc && typeof input.pickupLat === 'number' && typeof input.pickupLng === 'number') {
             distance = haversineDistance(input.pickupLat, input.pickupLng, loc.latitude, loc.longitude);
           } else if (loc) {
             distance = 10;
@@ -1129,6 +1207,7 @@ export const ridesRouter = createTRPCRouter({
             rating: d.rating,
             totalRides: d.totalRides,
             driverCategory: d.driverCategory,
+            district: d.district,
             isApproved: d.isApproved,
             isSuspended: d.isSuspended,
             distance,
@@ -1141,16 +1220,20 @@ export const ridesRouter = createTRPCRouter({
         return { found: false, driver: null, totalOnline: availableDrivers.length, reason: 'no_drivers' as const };
       }
 
-      const scored = candidates.map(d => ({
-        ...d,
-        score: scoreDriver(d, requestedCategory),
-      }));
-
-      scored.sort((a, b) => b.score - a.score);
+      const scored = sortDriversByDistrictPriority(
+        candidates.map((driver) => ({
+          ...driver,
+          matchScore: scoreDriver(driver, requestedCategory),
+        })),
+        input.district,
+      );
 
       const best = scored[0];
-      console.log('[RIDES] findBestDriver: best=', best.name, 'score=', best.score.toFixed(1), 'dist=', best.distance.toFixed(2), 'km, category:', best.driverCategory, 'requested:', requestedCategory ?? 'any');
-      console.log('[RIDES] findBestDriver: candidates:', scored.map(s => `${s.name}(${s.score.toFixed(1)})`).join(', '));
+      const districtMatchedCandidatesCount = input.district
+        ? scored.filter((driver) => isDistrictMatch(driver.district, input.district)).length
+        : 0;
+      console.log('[RIDES] findBestDriver: best=', best.name, 'score=', best.matchScore.toFixed(1), 'dist=', best.distance.toFixed(2), 'km, category:', best.driverCategory, 'requested:', requestedCategory ?? 'any', 'district:', input.district ?? 'none', 'districtMatchedCandidates:', districtMatchedCandidatesCount);
+      console.log('[RIDES] findBestDriver: candidates:', scored.map((driver) => `${driver.name}(${driver.matchScore.toFixed(1)}${isDistrictMatch(driver.district, input.district) ? ',ilçe' : ''})`).join(', '));
 
       const shortName = best.name.split(' ').length > 1
         ? best.name.split(' ')[0] + ' ' + best.name.split(' ')[best.name.split(' ').length - 1].charAt(0) + '.'
@@ -1172,7 +1255,7 @@ export const ridesRouter = createTRPCRouter({
           rating: best.rating,
           totalRides: best.totalRides,
           distance: best.distance,
-          score: best.score,
+          score: best.matchScore,
           location: best.location,
         },
         totalOnline: availableDrivers.length,
