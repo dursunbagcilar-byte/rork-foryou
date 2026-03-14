@@ -40,6 +40,8 @@ import type { CourierBusiness, CourierMenuItem } from '@/constants/courierBusine
 import { useWeather } from '@/hooks/useWeather';
 import { getGoogleMapsApiKey, getDirectionsApiUrl, getGeocodingUrl, logMapsKeyStatus } from '@/utils/maps';
 import TrendingMusicPlayer from '@/components/TrendingMusicPlayer';
+import { ScalePressable } from '@/components/ScalePressable';
+import { androidTextFix, crossPlatformShadow } from '@/utils/platform';
 
 const GOOGLE_API_KEY = getGoogleMapsApiKey();
 const DIRECTIONS_API_URL = getDirectionsApiUrl();
@@ -496,6 +498,12 @@ export default function CustomerHomeScreen() {
       : paymentMethod === 'card'
         ? 'Kart ile Öde & Çağır'
         : 'Şoför Çağır';
+  const noDriversHintScopeLabel = user?.district
+    ? `${user.district}, ${user.city}`
+    : user?.city ?? 'bulunduğunuz bölge';
+  const noDriversHintStatusLabel = onlineDriversQuery.isFetching
+    ? 'Canlı tarama sürüyor'
+    : '75 sn içinde otomatik yenilenir';
 
   const couriersByCityQuery = trpc.drivers.getCouriersByCity.useQuery(
     { city: user?.city ?? '', district: user?.district ?? '' },
@@ -1268,6 +1276,28 @@ export default function CustomerHomeScreen() {
     return assignedDriver;
   }, [selectedDest, mapRegion.latitude, mapRegion.longitude, fetchDriverRoute, densifyPath, user?.city, user?.district]);
 
+  const resetRideSearchState = useCallback(() => {
+    console.log('[Customer] Resetting ride search state to idle');
+    setCurrentBackendRideId(null);
+    setRideRequested(false);
+    setFindingDriver(false);
+    setDriverFound(false);
+    setReassigning(false);
+    setDestination('');
+    setSelectedDest(null);
+    setCurrentRideFree(false);
+    setCurrentRideRewardSource(null);
+    setDriverLocation(null);
+    setDriverEta(0);
+    setDriverRoutePath([]);
+    setCurrentDriver(null);
+    setPreviousDriverIds([]);
+    setAlternativeVehicle(null);
+    setShowAlternativeSuggestion(false);
+    setDriverArrived(false);
+    setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
+  }, []);
+
   const handleDriverCancelled = useCallback(async () => {
     console.log('[Customer] Driver cancelled! Reassigning...');
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
@@ -1312,23 +1342,35 @@ export default function CustomerHomeScreen() {
           setAlternativeVehicle(alt);
           setShowAlternativeSuggestion(true);
         } else {
-          Alert.alert('Şoför Bulunamadı', 'Müsait şoför bulunamadı.', [{ text: 'Tamam', onPress: () => {
-            setRideRequested(false);
-            setFindingDriver(false);
-            setDriverFound(false);
-            setDestination('');
-            setSelectedDest(null);
-            setCurrentRideFree(false);
-            setDriverLocation(null);
-            setDriverEta(0);
-            setDriverRoutePath([]);
-            setCurrentDriver(null);
-            setPreviousDriverIds([]);
-          } }]);
+          Alert.alert(
+            'Şu Anda Şoför Bulunamadı',
+            'Yeni bir eşleşme bulunamadı. İsterseniz planlı yolculuk oluşturabilir veya kısa süre sonra yeniden tarayabilirsiniz.',
+            [
+              {
+                text: 'Kapat',
+                style: 'cancel',
+                onPress: resetRideSearchState,
+              },
+              {
+                text: 'Tekrar Tara',
+                onPress: () => {
+                  resetRideSearchState();
+                  void onlineDriversQuery.refetch();
+                },
+              },
+              {
+                text: 'Planlı Yolculuk',
+                onPress: () => {
+                  resetRideSearchState();
+                  router.push('/scheduled-ride' as any);
+                },
+              },
+            ]
+          );
         }
       }
     }, 2500);
-  }, [currentDriver, previousDriverIds, assignNewDriver, selectedVehiclePackage]);
+  }, [assignNewDriver, currentDriver, onlineDriversQuery, previousDriverIds, resetRideSearchState, router, selectedVehiclePackage]);
 
   useEffect(() => {
     return () => {
@@ -3472,31 +3514,68 @@ export default function CustomerHomeScreen() {
                 {showNoAvailableDriversHint && (
                   <View style={styles.noDriversHintCard} testID="no-drivers-hint-card">
                     <View style={styles.noDriversHintHeader}>
-                      <AlertTriangle size={16} color="#B45309" />
-                      <Text style={styles.noDriversHintTitle}>
-                        {getVehicleTypeLabel(selectedVehiclePackage)} için boşta şoför görünmüyor
-                      </Text>
+                      <View style={styles.noDriversHintIconWrap}>
+                        <AlertTriangle size={16} color="#B45309" />
+                      </View>
+                      <View style={styles.noDriversHintHeaderContent}>
+                        <Text style={styles.noDriversHintEyebrow}>CANLI MÜSAİTLİK</Text>
+                        <Text style={styles.noDriversHintTitle}>
+                          {getVehicleTypeLabel(selectedVehiclePackage)} için anlık eşleşme görünmüyor
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.noDriversHintPillRow}>
+                      <View style={[styles.noDriversHintPill, onlineDriversQuery.isFetching && styles.noDriversHintPillActive]}>
+                        <Text style={[styles.noDriversHintPillText, onlineDriversQuery.isFetching && styles.noDriversHintPillTextActive]}>
+                          {noDriversHintStatusLabel}
+                        </Text>
+                      </View>
+                      <View style={[styles.noDriversHintPill, styles.noDriversHintPillSolid]}>
+                        <Text style={[styles.noDriversHintPillText, styles.noDriversHintPillSolidText]}>
+                          Talep engellenmez
+                        </Text>
+                      </View>
                     </View>
                     <Text style={styles.noDriversHintText}>
-                      Şu an çevrimiçi ve müsait bir şoför görünmüyor. Yine de talep oluşturup sıraya alınma durumunu kontrol edebilir veya daha sonra planlı yolculuk oluşturabilirsiniz.
+                      {noDriversHintScopeLabel} için şu anda çevrimiçi ve müsait bir şoför görünmüyor. Yine de talep oluşturabilirsiniz; sistem sıraya alma ve alternatif müsaitliği kontrol etmeyi sürdürür.
                     </Text>
+                    <View style={styles.noDriversHintStats}>
+                      <View style={styles.noDriversHintStatItem}>
+                        <Text style={styles.noDriversHintStatValue}>0</Text>
+                        <Text style={styles.noDriversHintStatLabel}>Şimdi uygun</Text>
+                      </View>
+                      <View style={styles.noDriversHintStatDivider} />
+                      <View style={styles.noDriversHintStatItem}>
+                        <Text style={styles.noDriversHintStatValue}>75 sn</Text>
+                        <Text style={styles.noDriversHintStatLabel}>Otomatik yenileme</Text>
+                      </View>
+                      <View style={styles.noDriversHintStatDivider} />
+                      <View style={styles.noDriversHintStatItem}>
+                        <Text style={styles.noDriversHintStatValue}>{user?.district ? 'İlçe' : 'Şehir'}</Text>
+                        <Text style={styles.noDriversHintStatLabel}>Öncelikli tarama</Text>
+                      </View>
+                    </View>
                     <View style={styles.noDriversHintActions}>
-                      <TouchableOpacity
+                      <ScalePressable
                         style={styles.noDriversHintSecondaryButton}
                         onPress={handleRefreshOnlineDrivers}
-                        activeOpacity={0.85}
                         testID="no-drivers-refresh-button"
+                        accessibilityLabel="Şoförleri yeniden tara"
+                        accessibilityHint="Müsait sürücü listesini hemen yeniler"
                       >
+                        <Navigation size={14} color="#9A3412" />
                         <Text style={styles.noDriversHintSecondaryText}>Tekrar Tara</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
+                      </ScalePressable>
+                      <ScalePressable
                         style={styles.noDriversHintPrimaryButton}
                         onPress={handleOpenScheduledRide}
-                        activeOpacity={0.85}
                         testID="no-drivers-scheduled-button"
+                        accessibilityLabel="Planlı yolculuk oluştur"
+                        accessibilityHint="Daha sonrası için bir yolculuk planlar"
                       >
+                        <Clock size={14} color="#FFFFFF" />
                         <Text style={styles.noDriversHintPrimaryText}>Planlı Yolculuk</Text>
-                      </TouchableOpacity>
+                      </ScalePressable>
                     </View>
                   </View>
                 )}
@@ -7248,28 +7327,122 @@ const styles = StyleSheet.create({
   },
   noDriversHintCard: {
     backgroundColor: '#FFF7ED',
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(180,83,9,0.18)',
-    padding: 14,
+    borderColor: 'rgba(180,83,9,0.16)',
+    padding: 16,
     marginBottom: 14,
-    gap: 10,
+    gap: 14,
+    ...crossPlatformShadow({
+      color: '#B45309',
+      offsetY: 8,
+      opacity: 0.08,
+      radius: 16,
+      elevation: 4,
+    }),
   },
   noDriversHintHeader: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
-    gap: 8,
+    gap: 10,
+  },
+  noDriversHintIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: 'rgba(251,191,36,0.18)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  noDriversHintHeaderContent: {
+    flex: 1,
+    gap: 2,
+  },
+  noDriversHintEyebrow: {
+    fontSize: 10,
+    fontWeight: '800' as const,
+    letterSpacing: 0.9,
+    color: '#C2410C',
+    ...androidTextFix({ fontWeight: '800' }),
   },
   noDriversHintTitle: {
     flex: 1,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '800' as const,
     color: '#9A3412',
+    ...androidTextFix({ fontWeight: '800' }),
+  },
+  noDriversHintPillRow: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: 8,
+  },
+  noDriversHintPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(194,65,12,0.12)',
+  },
+  noDriversHintPillActive: {
+    backgroundColor: 'rgba(245,166,35,0.12)',
+    borderColor: 'rgba(245,166,35,0.28)',
+  },
+  noDriversHintPillSolid: {
+    backgroundColor: 'rgba(26,26,46,0.92)',
+    borderColor: 'rgba(26,26,46,0.92)',
+  },
+  noDriversHintPillText: {
+    fontSize: 11,
+    fontWeight: '700' as const,
+    color: '#9A3412',
+    ...androidTextFix({ fontWeight: '700' }),
+  },
+  noDriversHintPillTextActive: {
+    color: '#B45309',
+  },
+  noDriversHintPillSolidText: {
+    color: '#FFFFFF',
   },
   noDriversHintText: {
     fontSize: 13,
-    lineHeight: 18,
+    lineHeight: 19,
     color: '#9A3412',
+    ...androidTextFix({ lineHeight: 19 }),
+  },
+  noDriversHintStats: {
+    flexDirection: 'row' as const,
+    alignItems: 'stretch' as const,
+    backgroundColor: 'rgba(255,255,255,0.76)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(180,83,9,0.08)',
+    overflow: 'hidden' as const,
+  },
+  noDriversHintStatItem: {
+    flex: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: 4,
+  },
+  noDriversHintStatDivider: {
+    width: 1,
+    backgroundColor: 'rgba(180,83,9,0.12)',
+  },
+  noDriversHintStatValue: {
+    fontSize: 14,
+    fontWeight: '800' as const,
+    color: '#7C2D12',
+    ...androidTextFix({ fontWeight: '800' }),
+  },
+  noDriversHintStatLabel: {
+    fontSize: 11,
+    color: '#B45309',
+    textAlign: 'center' as const,
+    ...androidTextFix({ lineHeight: 14 }),
   },
   noDriversHintActions: {
     flexDirection: 'row' as const,
@@ -7278,30 +7451,43 @@ const styles = StyleSheet.create({
   noDriversHintPrimaryButton: {
     flex: 1,
     backgroundColor: '#1A1A2E',
-    paddingVertical: 12,
-    borderRadius: 12,
+    paddingVertical: 13,
+    borderRadius: 14,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
+    flexDirection: 'row' as const,
+    gap: 8,
+    ...crossPlatformShadow({
+      color: '#1A1A2E',
+      offsetY: 8,
+      opacity: 0.16,
+      radius: 12,
+      elevation: 4,
+    }),
   },
   noDriversHintPrimaryText: {
     fontSize: 13,
     fontWeight: '700' as const,
     color: '#FFFFFF',
+    ...androidTextFix({ fontWeight: '700' }),
   },
   noDriversHintSecondaryButton: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-    paddingVertical: 12,
-    borderRadius: 12,
+    paddingVertical: 13,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(154,52,18,0.18)',
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
+    flexDirection: 'row' as const,
+    gap: 8,
   },
   noDriversHintSecondaryText: {
     fontSize: 13,
     fontWeight: '700' as const,
     color: '#9A3412',
+    ...androidTextFix({ fontWeight: '700' }),
   },
   pricingInfoNew: {
     backgroundColor: '#F8F8F8',
