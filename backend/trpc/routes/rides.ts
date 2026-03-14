@@ -141,6 +141,14 @@ function buildDriverShortName(name: string): string {
   return nameParts[0] ?? 'Şoför';
 }
 
+function isRideOfferedToDriver(ride: Ride, driverId: string): boolean {
+  if (!Array.isArray(ride.notifiedDriverIds) || ride.notifiedDriverIds.length === 0) {
+    return true;
+  }
+
+  return ride.notifiedDriverIds.includes(driverId);
+}
+
 interface BusyDriverQueueCandidate {
   id: string;
   name: string;
@@ -404,6 +412,12 @@ export const ridesRouter = createTRPCRouter({
       }, 5 * 60 * 1000);
 
       const driversToNotify = rankedDrivers.slice(0, Math.min(rankedDrivers.length, 5));
+      const notifiedDriverIds = driversToNotify.map((driver) => driver.id);
+      const dispatchedRide: Ride = {
+        ...ride,
+        notifiedDriverIds,
+      };
+      await db.rides.setSync(id, dispatchedRide);
       const driverRideInfo = input.isFreeRide
         ? `Ücretsiz sürüş • ${input.pickupAddress} → ${input.dropoffAddress}`
         : `₺${input.price.toFixed(0)} • ${input.pickupAddress} → ${input.dropoffAddress}`;
@@ -417,10 +431,10 @@ export const ridesRouter = createTRPCRouter({
         });
       }
 
-      console.log('[RIDES] Ride request dispatched to live drivers:', id, driversToNotify.map((driver) => `${driver.name}:${driver.distance.toFixed(2)}km`).join(', '));
+      console.log('[RIDES] Ride request dispatched to live drivers:', id, 'drivers:', driversToNotify.map((driver) => `${driver.name}:${driver.distance.toFixed(2)}km`).join(', '), 'notifiedDriverIds:', notifiedDriverIds.join(','));
       return {
         success: true,
-        ride,
+        ride: dispatchedRide,
         availableDriversCount: rankedDrivers.length,
         notifiedDriversCount: driversToNotify.length,
       };
@@ -501,6 +515,7 @@ export const ridesRouter = createTRPCRouter({
         city: input.city,
         district: input.district,
         requestedDriverCategory,
+        notifiedDriverIds: [queueCandidate.id],
         queuedForDriverId: queueCandidate.id,
         queuedForDriverName: queueCandidate.name,
         queuedAt,
@@ -704,6 +719,7 @@ export const ridesRouter = createTRPCRouter({
 
       const ride = db.rides.get(input.rideId);
       if (!ride) return { success: false, error: "Yolculuk bulunamadı" };
+      const rideIsBusiness = ride.orderType === 'business_delivery' || ride.orderType === 'custom_delivery';
 
       const driverActiveRide = getActiveRideForDriver(input.driverId);
       if (driverActiveRide && driverActiveRide.id !== input.rideId) {
@@ -715,6 +731,11 @@ export const ridesRouter = createTRPCRouter({
         return { success: false, error: 'Bu yolculuk sıradaki şoföre ayrıldı' };
       }
 
+      if (!rideIsBusiness && !ride.queuedForDriverId && !isRideOfferedToDriver(ride, input.driverId)) {
+        console.log('[RIDES] Accept blocked because ride was not dispatched to driver:', input.rideId, 'driver:', input.driverId, 'allowedDrivers:', ride.notifiedDriverIds ?? []);
+        return { success: false, error: 'Bu yolculuk şu anda size atanmış değil' };
+      }
+
       if (ride.status !== "pending") {
         console.log('[RIDES] Race condition: ride', input.rideId, 'status is', ride.status, 'not pending. Already accepted by:', ride.driverId);
         return { success: false, error: "Yolculuk zaten kabul edilmiş" };
@@ -724,7 +745,7 @@ export const ridesRouter = createTRPCRouter({
         return { success: false, error: "Yolculuk başka bir şoför tarafından kabul edildi" };
       }
 
-      if (isBusinessRide(ride)) {
+      if (rideIsBusiness) {
         if (!ride.assignedCourierId || ride.assignedCourierId !== input.driverId) {
           return { success: false, error: 'Bu sipariş size atanmadı' };
         }
@@ -744,6 +765,7 @@ export const ridesRouter = createTRPCRouter({
         driverRating: input.driverRating,
         assignedCourierId: undefined,
         courierRequestExpiresAt: undefined,
+        notifiedDriverIds: undefined,
         queuedForDriverId: undefined,
         queuedForDriverName: undefined,
         queuedAt: undefined,
@@ -752,11 +774,11 @@ export const ridesRouter = createTRPCRouter({
       await db.rides.setSync(input.rideId, updated);
       console.log("[RIDES] Accepted ride:", input.rideId, "by driver:", input.driverId);
 
-      const customerTitle = isBusinessRide(ride) ? '✅ Kurye siparişi kabul etti' : '✅ Yolculuk Kabul Edildi';
-      const customerBody = isBusinessRide(ride)
+      const customerTitle = rideIsBusiness ? '✅ Kurye siparişi kabul etti' : '✅ Yolculuk Kabul Edildi';
+      const customerBody = rideIsBusiness
         ? `${input.driverName} siparişinizi teslim almak için yola çıktı!`
         : `${input.driverName} yolculuğunuzu kabul etti!`;
-      const customerType = isBusinessRide(ride) ? 'business_delivery_accepted' : 'ride_accepted';
+      const customerType = rideIsBusiness ? 'business_delivery_accepted' : 'ride_accepted';
 
       createRideNotification(ride.customerId, customerTitle, customerBody, {
         type: customerType,
@@ -1042,12 +1064,21 @@ export const ridesRouter = createTRPCRouter({
           return firstTime - secondTime;
         });
 
-      const regularCategoryRides = pendingRides.filter((ride) => {
-        const isRegularRide = ride.orderType !== 'business_delivery' && ride.orderType !== 'custom_delivery';
-        return isRegularRide
-          && !ride.queuedForDriverId
-          && matchesRequestedDriverCategory(actorDriverCategory, ride.requestedDriverCategory);
-      });
+      const regularCategoryRides = pendingRides
+        .filter((ride) => {
+          const isRegularRide = ride.orderType !== 'business_delivery' && ride.orderType !== 'custom_delivery';
+          return isRegularRide
+            && !ride.queuedForDriverId
+            && matchesRequestedDriverCategory(actorDriverCategory, ride.requestedDriverCategory)
+            && isRideOfferedToDriver(ride, actorDriverId);
+        })
+        .sort((firstRide, secondRide) => {
+          const firstTime = new Date(firstRide.createdAt).getTime();
+          const secondTime = new Date(secondRide.createdAt).getTime();
+          return firstTime - secondTime;
+        });
+
+      console.log('[RIDES] getPendingByCity driver view:', actorDriverId, 'queued:', queuedCategoryRides.length, 'regularVisible:', regularCategoryRides.length, 'category:', actorDriverCategory);
 
       if (actorDriverCategory === 'courier') {
         console.log('[RIDES] getPendingByCity courier view:', actorDriverId, 'business:', assignedBusinessOrders.length, 'queued:', queuedCategoryRides.length, 'regular:', regularCategoryRides.length);

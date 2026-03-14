@@ -112,6 +112,7 @@ export interface Ride {
   city: string;
   district?: string;
   requestedDriverCategory?: "driver" | "scooter" | "courier";
+  notifiedDriverIds?: string[];
   queuedForDriverId?: string;
   queuedForDriverName?: string;
   queuedAt?: string;
