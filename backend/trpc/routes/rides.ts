@@ -285,6 +285,47 @@ interface BusyDriverQueueCandidate {
   activeRideId: string;
   matchScore: number;
   distance: number;
+  estimatedAvailabilityMinutes: number;
+}
+
+function parseRideDurationMinutes(duration: string | undefined): number | null {
+  const match = duration?.match(/(\d+)/);
+  if (!match) {
+    return null;
+  }
+
+  const parsed = parseInt(match[1], 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function getFallbackRemainingBusyMinutes(ride: Ride): number {
+  if (ride.status === 'accepted') {
+    return 12;
+  }
+
+  if (ride.status === 'in_progress') {
+    return 8;
+  }
+
+  return 10;
+}
+
+function estimateRideRemainingMinutes(ride: Ride): number {
+  const totalDurationMinutes = parseRideDurationMinutes(ride.duration);
+  const elapsedMinutes = Math.max(0, (Date.now() - new Date(ride.createdAt).getTime()) / 60000);
+
+  if (totalDurationMinutes && totalDurationMinutes > 0) {
+    const remainingMinutes = Math.ceil(totalDurationMinutes - elapsedMinutes);
+    if (remainingMinutes > 0) {
+      return Math.max(2, remainingMinutes);
+    }
+  }
+
+  return getFallbackRemainingBusyMinutes(ride);
 }
 
 function findBusyDriverQueueCandidate(params: {
@@ -327,7 +368,8 @@ function findBusyDriverQueueCandidate(params: {
       distance = 10;
     }
 
-    const busyMinutes = Math.max(0, (Date.now() - new Date(activeRide.createdAt).getTime()) / 60000);
+    const elapsedBusyMinutes = Math.max(0, (Date.now() - new Date(activeRide.createdAt).getTime()) / 60000);
+    const estimatedAvailabilityMinutes = estimateRideRemainingMinutes(activeRide);
     const matchScore = scoreDriver({
       id: driver.id,
       name: driver.name,
@@ -337,7 +379,7 @@ function findBusyDriverQueueCandidate(params: {
       isApproved: driver.isApproved,
       isSuspended: driver.isSuspended,
       distance,
-    }, params.requestedCategory) + Math.min(busyMinutes / 30, 1) * 10;
+    }, params.requestedCategory) + Math.min(elapsedBusyMinutes / 30, 1) * 10;
 
     const candidate: BusyDriverQueueCandidate = {
       id: driver.id,
@@ -346,6 +388,7 @@ function findBusyDriverQueueCandidate(params: {
       activeRideId: activeRide.id,
       matchScore,
       distance,
+      estimatedAvailabilityMinutes,
     };
 
     if (!bestCandidate || candidate.matchScore > bestCandidate.matchScore) {
@@ -428,6 +471,59 @@ export const ridesRouter = createTRPCRouter({
       }
 
       const requestedDriverCategory = input.requestedDriverCategory ?? 'driver';
+      const districtRegisteredDrivers = input.district?.trim()
+        ? db.drivers
+          .getAll()
+          .filter((driver) => matchesLocationValue(driver.city, input.city))
+          .filter((driver) => matchesLocationValue(driver.district, input.district))
+          .filter((driver) => driver.isApproved !== false)
+          .filter((driver) => !driver.isSuspended)
+          .filter((driver) => matchesRequestedDriverCategory(driver.driverCategory, requestedDriverCategory))
+        : [];
+      const districtOnlineDrivers = districtRegisteredDrivers.filter((driver) => driver.isOnline);
+      const districtAvailableDriversCount = districtOnlineDrivers.filter((driver) => !isDriverBusyWithAnotherRide(driver.id)).length;
+
+      if (input.district?.trim() && districtRegisteredDrivers.length === 0) {
+        console.log('[RIDES] No registered district drivers for ride request:', input.customerId, 'city:', input.city, 'district:', input.district, 'category:', requestedDriverCategory);
+        return {
+          success: false,
+          error: 'Şu an ilçenizde kayıtlı şoför yok.',
+          ride: null,
+          availableDriversCount: 0,
+          notifiedDriversCount: 0,
+          availabilityState: 'no_registered_district_drivers' as const,
+        };
+      }
+
+      const districtBusyQueueCandidate = input.district?.trim() && districtOnlineDrivers.length > 0 && districtAvailableDriversCount === 0
+        ? findBusyDriverQueueCandidate({
+          city: input.city,
+          district: input.district,
+          requestedCategory: requestedDriverCategory,
+          pickupLat: input.pickupLat,
+          pickupLng: input.pickupLng,
+        })
+        : null;
+
+      if (districtBusyQueueCandidate) {
+        console.log('[RIDES] District has active but busy drivers, offering queue placement:', input.customerId, 'city:', input.city, 'district:', input.district ?? '', 'queuedDriver:', districtBusyQueueCandidate.id, 'etaMinutes:', districtBusyQueueCandidate.estimatedAvailabilityMinutes);
+        return {
+          success: false,
+          error: `Bölgenizde aktif şoförlerimiz var, başka bir yolculuk yapıyor. ${districtBusyQueueCandidate.shortName} yaklaşık ${districtBusyQueueCandidate.estimatedAvailabilityMinutes} dk sonra müsait olacak.`,
+          ride: null,
+          availableDriversCount: 0,
+          notifiedDriversCount: 0,
+          queueAvailable: true,
+          estimatedAvailabilityMinutes: districtBusyQueueCandidate.estimatedAvailabilityMinutes,
+          availabilityState: 'busy_active_district_drivers' as const,
+          queuedDriver: {
+            id: districtBusyQueueCandidate.id,
+            name: districtBusyQueueCandidate.name,
+            shortName: districtBusyQueueCandidate.shortName,
+          },
+        };
+      }
+
       const rankedDrivers = sortDriversByDistrictPriority(
         getAvailableOnlineDriversByCity(input.city, requestedDriverCategory)
           .map((driver) => {
@@ -470,14 +566,16 @@ export const ridesRouter = createTRPCRouter({
         });
 
         if (queueCandidate) {
-          console.log('[RIDES] No available drivers, offering queue placement:', input.customerId, 'city:', input.city, 'district:', input.district ?? '', 'queuedDriver:', queueCandidate.id);
+          console.log('[RIDES] No available drivers, offering queue placement:', input.customerId, 'city:', input.city, 'district:', input.district ?? '', 'queuedDriver:', queueCandidate.id, 'etaMinutes:', queueCandidate.estimatedAvailabilityMinutes);
           return {
             success: false,
-            error: `${queueCandidate.shortName} şu anda başka bir yolculukta. İsterseniz sıraya alınabilirsiniz.`,
+            error: `Bölgenizde aktif şoförlerimiz var, başka bir yolculuk yapıyor. ${queueCandidate.shortName} yaklaşık ${queueCandidate.estimatedAvailabilityMinutes} dk sonra müsait olacak.`,
             ride: null,
             availableDriversCount: 0,
             notifiedDriversCount: 0,
             queueAvailable: true,
+            estimatedAvailabilityMinutes: queueCandidate.estimatedAvailabilityMinutes,
+            availabilityState: 'busy_active_district_drivers' as const,
             queuedDriver: {
               id: queueCandidate.id,
               name: queueCandidate.name,
@@ -665,6 +763,7 @@ export const ridesRouter = createTRPCRouter({
         notifiedDriverIds: [queueCandidate.id],
         queuedForDriverId: queueCandidate.id,
         queuedForDriverName: queueCandidate.name,
+        queuedEstimatedAvailabilityMinutes: queueCandidate.estimatedAvailabilityMinutes,
         queuedAt,
         orderType: 'ride',
         rideForOther: input.rideForOther,
@@ -704,6 +803,7 @@ export const ridesRouter = createTRPCRouter({
         ride,
         availableDriversCount: 0,
         notifiedDriversCount: 1,
+        estimatedAvailabilityMinutes: queueCandidate.estimatedAvailabilityMinutes,
         queuedDriver: {
           id: queueCandidate.id,
           name: queueCandidate.name,
@@ -1014,6 +1114,7 @@ export const ridesRouter = createTRPCRouter({
         rejectedDriverIds: undefined,
         queuedForDriverId: undefined,
         queuedForDriverName: undefined,
+        queuedEstimatedAvailabilityMinutes: undefined,
         queuedAt: undefined,
       };
 

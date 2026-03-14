@@ -116,6 +116,7 @@ export interface Ride {
   rejectedDriverIds?: string[];
   queuedForDriverId?: string;
   queuedForDriverName?: string;
+  queuedEstimatedAvailabilityMinutes?: number;
   queuedAt?: string;
   rideForOther?: boolean;
   recipientName?: string;

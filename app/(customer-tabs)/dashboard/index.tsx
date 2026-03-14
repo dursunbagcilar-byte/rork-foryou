@@ -1167,7 +1167,14 @@ export default function CustomerHomeScreen() {
       setCustomerConfirmedArrival(false);
       if (ride.queuedForDriverId && !ride.driverId) {
         const queuedDriverLabel = ride.queuedForDriverName?.trim() || 'Şoför';
-        setDriverSearchStatus(`${queuedDriverLabel} şu an yolculukta. Sıraya alındınız.`);
+        const queuedEta = typeof ride.queuedEstimatedAvailabilityMinutes === 'number' && ride.queuedEstimatedAvailabilityMinutes > 0
+          ? ride.queuedEstimatedAvailabilityMinutes
+          : null;
+        setDriverSearchStatus(
+          queuedEta
+            ? `Bölgenizde aktif şoförlerimiz var. ${queuedDriverLabel} yaklaşık ${queuedEta} dk sonra müsait olacak. Sıraya alındınız.`
+            : `${queuedDriverLabel} şu an yolculukta. Sıraya alındınız.`
+        );
       }
       lastBackendRideStatusRef.current = ride.status;
       return;
@@ -1808,6 +1815,9 @@ export default function CustomerHomeScreen() {
           const queuedDriverShortName = 'queuedDriver' in queuedResult && queuedResult.queuedDriver?.shortName
             ? queuedResult.queuedDriver.shortName
             : 'Şoför';
+          const queuedEta = 'estimatedAvailabilityMinutes' in queuedResult && typeof queuedResult.estimatedAvailabilityMinutes === 'number'
+            ? queuedResult.estimatedAvailabilityMinutes
+            : null;
 
           lastBackendRideStatusRef.current = queuedResult.ride.status;
           completionHandledRideIdRef.current = null;
@@ -1816,10 +1826,14 @@ export default function CustomerHomeScreen() {
           setRideRequested(true);
           setFindingDriver(true);
           setDriverFound(false);
-          setDriverSearchStatus(`${queuedDriverShortName} şu an yolculukta. Sıraya alındınız.`);
+          setDriverSearchStatus(
+            queuedEta && queuedEta > 0
+              ? `Bölgenizde aktif şoförlerimiz var. ${queuedDriverShortName} yaklaşık ${queuedEta} dk sonra müsait olacak. Sıraya alındınız.`
+              : `${queuedDriverShortName} şu an yolculukta. Sıraya alındınız.`
+          );
           setTripStarted(false);
           toggleSearch(false);
-          console.log('[Customer] Ride queued on backend:', queuedResult.ride.id, 'queuedDriver:', queuedDriverShortName);
+          console.log('[Customer] Ride queued on backend:', queuedResult.ride.id, 'queuedDriver:', queuedDriverShortName, 'etaMinutes:', queuedEta ?? 'unknown');
         } catch (queueError) {
           console.log('[Customer] Backend queued ride creation error:', queueError);
           setCurrentBackendRideId(null);
@@ -1831,6 +1845,14 @@ export default function CustomerHomeScreen() {
         }
       };
 
+      setCurrentBackendRideId(null);
+      setRideRequested(true);
+      setFindingDriver(true);
+      setDriverFound(false);
+      setTripStarted(false);
+      setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
+      toggleSearch(false);
+
       const result = await createRideMutation.mutateAsync(rideRequestPayload);
 
       if (!result?.success || !result.ride) {
@@ -1838,11 +1860,31 @@ export default function CustomerHomeScreen() {
         const queuedDriverShortName = 'queuedDriver' in result && result.queuedDriver?.shortName
           ? result.queuedDriver.shortName
           : 'Şoför';
+        const estimatedAvailabilityMinutes = 'estimatedAvailabilityMinutes' in result && typeof result.estimatedAvailabilityMinutes === 'number'
+          ? result.estimatedAvailabilityMinutes
+          : null;
+        const availabilityState = 'availabilityState' in result
+          && (result.availabilityState === 'no_registered_district_drivers' || result.availabilityState === 'busy_active_district_drivers')
+          ? result.availabilityState
+          : null;
+
+        setCurrentBackendRideId(null);
+        setRideRequested(false);
+        setFindingDriver(false);
+        setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
+
+        if (availabilityState === 'no_registered_district_drivers') {
+          Alert.alert('Şoför Bulunamadı', 'Şu an ilçenizde kayıtlı şoför yok.');
+          return;
+        }
 
         if (queueAvailable) {
+          const busyDriverMessage = estimatedAvailabilityMinutes && estimatedAvailabilityMinutes > 0
+            ? `Bölgenizde aktif şoförlerimiz var, başka bir yolculuk yapıyor. ${queuedDriverShortName} yaklaşık ${estimatedAvailabilityMinutes} dk sonra müsait olacak. Sıraya alınmak ister misiniz?`
+            : 'Bölgenizde aktif şoförlerimiz var, başka bir yolculuk yapıyor. Sıraya alınmak ister misiniz?';
           Alert.alert(
             'Şoför Şu Anda Meşgul',
-            `${queuedDriverShortName} şu anda başka bir yolculukta. Sıraya alınmak ister misiniz?`,
+            busyDriverMessage,
             [
               { text: 'Hayır', style: 'cancel' },
               {
@@ -1859,10 +1901,6 @@ export default function CustomerHomeScreen() {
         const backendError = 'error' in result && typeof result.error === 'string'
           ? result.error
           : 'Yolculuk talebi şu an oluşturulamadı. Lütfen tekrar deneyin.';
-        setCurrentBackendRideId(null);
-        setRideRequested(false);
-        setFindingDriver(false);
-        setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
         Alert.alert('Yolculuk Başlatılamadı', backendError);
         return;
       }

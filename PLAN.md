@@ -1,37 +1,22 @@
-# Android Uyumluluğu İyileştirmeleri
+# Müşteri sürüş başlatma ve şoför uygunluk uyarılarını netleştir
 
-Uygulamanın Android cihazlarda iOS ile aynı kalitede görünmesi için aşağıdaki iyileştirmeler yapılacak:
+## Özellikler
+- [x] Müşteri haritadan varış noktasını seçip **Sürüş Başlat**’a bastığında ekran yeniden **Şoför aranıyor** durumuna geçecek.
+- [x] Müşterinin bulunduğu ilçede kayıtlı şoför yoksa açık bir uyarı gösterilecek: **Şu an ilçenizde kayıtlı şoför yok**.
+- [x] Müşterinin bulunduğu il ve ilçede aktif şoför varsa ama hepsi başka yolculuktaysa şu uyarı gösterilecek: **Bölgenizde aktif şoförlerimiz var, başka bir yolculuk yapıyor**.
+- [x] Bu durumda uyarının içinde şoförün tahmini ne kadar süre sonra müsait olacağı dakika cinsinden gösterilecek.
+- [x] Tahmini süre önce şoförün mevcut yolculuğunun kalan süresine göre hesaplanacak.
+- [x] Kalan süre net değilse yaklaşık bir yedek hesaplama ile yine müşteriye tahmini dakika bilgisi gösterilecek.
+- [x] Aktif ama meşgul şoför durumunda müşteriye ayrıca **sıraya alınmak isteyip istemediği** sorulacak.
+- [x] Müşteri kabul ederse talebi sıraya alınacak, kabul etmezse rota korunup tekrar deneme imkanı kalacak.
 
-**Gölge & Derinlik Düzeltmeleri**
-- [x] Tüm ekranlarda eksik `elevation` değerleri eklenerek Android'de gölgelerin düzgün görünmesi sağlanacak
-- [x] Kartlar, butonlar ve panellerde tutarlı derinlik efektleri
+## Tasarım
+- [x] Uyarılar kısa, net ve güven veren bir dille gösterilecek.
+- [x] **Şoför aranıyor** ekranı kararsız görünmeyecek; tek bir sabit durum akışıyla daha profesyonel hissettirecek.
+- [x] Tahmini bekleme süresi uyarının içinde öne çıkarılarak müşterinin hemen anlaması sağlanacak.
+- [x] Sıra teklifi tek ekranda, kolay anlaşılır iki seçimle sunulacak.
 
-**Yazı Tipi & Metin İyileştirmeleri**
-- [x] Android'de satır yüksekliği (lineHeight) farklılıkları düzeltilecek
-- [x] Font ağırlığı (bold, semibold vb.) Android'e uygun şekilde ayarlanacak
-- [x] `includeFontPadding: false` eklenerek Android'deki fazladan metin boşlukları giderilecek
-
-**Buton & Dokunma Efektleri**
-- [x] Buton basma animasyonları her iki platformda tutarlı olacak (`components/ScalePressable.tsx` ile ortaklaştırıldı)
-- [x] Ortak basılabilir bileşende erişilebilirlik, hitSlop ve Android ripple davranışı profesyonel şekilde güçlendirildi
-
-**Durum Çubuğu (Status Bar)**
-- [x] Android'de durum çubuğu rengi ve stili uygulama temasına uygun ayarlanacak
-- [x] Koyu/açık tema geçişlerinde durum çubuğu otomatik güncellenecek
-- [x] Sistem arka planı tema ile senkronize edilerek Android geçişleri daha temiz hale getirildi
-
-**Genel Platform Uyumu**
-- [x] `KeyboardAvoidingView` davranışı Android için optimize edilecek
-- [x] Harita bileşenlerinde Android'e özel sağlayıcı (Google Maps) kullanımı kontrol edilecek
-- [x] Tab bar Android için elevation ve label style iyileştirmeleri yapıldı
-- [x] Cross-platform shadow utility oluşturuldu (`utils/platform.ts`)
-
-# Müşteri Şoför Bulunamadı Akışı
-
-- [x] Seçilen araç tipine göre müşteri tarafındaki müsait şoför sorgusu hizalanacak
-- [x] Müşteri rota seçim ekranında boşta şoför yokken açıklayıcı boş durum kartı gösterilecek
-- [x] Şoför yok ön kontrolü talebi gereksiz yere bloklamayacak, kullanıcı yine de müsaitlik ve sıra durumunu kontrol edebilecek
-- [x] Boş durum kartı canlı durum etiketleri, net istatistikler ve güçlü aksiyonlarla profesyonelleştirildi
-- [x] Yeniden atama başarısız olduğunda kullanıcıya tekrar tarama ve planlı yolculuk seçenekleri sunuldu
-- [x] Yeniden atama başarısızlığında rota korunarak ekran içi kurtarma paneli gösterildi
-- [x] Güzargah ekranındaki canlı müsaitlik kartı debounce ile stabilize edilerek hızlı gidip gelme sorunu giderildi
+## Ekranlar
+- [x] **Müşteri rota ekranı:** Haritadan hedef seçildikten sonra sürüş başlatma akışı daha net çalışacak.
+- [x] **Şoför aranıyor durumu:** Arama, uyarı ve bekleme bilgisi tek mantıklı akışta gösterilecek.
+- [x] **Meşgul şoför uyarısı:** Tahmini müsaitlik süresi ve sıraya alınma seçimi burada sunulacak.
