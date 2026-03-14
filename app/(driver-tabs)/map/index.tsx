@@ -30,6 +30,7 @@ import type { Driver } from '@/constants/mockData';
 import { buildApiUrl, getSessionToken, trpc } from '@/lib/trpc';
 import { getDbHeaders } from '@/utils/db';
 import { getGoogleMapsApiKey, getGeocodingUrl, logMapsKeyStatus } from '@/utils/maps';
+import { keyboardAvoidingBehavior, keyboardVerticalOffset } from '@/utils/platform';
 
 const GOOGLE_API_KEY = getGoogleMapsApiKey();
 const ROUTES_API_URL = 'https://routes.googleapis.com/directions/v2:computeRoutes';
@@ -2300,7 +2301,8 @@ export default function DriverHomeScreen() {
       {showDriverChatModal && (
         <View style={styles.loadingOverlay}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            behavior={keyboardAvoidingBehavior()}
+            keyboardVerticalOffset={keyboardVerticalOffset()}
             style={styles.driverChatModalWrap}
           >
             <View style={styles.driverChatModal}>

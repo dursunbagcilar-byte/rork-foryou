@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Modal,
-  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -12,6 +11,7 @@ import {
 } from 'react-native';
 import { KeyRound, RefreshCw, ShieldCheck, Smartphone, X } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
+import { keyboardAvoidingBehavior, keyboardVerticalOffset } from '@/utils/platform';
 
 interface VerificationCodeModalProps {
   visible: boolean;
@@ -57,7 +57,8 @@ export function VerificationCodeModal({
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={keyboardAvoidingBehavior()}
+          keyboardVerticalOffset={keyboardVerticalOffset()}
           style={styles.sheetWrap}
         >
           <View style={styles.sheet} testID={`${testIDPrefix}-container`}>
