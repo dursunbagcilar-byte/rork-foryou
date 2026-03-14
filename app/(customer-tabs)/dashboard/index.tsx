@@ -298,6 +298,7 @@ export default function CustomerHomeScreen() {
   const [customOrderLocationConfirmed, setCustomOrderLocationConfirmed] = useState<boolean>(false);
   
   const [showCustomOrderSuccess, setShowCustomOrderSuccess] = useState<boolean>(false);
+  const router = useRouter();
   const [currentDriver, setCurrentDriver] = useState<MockDriverInfo | null>(null);
   const [previousDriverIds, setPreviousDriverIds] = useState<string[]>([]);
   const [reassigning, setReassigning] = useState<boolean>(false);
@@ -348,6 +349,16 @@ export default function CustomerHomeScreen() {
       case 'motorcycle': return '#3498DB';
       default: return Colors.dark.primary;
     }
+  }, [selectedVehiclePackage]);
+
+  const selectedRequestedDriverCategory = useMemo<'driver' | 'scooter' | 'courier'>(() => {
+    if (selectedVehiclePackage === 'scooter') {
+      return 'scooter';
+    }
+    if (selectedVehiclePackage === 'motorcycle') {
+      return 'courier';
+    }
+    return 'driver';
   }, [selectedVehiclePackage]);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -459,7 +470,7 @@ export default function CustomerHomeScreen() {
   }, [rideHistory, currentLocationLabel, user?.city, user?.district, userCity, filteredDestinations]);
 
   const onlineDriversQuery = trpc.drivers.getOnlineByCity.useQuery(
-    { city: user?.city ?? '' },
+    { city: user?.city ?? '', requestedDriverCategory: selectedRequestedDriverCategory },
     {
       enabled: !!user?.city && !rideRequested && isRealtimeScreenActive,
       refetchInterval: isRealtimeScreenActive ? 75000 : false,
@@ -468,7 +479,7 @@ export default function CustomerHomeScreen() {
   );
   const onlineDrivers = onlineDriversQuery.data ?? [];
   const hasOnlineDrivers = onlineDrivers.length > 0;
-  const showRideStartSearchingState = Boolean(
+  const showNoAvailableDriversHint = Boolean(
     selectedDest
     && user?.city
     && !rideRequested
@@ -477,9 +488,9 @@ export default function CustomerHomeScreen() {
     && !onlineDriversQuery.isError
     && !hasOnlineDrivers
   );
-  const isConfirmButtonBusy = paymentLoading || showRideStartSearchingState;
-  const confirmButtonLabel = showRideStartSearchingState
-    ? 'Şoför aranıyor'
+  const isConfirmButtonBusy = paymentLoading;
+  const confirmButtonLabel = showNoAvailableDriversHint
+    ? 'Müsaitliği Kontrol Et'
     : isFreeRide() && selectedDest
       ? 'Ücretsiz Sürüş Başlat'
       : paymentMethod === 'card'
@@ -1454,6 +1465,18 @@ export default function CustomerHomeScreen() {
     Alert.alert('Yakında', 'Harita üzerinden konum seçme özelliği çok yakında eklenecek.');
     console.log('[RoutePicker] Map selection placeholder pressed');
   }, []);
+
+  const handleRefreshOnlineDrivers = useCallback(() => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    console.log('[Customer] Refreshing requested driver availability:', selectedRequestedDriverCategory);
+    void onlineDriversQuery.refetch();
+  }, [onlineDriversQuery, selectedRequestedDriverCategory]);
+
+  const handleOpenScheduledRide = useCallback(() => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    console.log('[Customer] Opening scheduled ride from no-driver hint');
+    router.push('/scheduled-ride' as any);
+  }, [router]);
 
   const initializePaymentMutation = trpc.payments.initializePayment.useMutation();
   const createRideMutation = trpc.rides.create.useMutation();
@@ -2446,7 +2469,6 @@ export default function CustomerHomeScreen() {
     setCustomOrderLocationConfirmed(false);
   }, []);
 
-  const router = useRouter();
   const searchParams = useLocalSearchParams<{ vehiclePackage?: string; openSearch?: string }>();
 
   useEffect(() => {
@@ -3447,11 +3469,43 @@ export default function CustomerHomeScreen() {
                   )}
                 </ScrollView>
 
+                {showNoAvailableDriversHint && (
+                  <View style={styles.noDriversHintCard} testID="no-drivers-hint-card">
+                    <View style={styles.noDriversHintHeader}>
+                      <AlertTriangle size={16} color="#B45309" />
+                      <Text style={styles.noDriversHintTitle}>
+                        {getVehicleTypeLabel(selectedVehiclePackage)} için boşta şoför görünmüyor
+                      </Text>
+                    </View>
+                    <Text style={styles.noDriversHintText}>
+                      Şu an çevrimiçi ve müsait bir şoför görünmüyor. Yine de talep oluşturup sıraya alınma durumunu kontrol edebilir veya daha sonra planlı yolculuk oluşturabilirsiniz.
+                    </Text>
+                    <View style={styles.noDriversHintActions}>
+                      <TouchableOpacity
+                        style={styles.noDriversHintSecondaryButton}
+                        onPress={handleRefreshOnlineDrivers}
+                        activeOpacity={0.85}
+                        testID="no-drivers-refresh-button"
+                      >
+                        <Text style={styles.noDriversHintSecondaryText}>Tekrar Tara</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.noDriversHintPrimaryButton}
+                        onPress={handleOpenScheduledRide}
+                        activeOpacity={0.85}
+                        testID="no-drivers-scheduled-button"
+                      >
+                        <Text style={styles.noDriversHintPrimaryText}>Planlı Yolculuk</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+
                 <TouchableOpacity
                   style={[
                     styles.confirmButton,
                     paymentMethod === 'cash' && styles.confirmButtonCash,
-                    showRideStartSearchingState && styles.confirmButtonSearching,
+                    showNoAvailableDriversHint && styles.confirmButtonSearching,
                     styles.routePickerConfirmButton,
                     !selectedDest && styles.confirmButtonDisabled,
                   ]}
@@ -7191,6 +7245,63 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: '#2ECC71',
+  },
+  noDriversHintCard: {
+    backgroundColor: '#FFF7ED',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(180,83,9,0.18)',
+    padding: 14,
+    marginBottom: 14,
+    gap: 10,
+  },
+  noDriversHintHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 8,
+  },
+  noDriversHintTitle: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '800' as const,
+    color: '#9A3412',
+  },
+  noDriversHintText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#9A3412',
+  },
+  noDriversHintActions: {
+    flexDirection: 'row' as const,
+    gap: 10,
+  },
+  noDriversHintPrimaryButton: {
+    flex: 1,
+    backgroundColor: '#1A1A2E',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  noDriversHintPrimaryText: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+    color: '#FFFFFF',
+  },
+  noDriversHintSecondaryButton: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(154,52,18,0.18)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  noDriversHintSecondaryText: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+    color: '#9A3412',
   },
   pricingInfoNew: {
     backgroundColor: '#F8F8F8',

@@ -62,6 +62,22 @@ function buildForbiddenDriverResponse(message = 'Bu işlem için yetkiniz yok') 
   return { success: false, error: message };
 }
 
+function normalizeDriverCategory(driverCategory?: string): NonNullable<Ride['requestedDriverCategory']> {
+  if (driverCategory === 'scooter' || driverCategory === 'courier') {
+    return driverCategory;
+  }
+
+  return 'driver';
+}
+
+function matchesRequestedDriverCategory(driverCategory: string | undefined, requestedCategory?: Ride['requestedDriverCategory']): boolean {
+  if (!requestedCategory) {
+    return true;
+  }
+
+  return normalizeDriverCategory(driverCategory) === requestedCategory;
+}
+
 export const driversRouter = createTRPCRouter({
   updateLocation: protectedProcedure
     .input(
@@ -127,11 +143,17 @@ export const driversRouter = createTRPCRouter({
     }),
 
   getOnlineByCity: protectedProcedure
-    .input(z.object({ city: z.string() }))
+    .input(z.object({
+      city: z.string(),
+      requestedDriverCategory: z.enum(["driver", "scooter", "courier"]).optional(),
+    }))
     .query(({ input }) => {
       const drivers = db.drivers.getOnlineByCity(input.city)
-        .filter((driver) => !db.rides.getActiveByDriver(driver.id));
-      console.log('[DRIVERS] getOnlineByCity available drivers:', input.city, 'count:', drivers.length);
+        .filter((driver) => !db.rides.getActiveByDriver(driver.id))
+        .filter((driver) => driver.isApproved !== false)
+        .filter((driver) => !driver.isSuspended)
+        .filter((driver) => matchesRequestedDriverCategory(driver.driverCategory, input.requestedDriverCategory));
+      console.log('[DRIVERS] getOnlineByCity available drivers:', input.city, 'category:', input.requestedDriverCategory ?? 'all', 'count:', drivers.length);
       return drivers.map(d => {
         const loc = db.driverLocations.get(d.id);
         return {
