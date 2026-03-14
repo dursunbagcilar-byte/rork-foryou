@@ -45,6 +45,9 @@ import { androidTextFix, crossPlatformShadow, keyboardAvoidingBehavior, keyboard
 
 const GOOGLE_API_KEY = getGoogleMapsApiKey();
 const DIRECTIONS_API_URL = getDirectionsApiUrl();
+const DEFAULT_DRIVER_SEARCH_STATUS = 'Yakınlarınızdaki şoförler kontrol ediliyor';
+
+type DriverSearchPanelState = 'searching' | 'no_drivers';
 
 if (Platform.OS === 'web') {
   logMapsKeyStatus();
@@ -241,7 +244,8 @@ export default function CustomerHomeScreen() {
   const [rideRequested, setRideRequested] = useState<boolean>(false);
   const [findingDriver, setFindingDriver] = useState<boolean>(false);
   const [driverFound, setDriverFound] = useState<boolean>(false);
-  const [driverSearchStatus, setDriverSearchStatus] = useState<string>('Yakınlarınızdaki şoförler kontrol ediliyor');
+  const [driverSearchStatus, setDriverSearchStatus] = useState<string>(DEFAULT_DRIVER_SEARCH_STATUS);
+  const [driverSearchPanelState, setDriverSearchPanelState] = useState<DriverSearchPanelState>('searching');
   const [promoInput, setPromoInput] = useState<string>('');
   const [showPromo, setShowPromo] = useState<boolean>(false);
   const [ridePrice, setRidePrice] = useState<number>(0);
@@ -338,6 +342,44 @@ export default function CustomerHomeScreen() {
 
   const onPromoSectionLayout = useCallback((_e: { nativeEvent: { layout: { y: number } } }) => {
   }, []);
+
+  const toggleSearch = useCallback((open: boolean) => {
+    if (open) {
+      panelAnim.setValue(1);
+      setIsSearching(true);
+    } else {
+      panelAnim.setValue(0);
+      setIsSearching(false);
+    }
+  }, [panelAnim]);
+
+  const showNoDriverAvailabilityPanel = useCallback((message: string) => {
+    console.log('[Customer] Showing no-driver availability panel:', message);
+    setCurrentBackendRideId(null);
+    setRideRequested(true);
+    setFindingDriver(false);
+    setDriverFound(false);
+    setTripStarted(false);
+    setTripCompleted(false);
+    setDriverArrived(false);
+    setCustomerConfirmedArrival(false);
+    setDriverLocation(null);
+    setDriverEta(0);
+    setDriverRoutePath([]);
+    setDriverSearchPanelState('no_drivers');
+    setDriverSearchStatus(message);
+    toggleSearch(false);
+  }, [toggleSearch]);
+
+  const dismissDriverAvailabilityPanel = useCallback(() => {
+    console.log('[Customer] Dismissing no-driver availability panel and returning to route picker');
+    setRideRequested(false);
+    setFindingDriver(false);
+    setDriverFound(false);
+    setDriverSearchPanelState('searching');
+    setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
+    toggleSearch(true);
+  }, [toggleSearch]);
 
   const vehicleEmoji = useMemo(() => {
     switch (selectedVehiclePackage) {
@@ -522,6 +564,8 @@ export default function CustomerHomeScreen() {
     : `${noDriversHintScopeLabel} için şu anda çevrimiçi ve müsait bir şoför görünmüyor. Yine de talep oluşturabilirsiniz; sistem sıraya alma ve alternatif müsaitliği kontrol etmeyi sürdürür.`;
   const noDriversHintAvailabilityValue = onlineDriversQuery.isError ? '—' : '0';
   const noDriversHintRefreshActionLabel = isLiveAvailabilityRefreshing ? 'Yenileniyor...' : 'Tekrar Tara';
+  const isDriverUnavailablePanel = driverSearchPanelState === 'no_drivers';
+  const shouldShowDriverSearchStatusPanel = rideRequested && (findingDriver || isDriverUnavailablePanel) && !reassigning;
 
   useEffect(() => {
     return () => {
@@ -1165,6 +1209,7 @@ export default function CustomerHomeScreen() {
       setTripCompleted(false);
       setDriverArrived(false);
       setCustomerConfirmedArrival(false);
+      setDriverSearchPanelState('searching');
       if (ride.queuedForDriverId && !ride.driverId) {
         const queuedDriverLabel = ride.queuedForDriverName?.trim() || 'Şoför';
         const queuedEta = typeof ride.queuedEstimatedAvailabilityMinutes === 'number' && ride.queuedEstimatedAvailabilityMinutes > 0
@@ -1224,15 +1269,22 @@ export default function CustomerHomeScreen() {
       if (cancellationHandledRideIdRef.current !== ride.id) {
         cancellationHandledRideIdRef.current = ride.id;
         console.log('[Customer] Backend cancelled ride detected:', ride.id, ride.cancelReason ?? 'no_reason');
-        Alert.alert(
-          'Yolculuk İptal Edildi',
-          ride.cancelReason ? `Sebep: ${ride.cancelReason}` : 'Yolculuğunuz iptal edildi.'
-        );
-        resetRideStatesRef.current?.();
+        const normalizedCancelReason = ride.cancelReason?.toLocaleLowerCase('tr-TR') ?? '';
+        const shouldShowNoDriverPanel = normalizedCancelReason.includes('şoför bulunamadı');
+
+        if (shouldShowNoDriverPanel) {
+          showNoDriverAvailabilityPanel('Müsait şoför bulunamadı. Lütfen tekrar deneyin.');
+        } else {
+          Alert.alert(
+            'Yolculuk İptal Edildi',
+            ride.cancelReason ? `Sebep: ${ride.cancelReason}` : 'Yolculuğunuz iptal edildi.'
+          );
+          resetRideStatesRef.current?.();
+        }
       }
       lastBackendRideStatusRef.current = ride.status;
     }
-  }, [backendObservedRide, tripCompleted, showReceiptModal, showRatingModal]);
+  }, [backendObservedRide, tripCompleted, showReceiptModal, showRatingModal, showNoDriverAvailabilityPanel]);
 
   useEffect(() => {
     if (backendObservedRide?.status !== 'in_progress') {
@@ -1409,7 +1461,8 @@ export default function CustomerHomeScreen() {
     setShowAlternativeSuggestion(false);
     setDriverArrived(false);
     setDriverApproaching(false);
-    setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
+    setDriverSearchPanelState('searching');
+    setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
   }, []);
 
   const prepareRideRecoveryState = useCallback((cancelledDriverShortName: string) => {
@@ -1430,6 +1483,7 @@ export default function CustomerHomeScreen() {
     setShowAlternativeSuggestion(false);
     setDriverArrived(false);
     setDriverApproaching(false);
+    setDriverSearchPanelState('searching');
     setCustomerConfirmedArrival(false);
     setTripStarted(false);
     setTripRoutePath([]);
@@ -1437,7 +1491,7 @@ export default function CustomerHomeScreen() {
     setRidePickupOverride(null);
     setTripEta(0);
     setTripCompleted(false);
-    setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
+    setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
     setReassignRecoveryDriverName(cancelledDriverShortName);
     setShowReassignRecoveryCard(true);
     panelAnim.setValue(1);
@@ -1564,16 +1618,6 @@ export default function CustomerHomeScreen() {
       }, 400);
     }
   }, [driverFound, driverArrived, tripStarted, driverLocationPollQuery.data, mapRegion.latitude, mapRegion.longitude, currentDriver?.id]);
-
-  const toggleSearch = useCallback((open: boolean) => {
-    if (open) {
-      panelAnim.setValue(1);
-      setIsSearching(true);
-    } else {
-      panelAnim.setValue(0);
-      setIsSearching(false);
-    }
-  }, [panelAnim]);
 
   const selectDestination = useCallback(async (dest: DestinationOption) => {
     setDestination(dest.name);
@@ -1807,7 +1851,7 @@ export default function CustomerHomeScreen() {
             setCurrentBackendRideId(null);
             setRideRequested(false);
             setFindingDriver(false);
-            setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
+            setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
             Alert.alert('Sıraya Alınamadı', queuedError);
             return;
           }
@@ -1839,7 +1883,7 @@ export default function CustomerHomeScreen() {
           setCurrentBackendRideId(null);
           setRideRequested(false);
           setFindingDriver(false);
-          setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
+          setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
           const queueErrorMessage = queueError instanceof Error ? queueError.message : 'Sıra talebi şu an oluşturulamadı. Lütfen tekrar deneyin.';
           Alert.alert('Sıraya Alınamadı', queueErrorMessage);
         }
@@ -1850,7 +1894,8 @@ export default function CustomerHomeScreen() {
       setFindingDriver(true);
       setDriverFound(false);
       setTripStarted(false);
-      setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
+      setDriverSearchPanelState('searching');
+      setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
       toggleSearch(false);
 
       const result = await createRideMutation.mutateAsync(rideRequestPayload);
@@ -1869,14 +1914,16 @@ export default function CustomerHomeScreen() {
           : null;
 
         setCurrentBackendRideId(null);
-        setRideRequested(false);
-        setFindingDriver(false);
-        setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
+        setDriverSearchPanelState('searching');
 
         if (availabilityState === 'no_registered_district_drivers') {
-          Alert.alert('Şoför Bulunamadı', 'Şu an ilçenizde kayıtlı şoför yok.');
+          showNoDriverAvailabilityPanel('Şu an ilçenizde kayıtlı şoför yok.');
           return;
         }
+
+        setRideRequested(false);
+        setFindingDriver(false);
+        setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
 
         if (queueAvailable) {
           const busyDriverMessage = estimatedAvailabilityMinutes && estimatedAvailabilityMinutes > 0
@@ -1928,7 +1975,7 @@ export default function CustomerHomeScreen() {
             ? `${notifiedDriversCount} müsait şoföre talebiniz gönderildi`
             : availableDriversCount > 0
               ? 'En yakın müsait şoföre talebiniz gönderildi'
-              : 'Yakınlarınızdaki şoförler kontrol ediliyor';
+              : DEFAULT_DRIVER_SEARCH_STATUS;
 
       lastBackendRideStatusRef.current = result.ride.status;
       completionHandledRideIdRef.current = null;
@@ -1946,14 +1993,14 @@ export default function CustomerHomeScreen() {
       setCurrentBackendRideId(null);
       setRideRequested(false);
       setFindingDriver(false);
-      setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
+      setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
       const errorMessage = err instanceof Error ? err.message : 'Yolculuk talebi şu an oluşturulamadı. Lütfen tekrar deneyin.';
       Alert.alert('Yolculuk Başlatılamadı', errorMessage);
       return;
     }
 
     console.log(`Ride requested: ${destination}, Free: ${free}, Payment: ${paymentMethod}, Price: ₺${free ? 0 : ridePrice}, ForOther: ${rideForOtherEnabled}`);
-  }, [destination, selectedDest, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, createQueuedRideMutation, mapRegion.latitude, mapRegion.longitude, rideForOtherDraft, selectedVehiclePackage, ensureServerSession]);
+  }, [destination, selectedDest, toggleSearch, isFreeRide, ridePrice, rideDistance, rideDuration, paymentMethod, user, initializePaymentMutation, isVehicleWeatherRestricted, createRideMutation, createQueuedRideMutation, mapRegion.latitude, mapRegion.longitude, rideForOtherDraft, selectedVehiclePackage, ensureServerSession, showNoDriverAvailabilityPanel]);
 
   const handleCompleteRide = useCallback(async () => {
     if (currentBackendRideId) {
@@ -2156,6 +2203,7 @@ export default function CustomerHomeScreen() {
     setTripEta(0);
     setTripCompleted(false);
     setCustomerConfirmedArrival(false);
+    setDriverSearchPanelState('searching');
     tripPathRef.current = [];
     tripPathIndexRef.current = 0;
     if (trackingIntervalRef.current) {
@@ -2168,7 +2216,7 @@ export default function CustomerHomeScreen() {
     }
     setCurrentDriver(null);
     setPreviousDriverIds([]);
-    setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
+    setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
     setCurrentBackendRideId(null);
     setActiveRideRecipient(null);
     setActiveRideForOther(false);
@@ -3835,17 +3883,34 @@ export default function CustomerHomeScreen() {
             </SafeAreaView>
           </KeyboardAvoidingView>
         )}
-        {rideRequested && findingDriver && !reassigning && (
+        {shouldShowDriverSearchStatusPanel && (
           <View style={[styles.statusPanel, styles.statusPanelSearching]} testID="driver-search-status-panel">
-            <ActivityIndicator size="large" color="#FFFFFF" />
-            <Text style={[styles.statusTitle, styles.statusTitleSearching]} testID="driver-search-status-title">Şoför aranıyor</Text>
-            <Text style={[styles.statusSub, styles.statusSubSearching]} testID="driver-search-status-subtitle">{driverSearchStatus}</Text>
+            {isDriverUnavailablePanel ? (
+              <View style={styles.statusSearchAlertIcon} testID="driver-search-status-warning-icon">
+                <AlertTriangle size={24} color="#FFFFFF" />
+              </View>
+            ) : (
+              <ActivityIndicator size="large" color="#FFFFFF" />
+            )}
+            <Text style={[styles.statusTitle, styles.statusTitleSearching]} testID="driver-search-status-title">
+              {isDriverUnavailablePanel ? 'Şoför bulunamadı' : 'Şoför aranıyor'}
+            </Text>
+            {isDriverUnavailablePanel ? (
+              <View style={styles.statusSearchMessageCard} testID="driver-search-status-warning-card">
+                <Text style={styles.statusSearchMessageCardText} testID="driver-search-status-subtitle">{driverSearchStatus}</Text>
+              </View>
+            ) : (
+              <Text style={[styles.statusSub, styles.statusSubSearching]} testID="driver-search-status-subtitle">{driverSearchStatus}</Text>
+            )}
             <TouchableOpacity
               style={[styles.cancelButton, styles.cancelButtonSearching]}
-              onPress={handleCancelRide}
+              onPress={isDriverUnavailablePanel ? dismissDriverAvailabilityPanel : handleCancelRide}
               testID="driver-search-cancel-button"
+              activeOpacity={0.85}
             >
-              <Text style={[styles.cancelButtonText, styles.cancelButtonTextSearching]}>İptal Et</Text>
+              <Text style={[styles.cancelButtonText, styles.cancelButtonTextSearching]}>
+                {isDriverUnavailablePanel ? 'Tamam' : 'İptal Et'}
+              </Text>
             </TouchableOpacity>
           </View>
         )}
@@ -5439,6 +5504,33 @@ const styles = StyleSheet.create({
   },
   statusSubSearching: {
     color: 'rgba(255,255,255,0.9)',
+  },
+  statusSearchAlertIcon: {
+    width: 68,
+    height: 68,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  statusSearchMessageCard: {
+    marginTop: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    width: '100%' as const,
+  },
+  statusSearchMessageCardText: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: '#FFFFFF',
+    textAlign: 'center' as const,
+    fontWeight: '600' as const,
   },
   altSuggestionIcon: {
     width: 72,
