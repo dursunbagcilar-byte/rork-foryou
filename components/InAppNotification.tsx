@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, Animated, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, Animated, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { X, Bell, CheckCircle, AlertTriangle, Info } from 'lucide-react-native';
+import { X, Bell, CheckCircle, AlertTriangle } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import { androidTextFix, crossPlatformShadow } from '@/utils/platform';
 
 export type NotificationType = 'info' | 'success' | 'warning' | 'error';
 
@@ -73,7 +74,7 @@ export default function InAppNotification({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [visible]);
+  }, [dismiss, duration, opacity, translateY, visible]);
 
   if (!visible) return null;
 
@@ -118,11 +119,13 @@ const styles = StyleSheet.create({
     zIndex: 9999,
     borderRadius: 16,
     borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 12,
+    ...crossPlatformShadow({
+      color: '#000',
+      offsetY: 8,
+      opacity: 0.3,
+      radius: 16,
+      elevation: 12,
+    }),
   },
   content: {
     flexDirection: 'row' as const,
@@ -145,11 +148,13 @@ const styles = StyleSheet.create({
     fontWeight: '700' as const,
     color: '#FFFFFF',
     marginBottom: 2,
+    ...androidTextFix({ fontWeight: '700' }),
   },
   message: {
     fontSize: 12,
     color: 'rgba(255,255,255,0.65)',
     lineHeight: 17,
+    ...androidTextFix({ lineHeight: 17 }),
   },
   closeBtn: {
     width: 28,

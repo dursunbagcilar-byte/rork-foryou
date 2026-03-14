@@ -1,6 +1,7 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Colors } from '@/constants/colors';
+import { androidTextFix, crossPlatformShadow } from '@/utils/platform';
 
 interface Props {
   children: ReactNode;
@@ -82,6 +83,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.dark.cardBorder,
     width: '100%',
+    ...crossPlatformShadow({
+      color: '#000',
+      offsetY: 12,
+      opacity: 0.18,
+      radius: 20,
+      elevation: 10,
+    }),
   },
   emoji: {
     fontSize: 48,
@@ -92,6 +100,7 @@ const styles = StyleSheet.create({
     fontWeight: '700' as const,
     color: Colors.dark.text,
     marginBottom: 8,
+    ...androidTextFix({ fontWeight: '700' }),
   },
   message: {
     fontSize: 14,
@@ -99,6 +108,7 @@ const styles = StyleSheet.create({
     textAlign: 'center' as const,
     lineHeight: 20,
     marginBottom: 16,
+    ...androidTextFix({ lineHeight: 20 }),
   },
   errorDetail: {
     fontSize: 12,
@@ -109,16 +119,25 @@ const styles = StyleSheet.create({
     width: '100%',
     marginBottom: 20,
     overflow: 'hidden' as const,
+    ...androidTextFix({ lineHeight: 18 }),
   },
   retryButton: {
     backgroundColor: Colors.dark.primary,
     paddingVertical: 14,
     paddingHorizontal: 40,
     borderRadius: 14,
+    ...crossPlatformShadow({
+      color: Colors.dark.primary,
+      offsetY: 8,
+      opacity: 0.24,
+      radius: 14,
+      elevation: 6,
+    }),
   },
   retryText: {
     fontSize: 16,
     fontWeight: '700' as const,
     color: Colors.dark.background,
+    ...androidTextFix({ fontWeight: '700' }),
   },
 });

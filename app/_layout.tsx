@@ -18,6 +18,7 @@ import InAppNotification from "@/components/InAppNotification";
 import { Colors } from "@/constants/colors";
 import { trpc, trpcClient, resetCircuitBreaker } from "@/lib/trpc";
 import { getDbBootstrapPayload, getDbHeaders, hasDbConfig } from "@/utils/db";
+import { androidTextFix, crossPlatformShadow } from "@/utils/platform";
 
 try {
   WebBrowser.maybeCompleteAuthSession();
@@ -142,11 +143,11 @@ const crashStyles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   emoji: { fontSize: 48, marginBottom: 16 },
-  title: { fontSize: 22, fontWeight: '700' as const, color: Colors.dark.text, marginBottom: 8 },
-  message: { fontSize: 14, color: Colors.dark.textSecondary, textAlign: 'center' as const, marginBottom: 16 },
-  detail: { fontSize: 12, color: Colors.dark.textMuted, backgroundColor: Colors.dark.card, padding: 12, borderRadius: 10, width: '100%', marginBottom: 20, overflow: 'hidden' as const },
-  button: { backgroundColor: Colors.dark.primary, paddingVertical: 14, paddingHorizontal: 40, borderRadius: 14 },
-  buttonText: { fontSize: 16, fontWeight: '700' as const, color: Colors.dark.background },
+  title: { fontSize: 22, fontWeight: '700' as const, color: Colors.dark.text, marginBottom: 8, ...androidTextFix({ fontWeight: '700' }) },
+  message: { fontSize: 14, color: Colors.dark.textSecondary, textAlign: 'center' as const, marginBottom: 16, ...androidTextFix({ lineHeight: 20 }) },
+  detail: { fontSize: 12, color: Colors.dark.textMuted, backgroundColor: Colors.dark.card, padding: 12, borderRadius: 10, width: '100%', marginBottom: 20, overflow: 'hidden' as const, ...androidTextFix({ lineHeight: 18 }) },
+  button: { backgroundColor: Colors.dark.primary, paddingVertical: 14, paddingHorizontal: 40, borderRadius: 14, ...crossPlatformShadow({ color: Colors.dark.primary, offsetY: 8, opacity: 0.24, radius: 14, elevation: 6 }) },
+  buttonText: { fontSize: 16, fontWeight: '700' as const, color: Colors.dark.background, ...androidTextFix({ fontWeight: '700' }) },
 });
 
 const bootStyles = StyleSheet.create({

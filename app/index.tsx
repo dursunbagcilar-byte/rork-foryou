@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/colors';
 import { APP_BRAND } from '@/constants/branding';
 import { useAuth } from '@/contexts/AuthContext';
+import { androidTextFix, crossPlatformShadow } from '@/utils/platform';
 
 const ONBOARDING_KEY = 'onboarding_completed';
 
@@ -185,9 +186,23 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(245,166,35,0.12)',
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
+    ...crossPlatformShadow({
+      color: Colors.dark.primary,
+      offsetY: 6,
+      opacity: 0.14,
+      radius: 12,
+      elevation: 4,
+    }),
   },
   iconBubbleAccent: {
     backgroundColor: Colors.dark.primary,
+    ...crossPlatformShadow({
+      color: Colors.dark.primary,
+      offsetY: 10,
+      opacity: 0.28,
+      radius: 16,
+      elevation: 8,
+    }),
   },
   iconConnector: {
     height: 2,
@@ -198,16 +213,19 @@ const styles = StyleSheet.create({
     fontWeight: '800' as const,
     color: Colors.dark.text,
     letterSpacing: -1,
+    ...androidTextFix({ fontWeight: '800' }),
   },
   tagline: {
     color: Colors.dark.primary,
     fontWeight: '600' as const,
     marginTop: 4,
+    ...androidTextFix({ fontWeight: '600' }),
   },
   description: {
     color: Colors.dark.textSecondary,
     lineHeight: 22,
     marginTop: 16,
+    ...androidTextFix({ lineHeight: 22 }),
   },
   bottomSection: {
     paddingBottom: 16,
@@ -219,10 +237,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
     gap: 8,
+    ...crossPlatformShadow({
+      color: Colors.dark.primary,
+      offsetY: 10,
+      opacity: 0.26,
+      radius: 16,
+      elevation: 8,
+    }),
   },
   primaryButtonText: {
     fontWeight: '700' as const,
     color: Colors.dark.background,
+    ...androidTextFix({ fontWeight: '700' }),
   },
   registerRow: {
     flexDirection: 'row' as const,
@@ -233,6 +259,7 @@ const styles = StyleSheet.create({
   registerButtonText: {
     color: Colors.dark.textSecondary,
     fontWeight: '600' as const,
+    ...androidTextFix({ fontWeight: '600' }),
   },
   registerDivider: {
     width: 1,
@@ -250,11 +277,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.dark.cardBorder,
     backgroundColor: 'rgba(255,255,255,0.03)',
+    ...crossPlatformShadow({
+      color: '#000',
+      offsetY: 6,
+      opacity: 0.12,
+      radius: 10,
+      elevation: 4,
+    }),
   },
   statusButtonText: {
     color: Colors.dark.primary,
     fontSize: 13,
     fontWeight: '700' as const,
+    ...androidTextFix({ fontWeight: '700' }),
   },
 
 });
