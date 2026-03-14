@@ -1,4 +1,4 @@
-import { Platform, ViewStyle, TextStyle } from 'react-native';
+import { Platform, ViewStyle, TextStyle, StatusBarStyle } from 'react-native';
 
 interface AndroidTextFixOptions {
   lineHeight?: number;
@@ -65,4 +65,25 @@ export function keyboardVerticalOffset(): number {
   if (Platform.OS === 'ios') return 0;
   if (Platform.OS === 'android') return 24;
   return 0;
+}
+
+interface StatusBarConfigOptions {
+  backgroundColor: string;
+  isDark: boolean;
+}
+
+interface StatusBarConfig {
+  animated: boolean;
+  barStyle: StatusBarStyle;
+  backgroundColor: string;
+  translucent: boolean;
+}
+
+export function getStatusBarConfig({ backgroundColor, isDark }: StatusBarConfigOptions): StatusBarConfig {
+  return {
+    animated: true,
+    barStyle: isDark ? 'light-content' : 'dark-content',
+    backgroundColor,
+    translucent: false,
+  };
 }

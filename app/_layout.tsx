@@ -18,7 +18,7 @@ import InAppNotification from "@/components/InAppNotification";
 import { Colors } from "@/constants/colors";
 import { trpc, trpcClient, resetCircuitBreaker } from "@/lib/trpc";
 import { getDbBootstrapPayload, getDbHeaders, hasDbConfig } from "@/utils/db";
-import { androidTextFix, crossPlatformShadow } from "@/utils/platform";
+import { androidTextFix, crossPlatformShadow, getStatusBarConfig } from "@/utils/platform";
 
 try {
   WebBrowser.maybeCompleteAuthSession();
@@ -81,14 +81,14 @@ function RootLayoutNav() {
     });
   }, [colors.background, isDark]);
 
+  const statusBarConfig = getStatusBarConfig({
+    backgroundColor: colors.background,
+    isDark,
+  });
+
   return (
     <>
-      <StatusBar
-        animated
-        barStyle={isDark ? 'light-content' : 'dark-content'}
-        backgroundColor={colors.background}
-        translucent={Platform.OS === 'android'}
-      />
+      <StatusBar {...statusBarConfig} />
       <Stack
       screenOptions={{
         headerShown: false,
