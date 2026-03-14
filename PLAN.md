@@ -14,6 +14,7 @@
 - [x] Uyarılar kısa, net ve güven veren bir dille gösterilecek.
 - [x] **Şoför aranıyor** ekranı kararsız görünmeyecek; tek bir sabit durum akışıyla daha profesyonel hissettirecek.
 - [x] İlçede uygun şoför bulunamadığında uyarı ayrı bir alert yerine yeşil arama panelinin içinde gösterilecek.
+- [x] Rota seçim ekranındaki ayrı canlı müsaitlik kartı kaldırılacak; akış yalnızca yeşil arama paneli üzerinden ilerleyecek.
 - [x] Tahmini bekleme süresi uyarının içinde öne çıkarılarak müşterinin hemen anlaması sağlanacak.
 - [x] Sıra teklifi tek ekranda, kolay anlaşılır iki seçimle sunulacak.
 
