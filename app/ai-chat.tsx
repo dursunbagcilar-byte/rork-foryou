@@ -7,7 +7,6 @@ import {
   TextInput,
   FlatList,
   KeyboardAvoidingView,
-  Platform,
   Animated,
   ActivityIndicator,
 } from 'react-native';
@@ -18,6 +17,7 @@ import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRorkAgent, createRorkTool } from '@rork-ai/toolkit-sdk';
 import { z } from 'zod';
+import { keyboardAvoidingBehavior, keyboardVerticalOffset } from '@/utils/platform';
 
 const QUICK_PROMPTS_CUSTOMER = [
   'En yakın restoran nerede?',
@@ -259,8 +259,8 @@ export default function AIChatScreen() {
 
         <KeyboardAvoidingView
           style={styles.chatArea}
-          behavior="padding"
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+          behavior={keyboardAvoidingBehavior()}
+          keyboardVerticalOffset={keyboardVerticalOffset()}
         >
           <FlatList
             ref={flatListRef}

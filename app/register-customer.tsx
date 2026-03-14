@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
-  KeyboardAvoidingView, Platform, ScrollView, Alert, Modal, FlatList, useWindowDimensions,
+  KeyboardAvoidingView, ScrollView, Alert, Modal, FlatList, useWindowDimensions,
   ActivityIndicator, Keyboard,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -15,6 +15,7 @@ import { usePrivacy } from '@/contexts/PrivacyContext';
 import { VerificationCodeModal } from '@/components/VerificationCodeModal';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 import { sendRegistrationVerificationCode, type VerificationSmsProvider, verifyRegistrationVerificationCode } from '@/utils/authVerification';
+import { keyboardAvoidingBehavior, keyboardVerticalOffset } from '@/utils/platform';
 
 interface VerifiedContactSnapshot {
   email: string;
@@ -273,7 +274,7 @@ export default function RegisterCustomerScreen() {
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <KeyboardAvoidingView behavior="padding" style={styles.flex} keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}>
+        <KeyboardAvoidingView behavior={keyboardAvoidingBehavior()} style={styles.flex} keyboardVerticalOffset={keyboardVerticalOffset()}>
           <ScrollView contentContainerStyle={[styles.scrollContent, { paddingHorizontal: hPad, maxWidth: isTablet ? 520 : undefined, alignSelf: isTablet ? 'center' as const : undefined, width: isTablet ? '100%' as unknown as number : undefined }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={styles.headerRow}>
               <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -444,7 +445,7 @@ export default function RegisterCustomerScreen() {
 
       <Modal visible={showCityPicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView behavior="padding" style={styles.modalContent}>
+          <KeyboardAvoidingView behavior={keyboardAvoidingBehavior()} style={styles.modalContent} keyboardVerticalOffset={keyboardVerticalOffset()}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>İl Seçin</Text>
               <TouchableOpacity onPress={() => { setShowCityPicker(false); setCitySearch(''); }}>
@@ -486,7 +487,7 @@ export default function RegisterCustomerScreen() {
       </Modal>
       <Modal visible={showDistrictPicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView behavior="padding" style={styles.modalContent}>
+          <KeyboardAvoidingView behavior={keyboardAvoidingBehavior()} style={styles.modalContent} keyboardVerticalOffset={keyboardVerticalOffset()}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{selectedCity} - İlçe Seçin</Text>
               <TouchableOpacity onPress={() => { setShowDistrictPicker(false); setDistrictSearch(''); }}>

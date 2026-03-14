@@ -20,6 +20,7 @@ import { getDbHeaders } from '@/utils/db';
 import { VerificationCodeModal } from '@/components/VerificationCodeModal';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 import { sendRegistrationVerificationCode, type VerificationSmsProvider, verifyRegistrationVerificationCode } from '@/utils/authVerification';
+import { keyboardAvoidingBehavior, keyboardVerticalOffset } from '@/utils/platform';
 
 type DriverCategory = 'driver' | 'scooter' | 'courier';
 type RegistrationCategory = DriverCategory | 'business';
@@ -764,7 +765,7 @@ export default function RegisterDriverScreen() {
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <KeyboardAvoidingView behavior="padding" style={styles.flex} keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}>
+        <KeyboardAvoidingView behavior={keyboardAvoidingBehavior()} style={styles.flex} keyboardVerticalOffset={keyboardVerticalOffset()}>
           <ScrollView contentContainerStyle={[styles.scrollContent, { paddingHorizontal: hPad, maxWidth: isTablet ? 520 : undefined, alignSelf: isTablet ? 'center' as const : undefined, width: isTablet ? '100%' as unknown as number : undefined }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={styles.headerRow}>
               <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -1439,7 +1440,7 @@ export default function RegisterDriverScreen() {
 
       <Modal visible={showCityPicker} animationType="slide" transparent={true}>
         <TouchableOpacity style={styles.modalOverlay} onPress={() => { setShowCityPicker(false); setCitySearch(''); }} activeOpacity={1}>
-          <KeyboardAvoidingView behavior="padding" style={styles.modalContent} onStartShouldSetResponder={() => true}>
+          <KeyboardAvoidingView behavior={keyboardAvoidingBehavior()} style={styles.modalContent} keyboardVerticalOffset={keyboardVerticalOffset()} onStartShouldSetResponder={() => true}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>İl Seçin</Text>
               <TouchableOpacity onPress={() => { setShowCityPicker(false); setCitySearch(''); }}>
@@ -1481,7 +1482,7 @@ export default function RegisterDriverScreen() {
 
       <Modal visible={showDistrictPicker} animationType="slide" transparent={true}>
         <TouchableOpacity style={styles.modalOverlay} onPress={() => { setShowDistrictPicker(false); setDistrictSearch(''); }} activeOpacity={1}>
-          <KeyboardAvoidingView behavior="padding" style={styles.modalContent} onStartShouldSetResponder={() => true}>
+          <KeyboardAvoidingView behavior={keyboardAvoidingBehavior()} style={styles.modalContent} keyboardVerticalOffset={keyboardVerticalOffset()} onStartShouldSetResponder={() => true}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{selectedCity} - İlçe Seçin</Text>
               <TouchableOpacity onPress={() => { setShowDistrictPicker(false); setDistrictSearch(''); }}>

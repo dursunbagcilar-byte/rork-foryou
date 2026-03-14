@@ -6,9 +6,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, User, Phone, Mail, Lock, UserPlus, Camera, X, CheckCircle2, AlertCircle, Calendar, AlertTriangle, ShieldCheck } from 'lucide-react-native';
+import { ArrowLeft, User, Phone, Mail, Lock, UserPlus, Camera, X, CheckCircle2, AlertCircle, AlertTriangle, ShieldCheck } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Colors } from '@/constants/colors';
+import { keyboardAvoidingBehavior, keyboardVerticalOffset } from '@/utils/platform';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface DocField {
@@ -205,9 +206,9 @@ export default function TeamMemberScreen() {
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <KeyboardAvoidingView
-          behavior="padding"
+          behavior={keyboardAvoidingBehavior()}
           style={styles.flex}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+          keyboardVerticalOffset={keyboardVerticalOffset()}
         >
           <ScrollView
             showsVerticalScrollIndicator={false}

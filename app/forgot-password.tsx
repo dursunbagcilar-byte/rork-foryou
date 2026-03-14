@@ -13,6 +13,7 @@ import { APP_BRAND } from '@/constants/branding';
 import { useAuth } from '@/contexts/AuthContext';
 import { getDbHeaders, getDbRequestConfigPayload } from '@/utils/db';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
+import { keyboardAvoidingBehavior, keyboardVerticalOffset } from '@/utils/platform';
 
 async function resolveApiBase(): Promise<string> {
   let base = getBaseUrl();
@@ -678,9 +679,9 @@ export default function ForgotPasswordScreen() {
       />
       <View style={[styles.bgOverlay, { width, height: imgHeight }]} />
       <KeyboardAvoidingView
-        behavior="padding"
+        behavior={keyboardAvoidingBehavior()}
         style={styles.flex}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+        keyboardVerticalOffset={keyboardVerticalOffset()}
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
         <ScrollView

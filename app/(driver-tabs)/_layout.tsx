@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Tabs } from 'expo-router';
 import { Map, Wallet, User, Clock, ShieldCheck, FileText, X, PartyPopper, CheckCircle2 } from 'lucide-react-native';
-import { View, Text, StyleSheet, Animated, Easing, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, Animated, Easing, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useNotifications } from '@/hooks/useNotifications';
+import { androidTextFix, crossPlatformShadow, isAndroid } from '@/utils/platform';
 import * as Haptics from 'expo-haptics';
 
 function DriverApprovalWaiting({ onDismiss }: { onDismiss: () => void }) {
@@ -384,7 +385,7 @@ export default function DriverTabsLayout() {
 
   useEffect(() => {
     if (user?.id) {
-      scheduleEveningNotifications();
+      void scheduleEveningNotifications();
       console.log('[DriverTabs] Push notifications initialized for driver:', user.id);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -408,21 +409,28 @@ export default function DriverTabsLayout() {
       <Tabs
         screenOptions={{
           headerShown: false,
+          tabBarHideOnKeyboard: true,
           tabBarStyle: {
             backgroundColor: colors.background,
             borderTopColor: colors.cardBorder,
-            borderTopWidth: 1,
-            ...(Platform.OS === 'android' ? {
-              elevation: 8,
-              borderTopWidth: 0,
-            } : {}),
+            borderTopWidth: isAndroid ? 0 : 1,
+            ...crossPlatformShadow({
+              color: '#000',
+              offsetY: -2,
+              opacity: isAndroid ? 0.18 : 0.08,
+              radius: 10,
+              elevation: 12,
+            }),
           },
           tabBarActiveTintColor: colors.primary,
           tabBarInactiveTintColor: colors.textMuted,
+          tabBarItemStyle: {
+            paddingTop: isAndroid ? 4 : 0,
+          },
           tabBarLabelStyle: {
             fontSize: 11,
             fontWeight: '600' as const,
-            ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
+            ...androidTextFix(),
           },
         }}
       >

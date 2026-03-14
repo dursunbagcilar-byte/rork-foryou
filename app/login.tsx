@@ -23,6 +23,7 @@ import { VerificationCodeModal } from '@/components/VerificationCodeModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 import { getClientEnv } from '@/utils/clientEnv';
+import { keyboardAvoidingBehavior, keyboardVerticalOffset } from '@/utils/platform';
 
 type LoginMode = 'customer' | 'driver';
 type QuickAccessProvider = 'google' | 'apple';
@@ -496,9 +497,9 @@ export default function LoginScreen() {
       />
       <View style={[styles.bgOverlay, { width, height: imgHeight }]} />
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={keyboardAvoidingBehavior()}
         style={styles.flex}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+        keyboardVerticalOffset={keyboardVerticalOffset()}
       >
         <ScrollView
           contentContainerStyle={styles.scrollContent}
