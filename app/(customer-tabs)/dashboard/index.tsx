@@ -41,7 +41,7 @@ import { useWeather } from '@/hooks/useWeather';
 import { getGoogleMapsApiKey, getDirectionsApiUrl, getGeocodingUrl, logMapsKeyStatus } from '@/utils/maps';
 import TrendingMusicPlayer from '@/components/TrendingMusicPlayer';
 import { ScalePressable } from '@/components/ScalePressable';
-import { androidTextFix, crossPlatformShadow } from '@/utils/platform';
+import { androidTextFix, crossPlatformShadow, keyboardAvoidingBehavior, keyboardVerticalOffset } from '@/utils/platform';
 
 const GOOGLE_API_KEY = getGoogleMapsApiKey();
 const DIRECTIONS_API_URL = getDirectionsApiUrl();
@@ -304,6 +304,8 @@ export default function CustomerHomeScreen() {
   const [currentDriver, setCurrentDriver] = useState<MockDriverInfo | null>(null);
   const [previousDriverIds, setPreviousDriverIds] = useState<string[]>([]);
   const [reassigning, setReassigning] = useState<boolean>(false);
+  const [showReassignRecoveryCard, setShowReassignRecoveryCard] = useState<boolean>(false);
+  const [reassignRecoveryDriverName, setReassignRecoveryDriverName] = useState<string>('Şoför');
   const [showCancelReasonModal, setShowCancelReasonModal] = useState<boolean>(false);
   const [selectedCancelReason, setSelectedCancelReason] = useState<string>('');
   const driverCancelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -501,9 +503,16 @@ export default function CustomerHomeScreen() {
   const noDriversHintScopeLabel = user?.district
     ? `${user.district}, ${user.city}`
     : user?.city ?? 'bulunduğunuz bölge';
-  const noDriversHintStatusLabel = onlineDriversQuery.isFetching
-    ? 'Canlı tarama sürüyor'
-    : '75 sn içinde otomatik yenilenir';
+  const noDriversHintStatusLabel = onlineDriversQuery.isError
+    ? 'Tarama tamamlanamadı'
+    : onlineDriversQuery.isFetching
+      ? 'Canlı tarama sürüyor'
+      : '75 sn içinde otomatik yenilenir';
+  const noDriversHintMessage = onlineDriversQuery.isError
+    ? `${noDriversHintScopeLabel} için son müsaitlik taraması tamamlanamadı. Tekrar Tara ile yeni sorgu başlatabilir veya talebinizi yine de oluşturabilirsiniz.`
+    : `${noDriversHintScopeLabel} için şu anda çevrimiçi ve müsait bir şoför görünmüyor. Yine de talep oluşturabilirsiniz; sistem sıraya alma ve alternatif müsaitliği kontrol etmeyi sürdürür.`;
+  const noDriversHintAvailabilityValue = onlineDriversQuery.isError ? '—' : '0';
+  const noDriversHintRefreshActionLabel = onlineDriversQuery.isFetching ? 'Yenileniyor...' : 'Tekrar Tara';
 
   const couriersByCityQuery = trpc.drivers.getCouriersByCity.useQuery(
     { city: user?.city ?? '', district: user?.district ?? '' },
@@ -1276,13 +1285,15 @@ export default function CustomerHomeScreen() {
     return assignedDriver;
   }, [selectedDest, mapRegion.latitude, mapRegion.longitude, fetchDriverRoute, densifyPath, user?.city, user?.district]);
 
-  const resetRideSearchState = useCallback(() => {
+  const _resetRideSearchState = useCallback(() => {
     console.log('[Customer] Resetting ride search state to idle');
     setCurrentBackendRideId(null);
     setRideRequested(false);
     setFindingDriver(false);
     setDriverFound(false);
     setReassigning(false);
+    setShowReassignRecoveryCard(false);
+    setReassignRecoveryDriverName('Şoför');
     setDestination('');
     setSelectedDest(null);
     setCurrentRideFree(false);
@@ -1295,8 +1306,41 @@ export default function CustomerHomeScreen() {
     setAlternativeVehicle(null);
     setShowAlternativeSuggestion(false);
     setDriverArrived(false);
+    setDriverApproaching(false);
     setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
   }, []);
+
+  const prepareRideRecoveryState = useCallback((cancelledDriverShortName: string) => {
+    console.log('[Customer] Preparing recovery state after reassignment failure for:', cancelledDriverShortName);
+    setCurrentBackendRideId(null);
+    setRideRequested(false);
+    setFindingDriver(false);
+    setDriverFound(false);
+    setReassigning(false);
+    setCurrentRideFree(false);
+    setCurrentRideRewardSource(null);
+    setDriverLocation(null);
+    setDriverEta(0);
+    setDriverRoutePath([]);
+    setCurrentDriver(null);
+    setPreviousDriverIds([]);
+    setAlternativeVehicle(null);
+    setShowAlternativeSuggestion(false);
+    setDriverArrived(false);
+    setDriverApproaching(false);
+    setCustomerConfirmedArrival(false);
+    setTripStarted(false);
+    setTripRoutePath([]);
+    setTripDriverLocation(null);
+    setRidePickupOverride(null);
+    setTripEta(0);
+    setTripCompleted(false);
+    setDriverSearchStatus('Yakınlarınızdaki şoförler kontrol ediliyor');
+    setReassignRecoveryDriverName(cancelledDriverShortName);
+    setShowReassignRecoveryCard(true);
+    panelAnim.setValue(1);
+    setIsSearching(true);
+  }, [panelAnim]);
 
   const handleDriverCancelled = useCallback(async () => {
     console.log('[Customer] Driver cancelled! Reassigning...');
@@ -1342,35 +1386,12 @@ export default function CustomerHomeScreen() {
           setAlternativeVehicle(alt);
           setShowAlternativeSuggestion(true);
         } else {
-          Alert.alert(
-            'Şu Anda Şoför Bulunamadı',
-            'Yeni bir eşleşme bulunamadı. İsterseniz planlı yolculuk oluşturabilir veya kısa süre sonra yeniden tarayabilirsiniz.',
-            [
-              {
-                text: 'Kapat',
-                style: 'cancel',
-                onPress: resetRideSearchState,
-              },
-              {
-                text: 'Tekrar Tara',
-                onPress: () => {
-                  resetRideSearchState();
-                  void onlineDriversQuery.refetch();
-                },
-              },
-              {
-                text: 'Planlı Yolculuk',
-                onPress: () => {
-                  resetRideSearchState();
-                  router.push('/scheduled-ride' as any);
-                },
-              },
-            ]
-          );
+          prepareRideRecoveryState(cancelledDriverName);
+          console.log('[Customer] No new driver found after cancellation, recovery card opened');
         }
       }
     }, 2500);
-  }, [assignNewDriver, currentDriver, onlineDriversQuery, previousDriverIds, resetRideSearchState, router, selectedVehiclePackage]);
+  }, [assignNewDriver, currentDriver, prepareRideRecoveryState, previousDriverIds, selectedVehiclePackage]);
 
   useEffect(() => {
     return () => {
@@ -1508,17 +1529,35 @@ export default function CustomerHomeScreen() {
     console.log('[RoutePicker] Map selection placeholder pressed');
   }, []);
 
+  const handleDismissReassignRecovery = useCallback(() => {
+    console.log('[Customer] Dismissing reassign recovery card');
+    setShowReassignRecoveryCard(false);
+    setReassignRecoveryDriverName('Şoför');
+  }, []);
+
   const handleRefreshOnlineDrivers = useCallback(() => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    handleDismissReassignRecovery();
     console.log('[Customer] Refreshing requested driver availability:', selectedRequestedDriverCategory);
     void onlineDriversQuery.refetch();
-  }, [onlineDriversQuery, selectedRequestedDriverCategory]);
+  }, [handleDismissReassignRecovery, onlineDriversQuery, selectedRequestedDriverCategory]);
 
   const handleOpenScheduledRide = useCallback(() => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    handleDismissReassignRecovery();
     console.log('[Customer] Opening scheduled ride from no-driver hint');
     router.push('/scheduled-ride' as any);
-  }, [router]);
+  }, [handleDismissReassignRecovery, router]);
+
+  const handleRetryAfterReassignFailure = useCallback(() => {
+    console.log('[Customer] Retrying live availability after reassignment failure');
+    handleRefreshOnlineDrivers();
+  }, [handleRefreshOnlineDrivers]);
+
+  const handleScheduleAfterReassignFailure = useCallback(() => {
+    console.log('[Customer] Opening scheduled ride after reassignment failure');
+    handleOpenScheduledRide();
+  }, [handleOpenScheduledRide]);
 
   const initializePaymentMutation = trpc.payments.initializePayment.useMutation();
   const createRideMutation = trpc.rides.create.useMutation();
@@ -3173,8 +3212,8 @@ export default function CustomerHomeScreen() {
         {isSearching && (
           <KeyboardAvoidingView
             style={styles.routePickerKeyboard}
-            behavior="padding"
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+            behavior={keyboardAvoidingBehavior()}
+            keyboardVerticalOffset={keyboardVerticalOffset()}
           >
             <SafeAreaView style={styles.routePickerSafeArea} edges={['top']}>
               <View style={styles.routePickerSurface}>
@@ -3511,6 +3550,59 @@ export default function CustomerHomeScreen() {
                   )}
                 </ScrollView>
 
+                {showReassignRecoveryCard && (
+                  <View style={styles.reassignRecoveryCard} testID="reassign-recovery-card">
+                    <View style={styles.reassignRecoveryHeader}>
+                      <View style={styles.reassignRecoveryIconWrap}>
+                        <AlertTriangle size={16} color="#991B1B" />
+                      </View>
+                      <View style={styles.reassignRecoveryHeaderContent}>
+                        <Text style={styles.reassignRecoveryEyebrow}>EŞLEŞME YENİLENEMEDİ</Text>
+                        <Text style={styles.reassignRecoveryTitle}>
+                          {reassignRecoveryDriverName} iptal etti, yeni şoför şu an görünmüyor
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.reassignRecoveryCloseButton}
+                        onPress={handleDismissReassignRecovery}
+                        activeOpacity={0.7}
+                        testID="reassign-recovery-close-button"
+                      >
+                        <X size={16} color="#7F1D1D" />
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={styles.reassignRecoveryText}>
+                      Güzergahınız korundu. İsterseniz canlı müsaitliği hemen tekrar tarayın veya bu rota için planlı yolculuk oluşturun.
+                    </Text>
+                    <View style={styles.reassignRecoveryActions}>
+                      <ScalePressable
+                        style={[
+                          styles.reassignRecoverySecondaryButton,
+                          onlineDriversQuery.isFetching && styles.reassignRecoverySecondaryButtonDisabled,
+                        ]}
+                        onPress={handleRetryAfterReassignFailure}
+                        disabled={onlineDriversQuery.isFetching}
+                        testID="reassign-recovery-refresh-button"
+                        accessibilityLabel="Canlı müsaitliği yeniden tara"
+                        accessibilityHint="Mevcut rotanız için hemen yeni bir sürücü taraması başlatır"
+                      >
+                        <Navigation size={14} color="#7F1D1D" />
+                        <Text style={styles.reassignRecoverySecondaryText}>{onlineDriversQuery.isFetching ? 'Yenileniyor...' : 'Tekrar Tara'}</Text>
+                      </ScalePressable>
+                      <ScalePressable
+                        style={styles.reassignRecoveryPrimaryButton}
+                        onPress={handleScheduleAfterReassignFailure}
+                        testID="reassign-recovery-scheduled-button"
+                        accessibilityLabel="Planlı yolculuk oluştur"
+                        accessibilityHint="Bu rota için daha sonrası adına planlı yolculuk açar"
+                      >
+                        <Clock size={14} color="#FFFFFF" />
+                        <Text style={styles.reassignRecoveryPrimaryText}>Planlı Yolculuk</Text>
+                      </ScalePressable>
+                    </View>
+                  </View>
+                )}
+
                 {showNoAvailableDriversHint && (
                   <View style={styles.noDriversHintCard} testID="no-drivers-hint-card">
                     <View style={styles.noDriversHintHeader}>
@@ -3537,11 +3629,11 @@ export default function CustomerHomeScreen() {
                       </View>
                     </View>
                     <Text style={styles.noDriversHintText}>
-                      {noDriversHintScopeLabel} için şu anda çevrimiçi ve müsait bir şoför görünmüyor. Yine de talep oluşturabilirsiniz; sistem sıraya alma ve alternatif müsaitliği kontrol etmeyi sürdürür.
+                      {noDriversHintMessage}
                     </Text>
                     <View style={styles.noDriversHintStats}>
                       <View style={styles.noDriversHintStatItem}>
-                        <Text style={styles.noDriversHintStatValue}>0</Text>
+                        <Text style={styles.noDriversHintStatValue}>{noDriversHintAvailabilityValue}</Text>
                         <Text style={styles.noDriversHintStatLabel}>Şimdi uygun</Text>
                       </View>
                       <View style={styles.noDriversHintStatDivider} />
@@ -3557,14 +3649,18 @@ export default function CustomerHomeScreen() {
                     </View>
                     <View style={styles.noDriversHintActions}>
                       <ScalePressable
-                        style={styles.noDriversHintSecondaryButton}
+                        style={[
+                          styles.noDriversHintSecondaryButton,
+                          onlineDriversQuery.isFetching && styles.noDriversHintSecondaryButtonDisabled,
+                        ]}
                         onPress={handleRefreshOnlineDrivers}
+                        disabled={onlineDriversQuery.isFetching}
                         testID="no-drivers-refresh-button"
                         accessibilityLabel="Şoförleri yeniden tara"
                         accessibilityHint="Müsait sürücü listesini hemen yeniler"
                       >
                         <Navigation size={14} color="#9A3412" />
-                        <Text style={styles.noDriversHintSecondaryText}>Tekrar Tara</Text>
+                        <Text style={styles.noDriversHintSecondaryText}>{noDriversHintRefreshActionLabel}</Text>
                       </ScalePressable>
                       <ScalePressable
                         style={styles.noDriversHintPrimaryButton}
@@ -7325,6 +7421,114 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: '#2ECC71',
   },
+  reassignRecoveryCard: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(185,28,28,0.14)',
+    padding: 16,
+    marginBottom: 14,
+    gap: 12,
+    ...crossPlatformShadow({
+      color: '#991B1B',
+      offsetY: 8,
+      opacity: 0.08,
+      radius: 16,
+      elevation: 4,
+    }),
+  },
+  reassignRecoveryHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    gap: 10,
+  },
+  reassignRecoveryIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: 'rgba(239,68,68,0.12)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  reassignRecoveryHeaderContent: {
+    flex: 1,
+    gap: 2,
+  },
+  reassignRecoveryEyebrow: {
+    fontSize: 10,
+    fontWeight: '800' as const,
+    letterSpacing: 0.9,
+    color: '#B91C1C',
+    ...androidTextFix({ fontWeight: '800' }),
+  },
+  reassignRecoveryTitle: {
+    fontSize: 14,
+    fontWeight: '800' as const,
+    color: '#7F1D1D',
+    ...androidTextFix({ fontWeight: '800' }),
+  },
+  reassignRecoveryCloseButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  reassignRecoveryText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#991B1B',
+    ...androidTextFix({ lineHeight: 19 }),
+  },
+  reassignRecoveryActions: {
+    flexDirection: 'row' as const,
+    gap: 10,
+  },
+  reassignRecoveryPrimaryButton: {
+    flex: 1,
+    backgroundColor: '#1F2937',
+    paddingVertical: 13,
+    borderRadius: 14,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    flexDirection: 'row' as const,
+    gap: 8,
+    ...crossPlatformShadow({
+      color: '#1F2937',
+      offsetY: 8,
+      opacity: 0.16,
+      radius: 12,
+      elevation: 4,
+    }),
+  },
+  reassignRecoveryPrimaryText: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+    color: '#FFFFFF',
+    ...androidTextFix({ fontWeight: '700' }),
+  },
+  reassignRecoverySecondaryButton: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 13,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(127,29,29,0.16)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    flexDirection: 'row' as const,
+    gap: 8,
+  },
+  reassignRecoverySecondaryButtonDisabled: {
+    opacity: 0.55,
+  },
+  reassignRecoverySecondaryText: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+    color: '#7F1D1D',
+    ...androidTextFix({ fontWeight: '700' }),
+  },
   noDriversHintCard: {
     backgroundColor: '#FFF7ED',
     borderRadius: 20,
@@ -7482,6 +7686,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center' as const,
     flexDirection: 'row' as const,
     gap: 8,
+  },
+  noDriversHintSecondaryButtonDisabled: {
+    opacity: 0.55,
   },
   noDriversHintSecondaryText: {
     fontSize: 13,
