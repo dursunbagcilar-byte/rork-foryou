@@ -12,7 +12,7 @@ Uygulamanın Android cihazlarda iOS ile aynı kalitede görünmesi için aşağ�
 - [x] `includeFontPadding: false` eklenerek Android'deki fazladan metin boşlukları giderilecek
 
 **Buton & Dokunma Efektleri**
-- [x] Buton basma animasyonları her iki platformda tutarlı olacak
+- [x] Buton basma animasyonları her iki platformda tutarlı olacak (`components/ScalePressable.tsx` ile ortaklaştırıldı)
 
 **Durum Çubuğu (Status Bar)**
 - [x] Android'de durum çubuğu rengi ve stili uygulama temasına uygun ayarlanacak

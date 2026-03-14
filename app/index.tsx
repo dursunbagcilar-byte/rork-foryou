@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, StatusBar, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, Animated, StatusBar, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Car, Wine, ArrowRight, ShieldCheck } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/colors';
 import { APP_BRAND } from '@/constants/branding';
+import { ScalePressable } from '@/components/ScalePressable';
 import { useAuth } from '@/contexts/AuthContext';
 import { androidTextFix, crossPlatformShadow } from '@/utils/platform';
 
@@ -114,43 +115,47 @@ export default function WelcomeScreen() {
           </Text>
         </Animated.View>
         <Animated.View style={[styles.bottomSection, { opacity: buttonFade, maxWidth: isTablet ? 420 : undefined, alignSelf: isTablet ? 'center' as const : undefined, width: isTablet ? '100%' as unknown as number : undefined }]}>
-          <TouchableOpacity
+          <ScalePressable
             style={[styles.primaryButton, { paddingVertical: isSmall ? 14 : 18, borderRadius: isSmall ? 12 : 16 }]}
             onPress={() => router.push('/login')}
-            activeOpacity={0.85}
+            pressedScale={0.985}
+            pressedOpacity={0.96}
             testID="login-button"
           >
             <Text style={[styles.primaryButtonText, { fontSize: isSmall ? 15 : 17 }]}>Giriş Yap</Text>
             <ArrowRight size={isSmall ? 18 : 20} color={Colors.dark.background} />
-          </TouchableOpacity>
+          </ScalePressable>
           <View style={styles.registerRow}>
-            <TouchableOpacity
+            <ScalePressable
               style={[styles.registerButton, { paddingVertical: isSmall ? 10 : 14, paddingHorizontal: isSmall ? 16 : 24 }]}
               onPress={() => router.push('/register-customer')}
-              activeOpacity={0.7}
+              pressedScale={0.98}
+              pressedOpacity={0.78}
               testID="register-customer-button"
             >
               <Text style={[styles.registerButtonText, { fontSize: isSmall ? 13 : 15 }]}>Müşteri Kaydı</Text>
-            </TouchableOpacity>
+            </ScalePressable>
             <View style={styles.registerDivider} />
-            <TouchableOpacity
+            <ScalePressable
               style={[styles.registerButton, { paddingVertical: isSmall ? 10 : 14, paddingHorizontal: isSmall ? 16 : 24 }]}
               onPress={() => router.push('/register-driver')}
-              activeOpacity={0.7}
+              pressedScale={0.98}
+              pressedOpacity={0.78}
               testID="register-driver-button"
             >
               <Text style={[styles.registerButtonText, { fontSize: isSmall ? 13 : 15 }]}>Şoför Kaydı</Text>
-            </TouchableOpacity>
+            </ScalePressable>
           </View>
-          <TouchableOpacity
+          <ScalePressable
             style={styles.statusButton}
             onPress={() => router.push('/system-status')}
-            activeOpacity={0.75}
+            pressedScale={0.98}
+            pressedOpacity={0.84}
             testID="system-status-button"
           >
             <ShieldCheck size={16} color={Colors.dark.primary} />
             <Text style={styles.statusButtonText}>Canlı Durumu Gör</Text>
-          </TouchableOpacity>
+          </ScalePressable>
         </Animated.View>
       </SafeAreaView>
     </View>

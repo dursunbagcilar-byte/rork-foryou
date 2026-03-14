@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import { ScalePressable } from '@/components/ScalePressable';
 import { Colors } from '@/constants/colors';
 import { androidTextFix, crossPlatformShadow } from '@/utils/platform';
 
@@ -51,13 +52,14 @@ export class ErrorBoundary extends Component<Props, State> {
                 {this.state.error.message}
               </Text>
             )}
-            <TouchableOpacity
+            <ScalePressable
               style={styles.retryButton}
               onPress={this.handleRetry}
-              activeOpacity={0.85}
+              pressedScale={0.985}
+              pressedOpacity={0.96}
             >
               <Text style={styles.retryText}>Tekrar Dene</Text>
-            </TouchableOpacity>
+            </ScalePressable>
           </View>
         </View>
       );

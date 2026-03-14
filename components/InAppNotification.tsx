@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Animated, TouchableOpacity } from 'react-native
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X, Bell, CheckCircle, AlertTriangle } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import { ScalePressable } from '@/components/ScalePressable';
 import { androidTextFix, crossPlatformShadow } from '@/utils/platform';
 
 export type NotificationType = 'info' | 'success' | 'warning' | 'error';
@@ -91,10 +92,12 @@ export default function InAppNotification({
         },
       ]}
     >
-      <TouchableOpacity
+      <ScalePressable
         style={styles.content}
-        activeOpacity={onPress ? 0.7 : 1}
         onPress={onPress}
+        pressedScale={0.99}
+        pressedOpacity={0.92}
+        enableHaptics={false}
       >
         <View style={[styles.iconWrap, { backgroundColor: config.iconColor + '18' }]}>
           {getIcon(type, config.iconColor)}
@@ -106,7 +109,7 @@ export default function InAppNotification({
         <TouchableOpacity onPress={dismiss} style={styles.closeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <X size={16} color="rgba(255,255,255,0.5)" />
         </TouchableOpacity>
-      </TouchableOpacity>
+      </ScalePressable>
     </Animated.View>
   );
 }

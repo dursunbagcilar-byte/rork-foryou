@@ -4,7 +4,7 @@ import * as SplashScreen from "expo-splash-screen";
 import * as WebBrowser from 'expo-web-browser';
 import * as SystemUI from 'expo-system-ui';
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Platform, StatusBar } from "react-native";
+import { View, Text, StyleSheet, Platform, StatusBar } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider, useTheme } from "@/contexts/ThemeContext";
@@ -15,6 +15,7 @@ import { PrivacyProvider } from "@/contexts/PrivacyContext";
 import { RideForOthersProvider } from "@/contexts/RideForOthersContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import InAppNotification from "@/components/InAppNotification";
+import { ScalePressable } from '@/components/ScalePressable';
 import { Colors } from "@/constants/colors";
 import { trpc, trpcClient, resetCircuitBreaker } from "@/lib/trpc";
 import { getDbBootstrapPayload, getDbHeaders, hasDbConfig } from "@/utils/db";
@@ -127,9 +128,9 @@ function CrashFallback({ error, onRetry }: { error: string; onRetry: () => void 
       <Text style={crashStyles.title}>Uygulama Başlatılamadı</Text>
       <Text style={crashStyles.message}>Bir hata oluştu. Lütfen tekrar deneyin.</Text>
       {error ? <Text style={crashStyles.detail} numberOfLines={4}>{error}</Text> : null}
-      <TouchableOpacity style={crashStyles.button} onPress={onRetry} activeOpacity={0.85}>
+      <ScalePressable style={crashStyles.button} onPress={onRetry} pressedScale={0.985} pressedOpacity={0.96}>
         <Text style={crashStyles.buttonText}>Tekrar Dene</Text>
-      </TouchableOpacity>
+      </ScalePressable>
     </View>
   );
 }
