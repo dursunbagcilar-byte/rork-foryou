@@ -1,8 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
-import * as SplashScreen from "expo-splash-screen";
-import * as WebBrowser from 'expo-web-browser';
-import * as SystemUI from 'expo-system-ui';
 import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, Platform, StatusBar } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -21,16 +18,26 @@ import { trpc, trpcClient, resetCircuitBreaker } from "@/lib/trpc";
 import { getDbBootstrapPayload, getDbHeaders, hasDbConfig } from "@/utils/db";
 import { androidTextFix, crossPlatformShadow, getStatusBarConfig } from "@/utils/platform";
 
-try {
-  WebBrowser.maybeCompleteAuthSession();
-} catch (e) {
-  console.log('[Layout] WebBrowser.maybeCompleteAuthSession error:', e);
+async function safelyCompleteAuthSession(): Promise<void> {
+  try {
+    const WebBrowser = await import('expo-web-browser');
+    WebBrowser.maybeCompleteAuthSession();
+  } catch (e) {
+    console.log('[Layout] WebBrowser.maybeCompleteAuthSession error:', e);
+  }
 }
 
-try {
-  void SplashScreen.preventAutoHideAsync();
-} catch (e) {
-  console.log('[Layout] SplashScreen.preventAutoHideAsync error:', e);
+async function safelySyncSystemBackground(backgroundColor: string): Promise<void> {
+  if (Platform.OS === 'web') {
+    return;
+  }
+
+  try {
+    const SystemUI = await import('expo-system-ui');
+    await SystemUI.setBackgroundColorAsync(backgroundColor);
+  } catch (error) {
+    console.log('[Layout] SystemUI.setBackgroundColorAsync error:', error);
+  }
 }
 
 let queryClientSingleton: QueryClient | null = null;
@@ -77,9 +84,7 @@ function RootLayoutNav() {
 
   useEffect(() => {
     console.log('[Layout] Syncing system background for theme:', isDark ? 'dark' : 'light');
-    SystemUI.setBackgroundColorAsync(colors.background).catch((error) => {
-      console.log('[Layout] SystemUI.setBackgroundColorAsync error:', error);
-    });
+    void safelySyncSystemBackground(colors.background);
   }, [colors.background, isDark]);
 
   const statusBarConfig = getStatusBarConfig({
@@ -199,7 +204,7 @@ export default function RootLayout() {
     console.log('[Layout] RootLayout mounted');
     mountedRef.current = true;
     resetCircuitBreaker();
-    SplashScreen.hideAsync().catch((e) => console.log('[Layout] SplashScreen.hideAsync error:', e));
+    void safelyCompleteAuthSession();
 
     if (Platform.OS === 'web') {
       console.log('[Layout] Delaying provider mount on web to avoid concurrent renderer context conflicts');
