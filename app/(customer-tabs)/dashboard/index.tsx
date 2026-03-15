@@ -339,6 +339,8 @@ export default function CustomerHomeScreen() {
   const customOrderMapRef = useRef<MapView>(null);
   const venueOpacity = useRef(new Animated.Value(1)).current;
   const venueProgress = useRef(new Animated.Value(0)).current;
+  const [venueProgressValue, setVenueProgressValue] = useState(0);
+  const [ratingScaleValue, setRatingScaleValue] = useState(0);
   const [chatMessages, setChatMessages] = useState<Array<{ id: string; text: string; fromMe: boolean; time: string }>>([
     { id: '1', text: 'Merhaba, yoldayım!', fromMe: false, time: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) },
   ]);
@@ -348,6 +350,13 @@ export default function CustomerHomeScreen() {
   const [mapCentered, setMapCentered] = useState<boolean>(true);
   const ratingScaleAnim = useRef(new Animated.Value(0)).current;
   const safetyShieldAnim = useRef(new Animated.Value(0.85)).current;
+
+  useEffect(() => {
+    const listener = ratingScaleAnim.addListener(({ value }) => {
+      setRatingScaleValue(value);
+    });
+    return () => ratingScaleAnim.removeListener(listener);
+  }, [ratingScaleAnim]);
   const driverPathRef = useRef<{ latitude: number; longitude: number }[]>([]);
   const driverPathIndexRef = useRef<number>(0);
   const trackingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -547,9 +556,9 @@ export default function CustomerHomeScreen() {
     }
   );
   const onlineDrivers = onlineDriversQuery.data ?? [];
-  const freeRidesLeft = remainingFreeRides();
+  const freeRidesLeft = useMemo(() => remainingFreeRides(), [remainingFreeRides]);
   const hasFreeRideAvailable = useMemo<boolean>(() => freeRidesLeft > 0, [freeRidesLeft]);
-  const displayFreeRideAvailable = selectedDest ? selectedRouteFreeRideLocked : hasFreeRideAvailable;
+  const displayFreeRideAvailable = useMemo(() => selectedDest ? selectedRouteFreeRideLocked : hasFreeRideAvailable, [selectedDest, selectedRouteFreeRideLocked, hasFreeRideAvailable]);
   const isConfirmButtonBusy = paymentLoading || rideRequestSubmitting;
   const confirmButtonLabel = displayFreeRideAvailable && selectedDest
     ? 'Ücretsiz Sürüş Başlat'
@@ -660,11 +669,14 @@ export default function CustomerHomeScreen() {
 
     const cycleVenue = () => {
       venueProgress.setValue(0);
+      setVenueProgressValue(0);
       Animated.timing(venueProgress, {
         toValue: 1,
         duration: 10000,
         useNativeDriver: false,
-      }).start();
+      }).start(({ finished }) => {
+        if (finished) setVenueProgressValue(1);
+      });
 
       if (Platform.OS !== 'web') {
         Animated.sequence([
@@ -3173,7 +3185,7 @@ export default function CustomerHomeScreen() {
                         <Text style={styles.venueSectionBadgeText}>TOP 10</Text>
                       </View>
                     </View>
-                    <Animated.View style={[styles.venueCard, { opacity: venueOpacity }]}>
+                    <View style={styles.venueCard}>
                       <Image
                         source={{ uri: venuePhotos[cityVenues[activeVenueIndex]?.id] || cityVenues[activeVenueIndex]?.image }}
                         style={styles.venueImage}
@@ -3209,7 +3221,7 @@ export default function CustomerHomeScreen() {
                           </Text>
                         </View>
                       </View>
-                    </Animated.View>
+                    </View>
                     <View style={styles.venueReviewCard}>
                       <View style={styles.venueReviewHeader}>
                         <View style={styles.venueReviewerAvatar}>
@@ -3266,15 +3278,10 @@ export default function CustomerHomeScreen() {
                       ))}
                     </View>
                     <View style={styles.venueProgressBarBg}>
-                      <Animated.View
+                      <View
                         style={[
                           styles.venueProgressBarFill,
-                          {
-                            width: venueProgress.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: ['0%', '100%'],
-                            }),
-                          },
+                          { width: `${Math.round(venueProgressValue * 100)}%` as const },
                         ]}
                       />
                     </View>
@@ -4317,16 +4324,11 @@ export default function CustomerHomeScreen() {
       )}
       {showRatingModal && (
         <View style={styles.ratingOverlay}>
-          <Animated.View style={[
+          <View style={[
             styles.ratingModal,
             {
-              transform: [{
-                scale: ratingScaleAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0.8, 1],
-                }),
-              }],
-              opacity: ratingScaleAnim,
+              transform: [{ scale: 0.8 + ratingScaleValue * 0.2 }],
+              opacity: ratingScaleValue,
             },
           ]}>
             <View style={styles.ratingModalHandle} />
@@ -4393,7 +4395,7 @@ export default function CustomerHomeScreen() {
             >
               <Text style={styles.skipRatingText}>Geç</Text>
             </TouchableOpacity>
-          </Animated.View>
+          </View>
         </View>
       )}
       {showCourierPanel && !showOrderSuccess && (
