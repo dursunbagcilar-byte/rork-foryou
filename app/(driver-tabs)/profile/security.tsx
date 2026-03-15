@@ -189,7 +189,7 @@ export default function DriverSecurityScreen() {
                 <Lock size={18} color={Colors.light.primary} />
               </View>
               <Text style={styles.menuLabel}>Şifre Değiştir</Text>
-              <ChevronRight size={18} color={Colors.light.textMuted} style={{ transform: [{ rotate: showPasswordForm ? '90deg' : '0deg' }] }} />
+              <ChevronRight size={18} color={Colors.light.textMuted} style={{ transform: [{ rotate: showPasswordForm ? '90deg' : '0deg' }]}} />
             </TouchableOpacity>
 
             {showPasswordForm && (
