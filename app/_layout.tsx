@@ -93,36 +93,36 @@ function RootLayoutNav() {
   });
 
   return (
-    <>
+    <View style={bootStyles.rootLayoutNavContainer}>
       <StatusBar {...statusBarConfig} />
       <Stack
-      screenOptions={{
-        headerShown: false,
-        contentStyle: { backgroundColor: colors.background },
-      }}
-    >
-      <Stack.Screen name="index" />
-      <Stack.Screen name="login" />
-      <Stack.Screen name="register-customer" options={{ presentation: 'modal' }} />
-      <Stack.Screen name="register-driver" options={{ presentation: 'modal' }} />
-      <Stack.Screen name="customer-menu" options={{ presentation: 'fullScreenModal', animation: 'fade_from_bottom', animationDuration: 250 }} />
-      <Stack.Screen name="driver-menu" options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }} />
-      <Stack.Screen name="ai-chat" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-      <Stack.Screen name="ai-photo-editor" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-      <Stack.Screen name="scheduled-ride" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-      <Stack.Screen name="cancellation-policy" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-      <Stack.Screen name="forgot-password" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-      <Stack.Screen name="system-status" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-      <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
-      <Stack.Screen name="privacy-policy" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-      <Stack.Screen name="terms-of-service" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-      <Stack.Screen name="driver-help" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-      <Stack.Screen name="kvkk-data-management" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
-      <Stack.Screen name="(customer-tabs)" />
-      <Stack.Screen name="(driver-tabs)" />
-      <Stack.Screen name="+not-found" />
-    </Stack>
-    </>
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+        }}
+      >
+        <Stack.Screen name="index" />
+        <Stack.Screen name="login" />
+        <Stack.Screen name="register-customer" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="register-driver" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="customer-menu" options={{ presentation: 'fullScreenModal', animation: 'fade_from_bottom', animationDuration: 250 }} />
+        <Stack.Screen name="driver-menu" options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="ai-chat" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="ai-photo-editor" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="scheduled-ride" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="cancellation-policy" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="forgot-password" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="system-status" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="onboarding" options={{ animation: 'fade' }} />
+        <Stack.Screen name="privacy-policy" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="terms-of-service" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="driver-help" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="kvkk-data-management" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="(customer-tabs)" />
+        <Stack.Screen name="(driver-tabs)" />
+        <Stack.Screen name="+not-found" />
+      </Stack>
+    </View>
   );
 }
 
@@ -160,6 +160,9 @@ const bootStyles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.dark.background,
+  },
+  rootLayoutNavContainer: {
+    flex: 1,
   },
 });
 
