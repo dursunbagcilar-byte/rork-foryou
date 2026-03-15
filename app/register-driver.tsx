@@ -816,11 +816,11 @@ export default function RegisterDriverScreen() {
                       </View>
                       <Text style={[styles.categoryLabel, isSelected && { color: cat.color }]}>{cat.label}</Text>
                       <Text style={styles.categoryDesc}>{cat.description}</Text>
-                      {isSelected && (
+                      {isSelected ? (
                         <View style={[styles.categoryCheck, { backgroundColor: cat.color }]}>
                           <CheckCircle size={12} color="#FFF" />
                         </View>
-                      )}
+                      ) : null}
                     </TouchableOpacity>
                   );
                 }
@@ -840,11 +840,11 @@ export default function RegisterDriverScreen() {
                     </View>
                     <Text style={[styles.categoryLabel, isSelected && { color: cat.color }]}>{cat.label}</Text>
                     <Text style={styles.categoryDesc}>{cat.description}</Text>
-                    {isSelected && (
+                    {isSelected ? (
                       <View style={[styles.categoryCheck, { backgroundColor: cat.color }]}>
                         <CheckCircle size={12} color="#FFF" />
                       </View>
-                    )}
+                    ) : null}
                   </TouchableOpacity>
                 );
               })}
@@ -1052,7 +1052,7 @@ export default function RegisterDriverScreen() {
               </>
             )}
 
-            {isCourierLike && (
+            {isCourierLike ? (
               <>
                 <Text style={styles.sectionTitle}>{isBusinessCategorySelected ? 'İşletme Bilgileri' : 'İşletme Kaydı'}</Text>
                 <Text style={styles.partnerNote}>
@@ -1082,7 +1082,7 @@ export default function RegisterDriverScreen() {
                     </TouchableOpacity>
                   )}
 
-                  {shouldShowBusinessFields && (
+                  {shouldShowBusinessFields ? (
                     <>
                       <InputField renderIcon={() => <Store size={18} color={Colors.dark.textMuted} />} label="İşletme Adı" placeholder="Örnek Burger House" value={businessName} onChangeText={setBusinessName} />
                       <InputField renderIcon={() => <Globe size={18} color={Colors.dark.textMuted} />} label="Web Sitesi" placeholder="www.isletmeniz.com" value={businessWebsite} onChangeText={setBusinessWebsite} />
@@ -1091,7 +1091,7 @@ export default function RegisterDriverScreen() {
                       <InputField renderIcon={() => <MapPin size={18} color={Colors.dark.textMuted} />} label="İşletme Adresi" placeholder="Mahalle, sokak, bina no" value={businessAddress} onChangeText={setBusinessAddress} helpText="Adres otomatik olarak harita konumuna çevrilmeye çalışılır" />
                       <InputField renderIcon={() => <FileText size={18} color={Colors.dark.textMuted} />} label="Kısa Açıklama" placeholder="Özel menüler ve hızlı teslimat" value={businessDescription} onChangeText={setBusinessDescription} />
                     </>
-                  )}
+                  ) : null}
                 </View>
               </>
             )}
@@ -1226,7 +1226,7 @@ export default function RegisterDriverScreen() {
               </View>
             )}
 
-            {shouldShowHelmetDocument && (
+            {shouldShowHelmetDocument ? (
               <View style={styles.docSection}>
                 <View style={styles.docLabelRow}>
                   <Text style={styles.docLabel}>Kask Fotoğrafı</Text>
@@ -1245,7 +1245,7 @@ export default function RegisterDriverScreen() {
               </View>
             )}
 
-            {shouldShowCriminalRecordDocument && (
+            {shouldShowCriminalRecordDocument ? (
               <View style={styles.docSection}>
                 <Text style={styles.docLabel}>Sabıka Kaydı</Text>
                 <View style={styles.docRow}>
@@ -1255,7 +1255,7 @@ export default function RegisterDriverScreen() {
               </View>
             )}
 
-            {shouldShowTaxCertificateDocument && (
+            {shouldShowTaxCertificateDocument ? (
               <View style={styles.docSection}>
                 <View style={styles.docLabelRow}>
                   <Text style={styles.docLabel}>Vergi Levhası</Text>

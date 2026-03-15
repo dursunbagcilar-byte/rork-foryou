@@ -1834,13 +1834,13 @@ export default function DriverHomeScreen() {
                 )}
               </TouchableOpacity>
             </View>
-            {nextStep && (
+            {nextStep ? (
               <View style={styles.navNextStep}>
                 <Text style={styles.navNextLabel}>Sonra:</Text>
                 <ChevronRight size={12} color={Colors.dark.textMuted} />
                 <Text style={styles.navNextText} numberOfLines={1}>{nextStep.instruction}</Text>
               </View>
-            )}
+            ) : null}
           </SafeAreaView>
         </View>
       )}
@@ -1857,22 +1857,22 @@ export default function DriverHomeScreen() {
                 <Menu size={26} color="#FFF" strokeWidth={2.5} />
               </TouchableOpacity>
             </View>
-            {!!driver?.partnerDriverName && (
+            {driver?.partnerDriverName ? (
               <View style={styles.topBarPartner} pointerEvents="box-none">
                 <View style={styles.partnerCard}>
                   <Users size={16} color={Colors.dark.primary} />
                   <Text style={styles.partnerText}>Partner: {driver.partnerDriverName}</Text>
                 </View>
               </View>
-            )}
+            ) : null}
 
-            {isApproved && !isOnline && (
+            {isApproved && !isOnline ? (
               <View style={styles.offlinePanel}>
                 <WifiOff size={32} color="#999" />
                 <Text style={styles.offlineTitle}>Meşgulsünüz</Text>
                 <Text style={styles.offlineSub}>Yolculuk almak için müsait olun</Text>
               </View>
-            )}
+            ) : null}
             <View style={styles.driverBottomSheet}>
               <View style={styles.driverSheetHandle}>
                 <View style={styles.driverSheetHandleBar} />
@@ -1907,15 +1907,15 @@ export default function DriverHomeScreen() {
                 contentContainerStyle={styles.driverSheetScroll}
                 bounces={false}
               >
-                {isOnline && (
+                {isOnline ? (
                   <View style={styles.driverOnlineBanner}>
                     <Wifi size={16} color="#2ECC71" />
                     <Text style={styles.driverOnlineBannerText}>Yolculuk talepleri alınıyor</Text>
 
                   </View>
-                )}
+                ) : null}
 
-                {hasRideRequest && (
+                {hasRideRequest ? (
                   <Animated.View style={[styles.inlineRequestPanel, { opacity: requestAnim, transform: [{ scale: requestAnim.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1] }) }] }]}>
                     <View style={styles.inlineRequestHeader}>
                       <View style={styles.inlineRequestPulse}>
@@ -1940,7 +1940,7 @@ export default function DriverHomeScreen() {
                         </TouchableOpacity>
                       </View>
                     </View>
-                    {currentRideIsFree && (
+                    {currentRideIsFree ? (
                       <View style={styles.freeRideDriverBanner} testID="driver-free-ride-banner">
                         <View style={styles.freeRideDriverBadge}>
                           <Text style={styles.freeRideDriverBadgeText}>ÜCRETSİZ SÜRÜŞ</Text>
@@ -1949,7 +1949,7 @@ export default function DriverHomeScreen() {
                           Bu yolculuk promosyon kapsamında. Ücret müşteriye yansıtılmayacak.
                         </Text>
                       </View>
-                    )}
+                    ) : null}
                     <View style={styles.inlineFareRow}>
                       <View style={styles.inlineFareItem}>
                         <Banknote size={16} color={currentRideIsFree ? Colors.dark.success : Colors.dark.primary} />
@@ -1991,12 +1991,12 @@ export default function DriverHomeScreen() {
                           resizeMode="contain"
                         />
                         <View style={styles.vehicleGroundShadow} />
-                        {isProcessingVehicle && (
+                        {isProcessingVehicle ? (
                           <View style={styles.vehicleProcessingOverlay}>
                             <ActivityIndicator size="small" color="#2ECC71" />
                             <Text style={styles.vehicleProcessingText}>AI arka plan kaldırılıyor...</Text>
                           </View>
-                        )}
+                        ) : null}
                         <View style={styles.vehicleImageEditBadge}>
                           <Camera size={12} color="#FFF" />
                         </View>
@@ -2051,11 +2051,11 @@ export default function DriverHomeScreen() {
         )}
 
 
-        {rideAccepted && (
+        {rideAccepted ? (
           <View style={styles.activeRidePanel}>
             <View style={styles.requestHandle} />
 
-            {isActivelyNavigating && (navigatingToDropoff ? etaToDropoff > 0 : etaToPickup > 0) && (
+            {isActivelyNavigating && (navigatingToDropoff ? etaToDropoff > 0 : etaToPickup > 0) ? (
               <View style={styles.trackingBanner}>
                 <View style={styles.trackingPulse}>
                   <Navigation size={14} color={Colors.dark.primary} />
@@ -2073,7 +2073,7 @@ export default function DriverHomeScreen() {
               </View>
             )}
 
-            {isActivelyNavigating && !voiceEnabled && (
+            {isActivelyNavigating && !voiceEnabled ? (
               <View style={styles.voiceWarningBanner}>
                 <AlertTriangle size={14} color={Colors.dark.warning} />
                 <Text style={styles.voiceWarningText}>
@@ -2082,14 +2082,14 @@ export default function DriverHomeScreen() {
               </View>
             )}
 
-            {arrivedAtPickup && !confirmedArrival && (
+            {arrivedAtPickup && !confirmedArrival ? (
               <View style={styles.arrivedBanner}>
                 <Text style={styles.arrivedEmoji}>📍</Text>
                 <Text style={styles.arrivedText}>{isBusinessDelivery ? 'İşletme noktasına ulaştınız!' : 'Müşteri noktasına ulaştınız!'}</Text>
               </View>
             )}
 
-            {arrivedAtPickup && !confirmedArrival && (
+            {arrivedAtPickup && !confirmedArrival ? (
               <View style={styles.photoWarningBanner}>
                 <Camera size={18} color="#FF9500" />
                 <View style={styles.photoWarningContent}>
@@ -2099,14 +2099,14 @@ export default function DriverHomeScreen() {
               </View>
             )}
 
-            {confirmedArrival && !customerPickedUp && (
+            {confirmedArrival && !customerPickedUp ? (
               <View style={styles.waitingBanner}>
                 <UserCheck size={18} color={Colors.dark.primary} />
                 <Text style={styles.waitingText}>{isBusinessDelivery ? 'Sipariş hazırlanıyor olabilir...' : 'Müşteriyi bekliyorsunuz...'}</Text>
               </View>
             )}
 
-            {customerPickedUp && arrivedAtDropoff && (
+            {customerPickedUp && arrivedAtDropoff ? (
               <View style={styles.arrivedBanner}>
                 <Text style={styles.arrivedEmoji}>🏁</Text>
                 <Text style={styles.arrivedText}>Varış noktasına ulaştınız!</Text>
@@ -2118,7 +2118,7 @@ export default function DriverHomeScreen() {
               <Text style={styles.safeDriveBannerText}>{safeDrivingReminder}</Text>
             </View>
 
-            {currentRideIsFree && (
+            {currentRideIsFree ? (
               <View style={styles.freeRideDriverBanner}>
                 <View style={styles.freeRideDriverBadge}>
                   <Text style={styles.freeRideDriverBadgeText}>ÜCRETSİZ SÜRÜŞ</Text>
@@ -2156,7 +2156,7 @@ export default function DriverHomeScreen() {
               ) : null}
             </View>
 
-            {isActivelyNavigating && navigationSteps.length > 1 && (
+            {isActivelyNavigating && navigationSteps.length > 1 ? (
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -2236,7 +2236,7 @@ export default function DriverHomeScreen() {
         )}
       </SafeAreaView>
 
-      {showDriverCancelReasonModal && (
+      {showDriverCancelReasonModal ? (
         <View style={styles.loadingOverlay}>
           <View style={styles.driverCancelReasonModal}>
             <TouchableOpacity
@@ -2304,7 +2304,7 @@ export default function DriverHomeScreen() {
         </View>
       )}
 
-      {showCourteousWarning && (
+      {showCourteousWarning ? (
         <View style={styles.loadingOverlay}>
           <View style={styles.courteousWarningBox}>
             <View style={styles.courteousIconRow}>
@@ -2325,7 +2325,7 @@ export default function DriverHomeScreen() {
         </View>
       )}
 
-      {isFetchingRoute && (
+      {isFetchingRoute ? (
         <View style={styles.loadingOverlay}>
           <View style={styles.loadingBox}>
             <Text style={styles.loadingText}>Rota hesaplanıyor...</Text>
@@ -2333,7 +2333,7 @@ export default function DriverHomeScreen() {
         </View>
       )}
 
-      {showDriverChatModal && (
+      {showDriverChatModal ? (
         <View style={styles.loadingOverlay}>
           <KeyboardAvoidingView
             behavior={keyboardAvoidingBehavior()}

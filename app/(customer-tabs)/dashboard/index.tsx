@@ -2876,13 +2876,13 @@ export default function CustomerHomeScreen() {
             </Marker>
           ) : null
         ))}
-        {selectedDest && (
+        {selectedDest ? (
           <Marker
             coordinate={{ latitude: selectedDest.latitude, longitude: selectedDest.longitude }}
             title={selectedDest.name}
             pinColor={Colors.dark.accent}
           />
-        )}
+        ) : null}
         {driverFound && !tripStarted && driverLocation && (
           <Marker
             coordinate={driverLocation}
@@ -3094,12 +3094,12 @@ export default function CustomerHomeScreen() {
                       {user?.city ? `${user.city} Merkez` : 'Son Konum'}
                     </Text>
                   </TouchableOpacity>
-                  {user?.district && (
+                  {user?.district ? (
                     <TouchableOpacity style={styles.recentChip} onPress={() => toggleSearch(true)}>
                       <Clock size={16} color="#666" />
                       <Text style={styles.recentChipText} numberOfLines={1}>{user.district}</Text>
                     </TouchableOpacity>
-                  )}
+                  ) : null}
                 </ScrollView>
                 <View style={styles.serviceGrid}>
                   <TouchableOpacity
@@ -3142,11 +3142,11 @@ export default function CustomerHomeScreen() {
                       }}
                       activeOpacity={isRainy ? 1 : 0.85}
                     >
-                      {isRainy && (
+                      {isRainy ? (
                         <View style={styles.sideServiceWeatherBadge}>
                           <CloudRain size={10} color="#FFF" />
                         </View>
-                      )}
+                      ) : null}
                       <View style={styles.sideServiceRow}>
                         <Bird size={30} color={isRainy ? '#CCC' : '#2ECC71'} />
                         <View style={styles.sideServiceInfo}>
@@ -3176,7 +3176,7 @@ export default function CustomerHomeScreen() {
                     </TouchableOpacity>
                   </View>
                 </View>
-                {cityVenues.length > 0 && (
+                {cityVenues.length > 0 ? (
                   <View style={styles.venueSection}>
                     <View style={styles.venueSectionHeader}>
                       <Text style={styles.venueSectionTitle}>{user?.district ? `${user.district}, ${user.city}` : (user?.city ?? '')} Gözde Mekanlar</Text>
@@ -3371,7 +3371,7 @@ export default function CustomerHomeScreen() {
             </View>
           </View>
         )}
-        {isSearching && (
+        {isSearching ? (
           <KeyboardAvoidingView
             style={styles.routePickerKeyboard}
             behavior={keyboardAvoidingBehavior()}
@@ -3395,7 +3395,7 @@ export default function CustomerHomeScreen() {
                   <View style={styles.routePickerHeaderSpacer} />
                 </View>
 
-                {rideForOtherDraft.enabled && rideForOtherDraft.recipient && (
+                {rideForOtherDraft.enabled && rideForOtherDraft.recipient ? (
                   <TouchableOpacity style={styles.rideForOtherSummaryCard} onPress={handleOpenRideForOther} activeOpacity={0.85}>
                     <View style={styles.rideForOtherSummaryHeader}>
                       <Text style={styles.rideForOtherSummaryTitle}>Misafir yolculuğu aktif</Text>
@@ -3404,7 +3404,7 @@ export default function CustomerHomeScreen() {
                     <Text style={styles.rideForOtherSummaryName}>{rideForOtherDraft.recipient.name}</Text>
                     <Text style={styles.rideForOtherSummaryPhone}>{rideForOtherDraft.recipient.phone}</Text>
                   </TouchableOpacity>
-                )}
+                ) : null}
 
                 <View style={styles.routeComposerRow}>
                   <View style={styles.routeComposerInputs}>
@@ -3443,9 +3443,9 @@ export default function CustomerHomeScreen() {
                       >
                         <MapPinned size={17} color="#5E6475" />
                       </TouchableOpacity>
-                      {(autoCompleteLoading || placesLoading) && (
+                      {(autoCompleteLoading || placesLoading) ? (
                         <ActivityIndicator size="small" color={Colors.dark.primary} style={styles.routeComposerSpinner} />
-                      )}
+                      ) : null}
                     </View>
                   </View>
                   <View style={styles.routeComposerActions}>
@@ -3587,7 +3587,7 @@ export default function CustomerHomeScreen() {
                     <ChevronRight size={18} color="#C5C9D5" />
                   </TouchableOpacity>
 
-                  {selectedDest && (
+                  {selectedDest ? (
                     <View style={styles.routePickerSelectedCard}>
                       <View style={styles.routePickerSelectedCardTopRow}>
                         <View style={styles.routePickerSelectedBadge}>
@@ -3609,9 +3609,9 @@ export default function CustomerHomeScreen() {
                         </View>
                       </View>
                     </View>
-                  )}
+                  ) : null}
 
-                  {selectedDest && (
+                  {selectedDest ? (
                     <View style={styles.rideSummary}>
                       <Text style={styles.vehicleSelectInlineTitle}>Araç paketini seç</Text>
                       <View style={styles.vehicleSelectInlineRow}>
@@ -3636,21 +3636,21 @@ export default function CustomerHomeScreen() {
                               activeOpacity={isRestricted ? 1 : 0.7}
                               testID={`inline-vehicle-${pkg}`}
                             >
-                              {isRestricted && (
+                              {isRestricted ? (
                                 <View style={styles.vehicleSelectInlineWeather}>
                                   <CloudRain size={10} color="#FFF" />
                                 </View>
-                              )}
+                              ) : null}
                               <Text style={styles.vehicleSelectInlineEmoji}>{config.emoji}</Text>
                               <Text style={[
                                 styles.vehicleSelectInlineLabel,
-                                isSelected && { color: config.color, fontWeight: '700' as const },
-                                isRestricted && { color: '#BBB' },
+                                isSelected ? { color: config.color, fontWeight: '700' as const } : undefined,
+                                isRestricted ? { color: '#BBB' } : undefined,
                               ]}>{config.label}</Text>
                               <Text style={[
                                 styles.vehicleSelectInlinePrice,
-                                isSelected && { color: config.color },
-                                isRestricted && { color: '#CCC' },
+                                isSelected ? { color: config.color } : undefined,
+                                isRestricted ? { color: '#CCC' } : undefined,
                               ]}>
                                 {displayFreeRideAvailable ? 'Ücretsiz' : `₺${config.price}`}
                               </Text>
@@ -3658,12 +3658,12 @@ export default function CustomerHomeScreen() {
                           );
                         })}
                       </View>
-                      {isRainy && (
+                      {isRainy ? (
                         <View style={styles.vehicleSelectInlineWeatherBanner}>
                           <CloudRain size={12} color="#E74C3C" />
                           <Text style={styles.vehicleSelectInlineWeatherText}>Yağışlı hava — Motor ve E-Scooter kullanılamaz</Text>
                         </View>
-                      )}
+                      ) : null}
                       <View style={styles.rideSummaryRow}>
                         <View style={styles.rideSummaryItem}>
                           <Text style={styles.rideSummaryLabel}>Mesafe</Text>
@@ -3689,12 +3689,12 @@ export default function CustomerHomeScreen() {
                       </View>
                       <View style={styles.paymentMethodSelector}>
                         <TouchableOpacity
-                          style={[styles.paymentMethodOption, paymentMethod === 'cash' && styles.paymentMethodOptionActive]}
+                          style={[styles.paymentMethodOption, paymentMethod === 'cash' ? styles.paymentMethodOptionActive : undefined]}
                           onPress={() => { setPaymentMethod('cash'); void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
                           activeOpacity={0.7}
                         >
                           <Banknote size={18} color={paymentMethod === 'cash' ? '#FFF' : '#666'} />
-                          <Text style={[styles.paymentMethodText, paymentMethod === 'cash' && styles.paymentMethodTextActive]}>Nakit</Text>
+                          <Text style={[styles.paymentMethodText, paymentMethod === 'cash' ? styles.paymentMethodTextActive : undefined]}>Nakit</Text>
                         </TouchableOpacity>
                         <View style={{ flex: 1, alignItems: 'center' }}>
                           <TouchableOpacity
@@ -3709,10 +3709,10 @@ export default function CustomerHomeScreen() {
                         </View>
                       </View>
                     </View>
-                  )}
+                  ) : null}
                 </ScrollView>
 
-                {showReassignRecoveryCard && (
+                {showReassignRecoveryCard ? (
                   <View style={styles.reassignRecoveryCard} testID="reassign-recovery-card">
                     <View style={styles.reassignRecoveryHeader}>
                       <View style={styles.reassignRecoveryIconWrap}>
@@ -3790,7 +3790,7 @@ export default function CustomerHomeScreen() {
             </SafeAreaView>
           </KeyboardAvoidingView>
         )}
-        {shouldShowDriverSearchStatusPanel && (
+        {shouldShowDriverSearchStatusPanel ? (
           <View style={[styles.statusPanel, styles.statusPanelSearching]} testID="driver-search-status-panel">
             {isDriverUnavailablePanel ? (
               <View style={styles.statusSearchAlertIcon} testID="driver-search-status-warning-icon">
@@ -3821,7 +3821,7 @@ export default function CustomerHomeScreen() {
             </TouchableOpacity>
           </View>
         )}
-        {showAlternativeSuggestion && alternativeVehicle && (
+        {showAlternativeSuggestion && alternativeVehicle ? (
           <View style={styles.statusPanel}>
             <View style={styles.altSuggestionIcon}>
               <Text style={{ fontSize: 36 }}>
@@ -3845,7 +3845,7 @@ export default function CustomerHomeScreen() {
                 <Text style={styles.altDriverRating}>⭐ {alternativeVehicle.driver.rating} • {alternativeVehicle.driver.totalRides} yolculuk</Text>
               </View>
             </View>
-            {selectedDest && (
+            {selectedDest ? (
               <View style={styles.altPriceRow}>
                 <Text style={styles.altPriceLabel}>Yeni fiyat:</Text>
                 <Text style={styles.altPriceValue}>
@@ -3855,7 +3855,7 @@ export default function CustomerHomeScreen() {
                   )}
                 </Text>
               </View>
-            )}
+            ) : null}
             <TouchableOpacity style={styles.altAcceptBtn} onPress={handleAcceptAlternative} activeOpacity={0.85}>
               <Text style={styles.altAcceptText}>{getVehicleTypeLabel(alternativeVehicle.vehicleType)} ile Devam Et</Text>
             </TouchableOpacity>
@@ -3864,7 +3864,7 @@ export default function CustomerHomeScreen() {
             </TouchableOpacity>
           </View>
         )}
-        {reassigning && (
+        {reassigning ? (
           <View style={styles.statusPanel}>
             <View style={styles.reassignBanner}>
               <AlertTriangle size={24} color="#F5A623" />
@@ -3874,7 +3874,7 @@ export default function CustomerHomeScreen() {
             <Text style={styles.statusSub}>Şoförünüz yolculuğu iptal etti. Hemen yeni bir şoför bulunuyor.</Text>
           </View>
         )}
-        {rideRequested && driverFound && !tripStarted && (
+        {rideRequested && driverFound && !tripStarted ? (
           <View style={styles.driverPanel}>
             <View style={styles.driverPanelHandle} />
             {driverEta > 0 ? (
@@ -3975,7 +3975,7 @@ export default function CustomerHomeScreen() {
             </View>
           </View>
         )}
-        {rideRequested && tripStarted && (
+        {rideRequested && tripStarted ? (
           <View style={styles.driverPanel}>
             <View style={styles.driverPanelHandle} />
             {customerConfirmedArrival && !tripCompleted && (
@@ -4001,12 +4001,12 @@ export default function CustomerHomeScreen() {
                 </View>
               </View>
             )}
-            {tripCompleted && (
+            {tripCompleted ? (
               <View style={styles.tripArrivedBanner}>
                 <Text style={styles.arrivedEmoji}>🎉</Text>
                 <Text style={styles.tripArrivedText}>Çok Memnun Oldum, Görüşmek Üzere!</Text>
               </View>
-            )}
+            ) : null}
             <View style={styles.driverInfo}>
               <View style={styles.driverAvatar}>
                 <Text style={styles.driverAvatarText}>{currentDriver?.initials ?? 'XX'}</Text>
@@ -4044,17 +4044,17 @@ export default function CustomerHomeScreen() {
               </View>
             </View>
 
-            {activeRideForOther && activeRideRecipient && (
+            {activeRideForOther && activeRideRecipient ? (
               <View style={styles.activeRideGuestCard}>
                 <Text style={styles.activeRideGuestTitle}>Yolculuk misafir adına takip ediliyor</Text>
                 <Text style={styles.activeRideGuestSubtitle}>{activeRideRecipient.name} • {activeRideRecipient.phone}</Text>
                 <View style={styles.activeRideGuestTags}>
-                  {activeRideShareBySms && <Text style={styles.activeRideGuestTag}>SMS</Text>}
-                  {activeRideShareByWhatsApp && <Text style={styles.activeRideGuestTag}>WhatsApp</Text>}
-                  {activeRideLiveTracking && <Text style={styles.activeRideGuestTag}>Canlı takip</Text>}
+                  {activeRideShareBySms ? <Text style={styles.activeRideGuestTag}>SMS</Text> : null}
+                  {activeRideShareByWhatsApp ? <Text style={styles.activeRideGuestTag}>WhatsApp</Text> : null}
+                  {activeRideLiveTracking ? <Text style={styles.activeRideGuestTag}>Canlı takip</Text> : null}
                 </View>
               </View>
-            )}
+            ) : null}
             <View style={styles.tripInfo}>
               <View style={styles.tripInfoItem}>
                 <Text style={styles.tripInfoLabel}>Mesafe</Text>
@@ -4076,17 +4076,17 @@ export default function CustomerHomeScreen() {
               </View>
             </View>
             <View style={styles.actionButtons}>
-              {tripCompleted && (
+              {tripCompleted ? (
                 <TouchableOpacity style={styles.completeButton} onPress={handleCompleteRide} activeOpacity={0.85}>
                   <Text style={styles.completeButtonText}>Yolculuğu Tamamla</Text>
                 </TouchableOpacity>
-              )}
+              ) : null}
               <View style={styles.actionRow}>
-                {!tripCompleted && !customerConfirmedArrival && (
+                {!tripCompleted && !customerConfirmedArrival ? (
                   <TouchableOpacity style={styles.cancelButton} onPress={handleCancelRide}>
                     <Text style={styles.cancelButtonText}>İptal Et</Text>
                   </TouchableOpacity>
-                )}
+                ) : null}
                 <TouchableOpacity style={styles.sosButton} onPress={handleSOS}>
                   <Shield size={16} color="#FFF" />
                   <Text style={styles.sosButtonText}>SOS</Text>
@@ -4096,7 +4096,7 @@ export default function CustomerHomeScreen() {
           </View>
         )}
       </SafeAreaView>
-      {showReceiptModal && (
+      {showReceiptModal ? (
         <View style={styles.ratingOverlay}>
           <View style={styles.receiptModal}>
             <View style={styles.receiptHeader}>
@@ -4141,12 +4141,12 @@ export default function CustomerHomeScreen() {
               <Text style={styles.receiptLabel}>Ödeme</Text>
               <Text style={styles.receiptValue}>{currentRideFree ? 'Ücretsiz sürüş' : paymentMethod === 'card' ? 'Kredi/Banka Kartı' : 'Nakit'}</Text>
             </View>
-            {activeRideForOther && activeRideRecipient && (
+            {activeRideForOther && activeRideRecipient ? (
               <View style={styles.receiptRow}>
                 <Text style={styles.receiptLabel}>Misafir</Text>
                 <Text style={styles.receiptValue}>{activeRideRecipient.name} • {activeRideRecipient.phone}</Text>
               </View>
-            )}
+            ) : null}
             <View style={styles.receiptDivider} />
             <View style={styles.receiptTotalRow}>
               <Text style={styles.receiptTotalLabel}>Toplam</Text>
@@ -4154,14 +4154,14 @@ export default function CustomerHomeScreen() {
                 {currentRideFree ? 'ÜCRETSİZ' : `₺${ridePrice}`}
               </Text>
             </View>
-            {sponsorVenueName && (
+            {sponsorVenueName ? (
               <View style={styles.receiptSafetyBanner}>
                 <Shield size={14} color="#FFD700" />
                 <Text style={styles.receiptSafetyText}>
                   Bu gece güvenli eve dönüşünüzü {sponsorVenueName} destekledi
                 </Text>
               </View>
-            )}
+            ) : null}
             <Text style={styles.receiptDate}>
               {new Date().toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
             </Text>
@@ -4171,7 +4171,7 @@ export default function CustomerHomeScreen() {
           </View>
         </View>
       )}
-      {showCancelReasonModal && (
+      {showCancelReasonModal ? (
         <View style={styles.ratingOverlay}>
           <View style={styles.cancelReasonModal}>
             <TouchableOpacity
@@ -4238,7 +4238,7 @@ export default function CustomerHomeScreen() {
           </View>
         </View>
       )}
-      {showSOSModal && (
+      {showSOSModal ? (
         <View style={styles.ratingOverlay}>
           <View style={styles.sosModal}>
             <TouchableOpacity
@@ -4275,7 +4275,7 @@ export default function CustomerHomeScreen() {
           </View>
         </View>
       )}
-      {showChatModal && (
+      {showChatModal ? (
         <KeyboardAvoidingView
           style={styles.ratingOverlay}
           behavior="padding"
@@ -4322,7 +4322,7 @@ export default function CustomerHomeScreen() {
           </View>
         </KeyboardAvoidingView>
       )}
-      {showRatingModal && (
+      {showRatingModal ? (
         <View style={styles.ratingOverlay}>
           <View style={[
             styles.ratingModal,
@@ -4351,11 +4351,11 @@ export default function CustomerHomeScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-            {ratingStars > 0 && (
+            {ratingStars > 0 ? (
               <Text style={styles.ratingLabel}>
                 {ratingStars === 1 ? 'Kötü' : ratingStars === 2 ? 'Fena Değil' : ratingStars === 3 ? 'İyi' : ratingStars === 4 ? 'Çok İyi' : 'Mükemmel!'}
               </Text>
-            )}
+            ) : null}
             <View style={styles.commentInputWrapper}>
               <TextInput
                 style={styles.commentInput}
@@ -4368,9 +4368,9 @@ export default function CustomerHomeScreen() {
                 textAlignVertical="top"
                 testID="rating-comment-input"
               />
-              {ratingComment.length > 0 && (
+              {ratingComment.length > 0 ? (
                 <Text style={styles.commentCount}>{ratingComment.length}/200</Text>
-              )}
+              ) : null}
             </View>
             <TouchableOpacity
               style={[
@@ -4398,7 +4398,7 @@ export default function CustomerHomeScreen() {
           </View>
         </View>
       )}
-      {showCourierPanel && !showOrderSuccess && (
+      {showCourierPanel && !showOrderSuccess ? (
         <View style={styles.courierOverlay}>
           <SafeAreaView style={styles.courierSafeArea}>
             <View style={styles.courierHeader}>
@@ -4782,7 +4782,7 @@ export default function CustomerHomeScreen() {
           </SafeAreaView>
         </View>
       )}
-      {showOrderSuccess && (
+      {showOrderSuccess ? (
         <View style={styles.ratingOverlay}>
           <View style={styles.orderSuccessModal}>
             <View style={styles.orderSuccessIconWrap}>
@@ -4821,7 +4821,7 @@ export default function CustomerHomeScreen() {
         </View>
       )}
 
-      {showCustomOrderSuccess && (
+      {showCustomOrderSuccess ? (
         <View style={styles.ratingOverlay}>
           <View style={styles.orderSuccessModal}>
             <View style={styles.orderSuccessIconWrap}>

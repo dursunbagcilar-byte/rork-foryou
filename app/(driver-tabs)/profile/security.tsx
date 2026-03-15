@@ -192,7 +192,7 @@ export default function DriverSecurityScreen() {
               <ChevronRight size={18} color={Colors.light.textMuted} style={{ transform: [{ rotate: showPasswordForm ? '90deg' : '0deg' }] }} />
             </TouchableOpacity>
 
-            {showPasswordForm && (
+            {showPasswordForm ? (
               <View style={styles.formWrap}>
                 <View style={styles.inputRow}>
                   <TextInput

@@ -333,7 +333,7 @@ export default function TeamMemberScreen() {
                   />
                 </View>
               </View>
-              {hasLicenseInput && (
+              {hasLicenseInput ? (
                 <View style={[styles.licenseResult, { borderColor: isLicenseValid ? Colors.light.success + '40' : '#EF444440' }]}>
                   <View style={styles.licenseResultTop}>
                     {isLicenseValid ? (
@@ -349,7 +349,7 @@ export default function TeamMemberScreen() {
                     {licenseMonths} ay ({Math.floor(licenseMonths / 12)} yıl {licenseMonths % 12} ay) • Minimum: 15 ay
                   </Text>
                 </View>
-              )}
+              ) : null}
             </View>
 
             <View style={styles.docDivider}>

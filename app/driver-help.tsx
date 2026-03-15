@@ -201,9 +201,9 @@ export default function DriverHelpScreen() {
                       <ChevronDown size={20} color="#888" strokeWidth={2} />
                     )}
                   </View>
-                  {isExpanded && (
+                  {isExpanded ? (
                     <Text style={styles.faqAnswer}>{item.answer}</Text>
-                  )}
+                  ) : null}
                 </TouchableOpacity>
               );
             })}

@@ -462,13 +462,13 @@ export default function DriverTabsLayout() {
         />
       </Tabs>
 
-      {showSuccessOverlay && (
+      {showSuccessOverlay ? (
         <ApprovalSuccessOverlay onFinish={() => setShowSuccessOverlay(false)} />
-      )}
+      ) : null}
 
-      {showWaiting && !showSuccessOverlay && (
+      {showWaiting && !showSuccessOverlay ? (
         <DriverApprovalWaiting onDismiss={() => setDismissedApproval(true)} />
-      )}
+      ) : null}
     </View>
   );
 }

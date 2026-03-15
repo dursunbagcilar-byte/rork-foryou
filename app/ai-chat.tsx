@@ -84,11 +84,11 @@ const ChatBubble = React.memo(({ role, text, isLast: _isLast }: ChatBubbleProps)
           {text}
         </Text>
       </View>
-      {isUser && (
+      {isUser ? (
         <View style={styles.avatarUser}>
           <User size={14} color="#FFF" strokeWidth={2.2} />
         </View>
-      )}
+      ) : null}
     </Animated.View>
   );
 });

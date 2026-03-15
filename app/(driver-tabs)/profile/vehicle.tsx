@@ -203,7 +203,7 @@ export default function VehicleInfoScreen() {
             </View>
           </View>
 
-          {isEditing && (
+          {isEditing ? (
             <View style={styles.actionBtns}>
               <TouchableOpacity
                 style={styles.cancelButton}

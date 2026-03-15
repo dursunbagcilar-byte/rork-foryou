@@ -364,18 +364,18 @@ export default function AIPhotoEditorScreen() {
                         contentFit={editedImage && selectedMode === 'remove-bg' ? 'contain' : 'cover'}
                         testID={editedImage ? "edited-image" : "original-image"}
                       />
-                      {editedImage && selectedMode === 'remove-bg' && (
+                      {editedImage && selectedMode === 'remove-bg' ? (
                         <View style={styles.carShadow} />
-                      )}
+                      ) : null}
 
-                      {editedImage && (
+                      {editedImage ? (
                         <View style={styles.editedBadge}>
                           <Sparkles size={10} color="#F5A623" />
                           <Text style={styles.editedBadgeText}>AI</Text>
                         </View>
-                      )}
+                      ) : null}
 
-                      {editMutation.isPending && (
+                      {editMutation.isPending ? (
                         <View style={styles.processingOverlay}>
                           <Animated.View style={[styles.processingShimmer, { opacity: shimmerOpacity }]} />
                           <View style={styles.processingContent}>
@@ -420,7 +420,7 @@ export default function AIPhotoEditorScreen() {
                       <ImagePlus size={15} color="#9595A8" />
                       <Text style={styles.controlBtnText}>Değiştir</Text>
                     </TouchableOpacity>
-                    {editedImage && (
+                    {editedImage ? (
                       <TouchableOpacity
                         style={styles.controlBtn}
                         onPress={handleReset}
@@ -429,14 +429,14 @@ export default function AIPhotoEditorScreen() {
                         <RotateCcw size={15} color="#9595A8" />
                         <Text style={styles.controlBtnText}>Sıfırla</Text>
                       </TouchableOpacity>
-                    )}
+                    ) : null}
                   </View>
 
-                  {!editedImage && !editMutation.isPending && (
+                  {!editedImage && !editMutation.isPending ? (
                     <Animated.View style={[styles.createBtnWrap, { transform: [{ scale: pulseAnim }] }]}>
                       <Text style={styles.createHint}>Bir efekt seçerek aracınızı dönüştürün</Text>
                     </Animated.View>
-                  )}
+                  ) : null}
                 </View>
 
                 <View style={styles.optionsSection}>
