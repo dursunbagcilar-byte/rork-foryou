@@ -20,6 +20,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRideForOthers, type RideForOtherPaymentMode, type RideRecipient } from '@/contexts/RideForOthersContext';
 import { useLocation } from '@/hooks/useLocation';
 import { useAppActive } from '@/hooks/useAppActive';
+import { useMounted } from '@/hooks/useMounted';
 import { buildApiUrl, trpc, trpcClient } from '@/lib/trpc';
 import { ISTANBUL_REGION, findBestAlternativeVehicle, getVehicleTypeLabel } from '@/constants/mockData';
 import type { Driver, MockDriverInfo } from '@/constants/mockData';
@@ -49,7 +50,7 @@ const DEFAULT_DRIVER_SEARCH_STATUS = 'Yakınlarınızdaki şoförler kontrol edi
 
 type DriverSearchPanelState = 'searching' | 'no_drivers';
 
-if (Platform.OS === 'web') {
+if (typeof window !== 'undefined') {
   logMapsKeyStatus();
 }
 
@@ -314,6 +315,7 @@ export default function CustomerHomeScreen() {
   const [isScreenFocused, setIsScreenFocused] = useState<boolean>(true);
   const { isAppActive } = useAppActive();
   const isRealtimeScreenActive = isScreenFocused && isAppActive;
+  const mounted = useMounted();
   const lastBackendRideStatusRef = useRef<string | null>(null);
   const completionHandledRideIdRef = useRef<string | null>(null);
   const cancellationHandledRideIdRef = useRef<string | null>(null);
@@ -2775,58 +2777,62 @@ export default function CustomerHomeScreen() {
   return (
     <View style={styles.container}>
 
-      {Platform.OS === 'web' ? (
-        <WebMapFallback
-          style={StyleSheet.absoluteFillObject}
-          latitude={gpsLocation?.latitude ?? mapRegion.latitude}
-          longitude={gpsLocation?.longitude ?? mapRegion.longitude}
-          showUserLocation={true}
-          zoom={16}
-          markers={[
-            ...(!rideRequested ? onlineDrivers.filter(d => d.location).map(d => ({
-              id: d.id,
-              latitude: d.location!.latitude,
-              longitude: d.location!.longitude,
-              title: d.name,
-              emoji: '🚗',
-            })) : []),
-            ...(selectedDest ? [{
-              id: 'destination',
-              latitude: selectedDest.latitude,
-              longitude: selectedDest.longitude,
-              title: selectedDest.name,
-              color: Colors.dark.accent,
-            }] : []),
-            ...(driverFound && !tripStarted && driverLocation ? [{
-              id: 'driver',
-              latitude: driverLocation.latitude,
-              longitude: driverLocation.longitude,
-              title: 'Şoförünüz',
-              emoji: vehicleEmoji,
-            }] : []),
-            ...(tripStarted && tripDriverLocation ? [{
-              id: 'trip-driver',
-              latitude: tripDriverLocation.latitude,
-              longitude: tripDriverLocation.longitude,
-              title: 'Yolculuk',
-              emoji: vehicleEmoji,
-            }] : []),
-          ] as WebMapMarker[]}
-          polylines={[
-            ...(driverFound && !tripStarted && driverRoutePath.length > 1 ? [{
-              id: 'driver-route',
-              coordinates: driverRoutePath,
-              color: '#4A90E2',
-              width: 5,
-            }] : []),
-            ...(tripStarted && tripRoutePath.length > 1 ? [{
-              id: 'trip-route',
-              coordinates: tripRoutePath,
-              color: '#2ECC71',
-              width: 5,
-            }] : []),
-          ] as WebMapPolyline[]}
-        />
+      {(!mounted || Platform.OS === 'web') ? (
+        mounted ? (
+          <WebMapFallback
+            style={StyleSheet.absoluteFillObject}
+            latitude={gpsLocation?.latitude ?? mapRegion.latitude}
+            longitude={gpsLocation?.longitude ?? mapRegion.longitude}
+            showUserLocation={true}
+            zoom={16}
+            markers={[
+              ...(!rideRequested ? onlineDrivers.filter(d => d.location).map(d => ({
+                id: d.id,
+                latitude: d.location!.latitude,
+                longitude: d.location!.longitude,
+                title: d.name,
+                emoji: '🚗',
+              })) : []),
+              ...(selectedDest ? [{
+                id: 'destination',
+                latitude: selectedDest.latitude,
+                longitude: selectedDest.longitude,
+                title: selectedDest.name,
+                color: Colors.dark.accent,
+              }] : []),
+              ...(driverFound && !tripStarted && driverLocation ? [{
+                id: 'driver',
+                latitude: driverLocation.latitude,
+                longitude: driverLocation.longitude,
+                title: 'Şoförünüz',
+                emoji: vehicleEmoji,
+              }] : []),
+              ...(tripStarted && tripDriverLocation ? [{
+                id: 'trip-driver',
+                latitude: tripDriverLocation.latitude,
+                longitude: tripDriverLocation.longitude,
+                title: 'Yolculuk',
+                emoji: vehicleEmoji,
+              }] : []),
+            ] as WebMapMarker[]}
+            polylines={[
+              ...(driverFound && !tripStarted && driverRoutePath.length > 1 ? [{
+                id: 'driver-route',
+                coordinates: driverRoutePath,
+                color: '#4A90E2',
+                width: 5,
+              }] : []),
+              ...(tripStarted && tripRoutePath.length > 1 ? [{
+                id: 'trip-route',
+                coordinates: tripRoutePath,
+                color: '#2ECC71',
+                width: 5,
+              }] : []),
+            ] as WebMapPolyline[]}
+          />
+        ) : (
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#E5E5E5' }]} />
+        )
       ) : (
       <MapView
         ref={mapRef}
@@ -4486,18 +4492,22 @@ export default function CustomerHomeScreen() {
 
                   <Text style={styles.customOrderSectionLabel}>Teslimat Konumu</Text>
                   <View style={styles.customOrderMapWrap}>
-                    {Platform.OS === 'web' ? (
-                      <WebMapFallback
-                        style={styles.customOrderMap}
-                        latitude={customOrderLocation?.latitude ?? mapRegion.latitude}
-                        longitude={customOrderLocation?.longitude ?? mapRegion.longitude}
-                        zoom={16}
-                        interactive={true}
-                        onRegionChange={(lat, lng) => {
-                          setCustomOrderLocation({ latitude: lat, longitude: lng });
-                          setCustomOrderLocationConfirmed(false);
-                        }}
-                      />
+                    {(!mounted || Platform.OS === 'web') ? (
+                      mounted ? (
+                        <WebMapFallback
+                          style={styles.customOrderMap}
+                          latitude={customOrderLocation?.latitude ?? mapRegion.latitude}
+                          longitude={customOrderLocation?.longitude ?? mapRegion.longitude}
+                          zoom={16}
+                          interactive={true}
+                          onRegionChange={(lat, lng) => {
+                            setCustomOrderLocation({ latitude: lat, longitude: lng });
+                            setCustomOrderLocationConfirmed(false);
+                          }}
+                        />
+                      ) : (
+                        <View style={[styles.customOrderMap, { backgroundColor: '#E5E5E5' }]} />
+                      )
                     ) : (
                       <MapView
                         ref={customOrderMapRef}

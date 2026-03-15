@@ -21,6 +21,7 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from '@/hooks/useLocation';
 import { useAppActive } from '@/hooks/useAppActive';
+import { useMounted } from '@/hooks/useMounted';
 import { ISTANBUL_REGION, generateHeatPoints } from '@/constants/mockData';
 import type { HeatPoint } from '@/constants/mockData';
 import { getCityByName, getCityRegion } from '@/constants/cities';
@@ -256,6 +257,8 @@ export default function DriverHomeScreen() {
   const [driverChatMessages, setDriverChatMessages] = useState<Array<{ id: string; text: string; fromMe: boolean; time: string }>>([]);
   const [currentCustomerPhone, setCurrentCustomerPhone] = useState<string>('');
   const [_currentRidePrice, setCurrentRidePrice] = useState<number>(0);
+
+  const mounted = useMounted();
 
   const heatPoints = React.useMemo<HeatPoint[]>(() => {
     return generateHeatPoints(cityCenter.latitude, cityCenter.longitude);
@@ -1670,45 +1673,49 @@ export default function DriverHomeScreen() {
 
   return (
     <View style={styles.container}>
-      {Platform.OS === 'web' ? (
-        <WebMapFallback
-          style={StyleSheet.absoluteFillObject}
-          latitude={gpsLocation?.latitude ?? mapRegion.latitude}
-          longitude={gpsLocation?.longitude ?? mapRegion.longitude}
-          showUserLocation={true}
-          zoom={15}
-          markers={[
-            ...(rideAccepted && !navigatingToDropoff ? [{
-              id: 'pickup',
-              latitude: pickupCoord.latitude,
-              longitude: pickupCoord.longitude,
-              title: pickupLocationTitle,
-              color: '#2ECC71',
-            }] : []),
-            ...(rideAccepted && navigatingToDropoff ? [{
-              id: 'dropoff',
-              latitude: dropoffCoord.latitude,
-              longitude: dropoffCoord.longitude,
-              title: 'Varış Noktası',
-              color: Colors.dark.accent,
-            }] : []),
-            ...(rideAccepted && driverSimLoc ? [{
-              id: 'driver-sim',
-              latitude: driverSimLoc.latitude,
-              longitude: driverSimLoc.longitude,
-              title: 'Siz',
-              emoji: '🚗',
-            }] : []),
-          ] as WebMapMarker[]}
-          polylines={[
-            ...(rideAccepted && routeCoords.length > 1 ? [{
-              id: 'route',
-              coordinates: routeCoords.slice(driverPathIdxRef.current),
-              color: Colors.dark.primary,
-              width: 5,
-            }] : []),
-          ] as WebMapPolyline[]}
-        />
+      {(!mounted || Platform.OS === 'web') ? (
+        mounted ? (
+          <WebMapFallback
+            style={StyleSheet.absoluteFillObject}
+            latitude={gpsLocation?.latitude ?? mapRegion.latitude}
+            longitude={gpsLocation?.longitude ?? mapRegion.longitude}
+            showUserLocation={true}
+            zoom={15}
+            markers={[
+              ...(rideAccepted && !navigatingToDropoff ? [{
+                id: 'pickup',
+                latitude: pickupCoord.latitude,
+                longitude: pickupCoord.longitude,
+                title: pickupLocationTitle,
+                color: '#2ECC71',
+              }] : []),
+              ...(rideAccepted && navigatingToDropoff ? [{
+                id: 'dropoff',
+                latitude: dropoffCoord.latitude,
+                longitude: dropoffCoord.longitude,
+                title: 'Varış Noktası',
+                color: Colors.dark.accent,
+              }] : []),
+              ...(rideAccepted && driverSimLoc ? [{
+                id: 'driver-sim',
+                latitude: driverSimLoc.latitude,
+                longitude: driverSimLoc.longitude,
+                title: 'Siz',
+                emoji: '🚗',
+              }] : []),
+            ] as WebMapMarker[]}
+            polylines={[
+              ...(rideAccepted && routeCoords.length > 1 ? [{
+                id: 'route',
+                coordinates: routeCoords.slice(driverPathIdxRef.current),
+                color: Colors.dark.primary,
+                width: 5,
+              }] : []),
+            ] as WebMapPolyline[]}
+          />
+        ) : (
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#E5E5E5' }]} />
+        )
       ) : (
       <MapView
         ref={mapRef}
