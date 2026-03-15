@@ -375,7 +375,7 @@ export default function AIPhotoEditorScreen() {
                         </View>
                       ) : null}
 
-                      {editMutation.isPending ? (
+                      {editMutation.isPending && (
                         <View style={styles.processingOverlay}>
                           <Animated.View style={[styles.processingShimmer, { opacity: shimmerOpacity }]} />
                           <View style={styles.processingContent}>
