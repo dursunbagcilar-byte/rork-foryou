@@ -3286,7 +3286,7 @@ export default function CustomerHomeScreen() {
                       />
                     </View>
                   </View>
-                )}
+                ) : null}
                 <TrendingMusicPlayer />
 
                 <View style={styles.promoSectionNew} onLayout={onPromoSectionLayout}>
@@ -3763,7 +3763,7 @@ export default function CustomerHomeScreen() {
                       </ScalePressable>
                     </View>
                   </View>
-                )}
+                ) : null}
 
                 <TouchableOpacity
                   style={[
@@ -3789,7 +3789,7 @@ export default function CustomerHomeScreen() {
               </View>
             </SafeAreaView>
           </KeyboardAvoidingView>
-        )}
+        ) : null}
         {shouldShowDriverSearchStatusPanel ? (
           <View style={[styles.statusPanel, styles.statusPanelSearching]} testID="driver-search-status-panel">
             {isDriverUnavailablePanel ? (
@@ -3820,7 +3820,7 @@ export default function CustomerHomeScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-        )}
+        ) : null}
         {showAlternativeSuggestion && alternativeVehicle ? (
           <View style={styles.statusPanel}>
             <View style={styles.altSuggestionIcon}>
@@ -3863,7 +3863,7 @@ export default function CustomerHomeScreen() {
               <Text style={styles.altRejectText}>Vazgeç</Text>
             </TouchableOpacity>
           </View>
-        )}
+        ) : null}
         {reassigning ? (
           <View style={styles.statusPanel}>
             <View style={styles.reassignBanner}>
@@ -3873,7 +3873,7 @@ export default function CustomerHomeScreen() {
             <Text style={styles.statusTitle}>Yeni Şoför Atanıyor...</Text>
             <Text style={styles.statusSub}>Şoförünüz yolculuğu iptal etti. Hemen yeni bir şoför bulunuyor.</Text>
           </View>
-        )}
+        ) : null}
         {rideRequested && driverFound && !tripStarted ? (
           <View style={styles.driverPanel}>
             <View style={styles.driverPanelHandle} />
@@ -3974,7 +3974,7 @@ export default function CustomerHomeScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        )}
+        ) : null}
         {rideRequested && tripStarted ? (
           <View style={styles.driverPanel}>
             <View style={styles.driverPanelHandle} />
@@ -4094,7 +4094,7 @@ export default function CustomerHomeScreen() {
               </View>
             </View>
           </View>
-        )}
+        ) : null}
       </SafeAreaView>
       {showReceiptModal ? (
         <View style={styles.ratingOverlay}>
@@ -4170,7 +4170,7 @@ export default function CustomerHomeScreen() {
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      ) : null}
       {showCancelReasonModal ? (
         <View style={styles.ratingOverlay}>
           <View style={styles.cancelReasonModal}>
@@ -4237,7 +4237,7 @@ export default function CustomerHomeScreen() {
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      ) : null}
       {showSOSModal ? (
         <View style={styles.ratingOverlay}>
           <View style={styles.sosModal}>
@@ -4274,7 +4274,7 @@ export default function CustomerHomeScreen() {
             </View>
           </View>
         </View>
-      )}
+      ) : null}
       {showChatModal ? (
         <KeyboardAvoidingView
           style={styles.ratingOverlay}
@@ -4321,7 +4321,7 @@ export default function CustomerHomeScreen() {
             </View>
           </View>
         </KeyboardAvoidingView>
-      )}
+      ) : null}
       {showRatingModal ? (
         <View style={styles.ratingOverlay}>
           <View style={[
@@ -4397,7 +4397,7 @@ export default function CustomerHomeScreen() {
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      ) : null}
       {showCourierPanel && !showOrderSuccess ? (
         <View style={styles.courierOverlay}>
           <SafeAreaView style={styles.courierSafeArea}>
@@ -4781,7 +4781,7 @@ export default function CustomerHomeScreen() {
             )}
           </SafeAreaView>
         </View>
-      )}
+      ) : null}
       {showOrderSuccess ? (
         <View style={styles.ratingOverlay}>
           <View style={styles.orderSuccessModal}>
@@ -4819,7 +4819,7 @@ export default function CustomerHomeScreen() {
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      ) : null}
 
       {showCustomOrderSuccess ? (
         <View style={styles.ratingOverlay}>
@@ -4860,7 +4860,7 @@ export default function CustomerHomeScreen() {
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      ) : null}
 
     </View>
   );

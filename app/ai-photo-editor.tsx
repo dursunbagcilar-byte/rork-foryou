@@ -343,7 +343,7 @@ export default function AIPhotoEditorScreen() {
             {selectedImage ? (
               <>
                 <View style={styles.imageSection}>
-                  <Animated.View style={[styles.imageFloat, { transform: [{ scale: editedImage ? resultAnim.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1]}) : imageScaleAnim }]}}>
+                  <Animated.View style={[styles.imageFloat, { transform: [{ scale: editedImage ? resultAnim.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1]}) : imageScaleAnim }]}]}>
                     <LinearGradient
                       colors={['#F5A62330', '#FF6B3520', 'transparent']}
                       style={styles.imageGlow}
@@ -433,7 +433,7 @@ export default function AIPhotoEditorScreen() {
                   </View>
 
                   {!editedImage && !editMutation.isPending ? (
-                    <Animated.View style={[styles.createBtnWrap, { transform: [{ scale: pulseAnim }]}}>
+                    <Animated.View style={[styles.createBtnWrap, { transform: [{ scale: pulseAnim }]}]}>
                       <Text style={styles.createHint}>Bir efekt seçerek aracınızı dönüştürün</Text>
                     </Animated.View>
                   ) : null}
@@ -495,7 +495,7 @@ export default function AIPhotoEditorScreen() {
               </>
             ) : (
               <View style={styles.emptyState}>
-                <Animated.View style={[styles.emptyIconContainer, { transform: [{ scale: pulseAnim }]}}>
+                <Animated.View style={[styles.emptyIconContainer, { transform: [{ scale: pulseAnim }]}]}>
                   <LinearGradient
                     colors={['#F5A62325', '#FF6B3515', 'transparent']}
                     style={styles.emptyIconGlow}

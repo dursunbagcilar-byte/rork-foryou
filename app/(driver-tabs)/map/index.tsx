@@ -1975,7 +1975,7 @@ export default function DriverHomeScreen() {
                       </TouchableOpacity>
                     </View>
                   </Animated.View>
-                )}
+                ) : null}
 
                 <View style={styles.driverVehicleCard}>
                   <TouchableOpacity
@@ -2071,7 +2071,7 @@ export default function DriverHomeScreen() {
                 </View>
 
               </View>
-            )}
+            ) : null}
 
             {isActivelyNavigating && !voiceEnabled ? (
               <View style={styles.voiceWarningBanner}>
@@ -2080,14 +2080,14 @@ export default function DriverHomeScreen() {
                   Sesli navigasyon kapalı - sorumluluk size aittir
                 </Text>
               </View>
-            )}
+            ) : null}
 
             {arrivedAtPickup && !confirmedArrival ? (
               <View style={styles.arrivedBanner}>
                 <Text style={styles.arrivedEmoji}>📍</Text>
                 <Text style={styles.arrivedText}>{isBusinessDelivery ? 'İşletme noktasına ulaştınız!' : 'Müşteri noktasına ulaştınız!'}</Text>
               </View>
-            )}
+            ) : null}
 
             {arrivedAtPickup && !confirmedArrival ? (
               <View style={styles.photoWarningBanner}>
@@ -2097,21 +2097,21 @@ export default function DriverHomeScreen() {
                   <Text style={styles.photoWarningText}>Aracınızın dış detay fotoğraf ve videosunu çekin</Text>
                 </View>
               </View>
-            )}
+            ) : null}
 
             {confirmedArrival && !customerPickedUp ? (
               <View style={styles.waitingBanner}>
                 <UserCheck size={18} color={Colors.dark.primary} />
                 <Text style={styles.waitingText}>{isBusinessDelivery ? 'Sipariş hazırlanıyor olabilir...' : 'Müşteriyi bekliyorsunuz...'}</Text>
               </View>
-            )}
+            ) : null}
 
             {customerPickedUp && arrivedAtDropoff ? (
               <View style={styles.arrivedBanner}>
                 <Text style={styles.arrivedEmoji}>🏁</Text>
                 <Text style={styles.arrivedText}>Varış noktasına ulaştınız!</Text>
               </View>
-            )}
+            ) : null}
 
             <View style={styles.safeDriveBanner} testID="driver-safe-drive-banner">
               <AlertTriangle size={16} color="#C96A00" />
@@ -2127,7 +2127,7 @@ export default function DriverHomeScreen() {
                   Bu yolculuk promosyon kapsamında. Müşteriye ücret yansıtılmaz.
                 </Text>
               </View>
-            )}
+            ) : null}
 
             <View style={styles.activeRideHeader}>
               <View style={styles.activeRideAvatar}>
@@ -2182,7 +2182,7 @@ export default function DriverHomeScreen() {
                   );
                 })}
               </ScrollView>
-            )}
+            ) : null}
 
             <View style={styles.requestRoute}>
               <View style={styles.routeDots}>
@@ -2233,7 +2233,7 @@ export default function DriverHomeScreen() {
               </TouchableOpacity>
             )}
           </View>
-        )}
+        ) : null}
       </SafeAreaView>
 
       {showDriverCancelReasonModal ? (
@@ -2302,7 +2302,7 @@ export default function DriverHomeScreen() {
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      ) : null}
 
       {showCourteousWarning ? (
         <View style={styles.loadingOverlay}>
@@ -2323,7 +2323,7 @@ export default function DriverHomeScreen() {
             </TouchableOpacity>
           </View>
         </View>
-      )}
+      ) : null}
 
       {isFetchingRoute ? (
         <View style={styles.loadingOverlay}>
@@ -2331,7 +2331,7 @@ export default function DriverHomeScreen() {
             <Text style={styles.loadingText}>Rota hesaplanıyor...</Text>
           </View>
         </View>
-      )}
+      ) : null}
 
       {showDriverChatModal ? (
         <View style={styles.loadingOverlay}>
@@ -2399,7 +2399,7 @@ export default function DriverHomeScreen() {
             </View>
           </KeyboardAvoidingView>
         </View>
-      )}
+      ) : null}
     </View>
   );
 }

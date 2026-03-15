@@ -1094,7 +1094,7 @@ export default function RegisterDriverScreen() {
                   ) : null}
                 </View>
               </>
-            )}
+            ) : null}
 
             {driverCategory !== 'courier' && (
               <>
@@ -1243,7 +1243,7 @@ export default function RegisterDriverScreen() {
                   <View style={styles.docBox} />
                 </View>
               </View>
-            )}
+            ) : null}
 
             {shouldShowCriminalRecordDocument ? (
               <View style={styles.docSection}>
@@ -1253,7 +1253,7 @@ export default function RegisterDriverScreen() {
                   <View style={styles.docBox} />
                 </View>
               </View>
-            )}
+            ) : null}
 
             {shouldShowTaxCertificateDocument ? (
               <View style={styles.docSection}>
@@ -1272,7 +1272,7 @@ export default function RegisterDriverScreen() {
                   <View style={styles.docBox} />
                 </View>
               </View>
-            )}
+            ) : null}
 
             {driverCategory === 'driver' && (
               <>
