@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useCallback, useState, useMemo } from 'react';
-import { View, StyleSheet, Text, Platform, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, Text, Platform, ActivityIndicator } from 'react-native';
 import { Colors } from '@/constants/colors';
 import { getGoogleMapsApiKey } from '@/utils/maps';
 
@@ -58,11 +58,47 @@ const DARK_MAP_STYLE = [
 let googleMapsLoaded = false;
 let googleMapsLoading = false;
 const loadCallbacks: ((success: boolean) => void)[] = [];
+const GOOGLE_MAPS_SCRIPT_SELECTOR = 'script[data-rork-google-maps="true"], script[src*="maps.googleapis.com/maps/api/js"]';
 
 function resetGlobalState() {
   googleMapsLoaded = false;
   googleMapsLoading = false;
   loadCallbacks.length = 0;
+}
+
+function flushLoadCallbacks(success: boolean): void {
+  const pendingCallbacks = [...loadCallbacks];
+  loadCallbacks.length = 0;
+  pendingCallbacks.forEach((callback) => callback(success));
+}
+
+function resolveGoogleMapsLoad(success: boolean): void {
+  const isReady = success && !!(window as any).google?.maps;
+  googleMapsLoaded = isReady;
+  googleMapsLoading = false;
+  flushLoadCallbacks(isReady);
+}
+
+function waitForGoogleMapsReady(timeoutMs: number = 20000): void {
+  const startTime = Date.now();
+
+  const checkReady = () => {
+    if ((window as any).google?.maps) {
+      console.log('[WebMap] Google Maps JS API loaded successfully');
+      resolveGoogleMapsLoad(true);
+      return;
+    }
+
+    if (Date.now() - startTime >= timeoutMs) {
+      console.error('[WebMap] Script load timeout after 20s');
+      resolveGoogleMapsLoad(false);
+      return;
+    }
+
+    setTimeout(checkReady, 100);
+  };
+
+  checkReady();
 }
 
 function loadGoogleMapsScript(apiKey: string): Promise<boolean> {
@@ -87,12 +123,15 @@ function loadGoogleMapsScript(apiKey: string): Promise<boolean> {
       console.log('[WebMap] Script already loading, waiting...');
       return;
     }
-    googleMapsLoading = true;
 
-    const existingScripts = document.querySelectorAll('script[src*="maps.googleapis.com"]');
-    existingScripts.forEach((s) => {
-      try { s.remove(); } catch (_e) {}
-    });
+    googleMapsLoading = true;
+    const existingScript = document.querySelector(GOOGLE_MAPS_SCRIPT_SELECTOR) as HTMLScriptElement | null;
+
+    if (existingScript) {
+      console.log('[WebMap] Reusing existing Google Maps script');
+      waitForGoogleMapsReady();
+      return;
+    }
 
     console.log('[WebMap] Loading Google Maps script with key:', apiKey.substring(0, 10) + '...');
 
@@ -100,38 +139,15 @@ function loadGoogleMapsScript(apiKey: string): Promise<boolean> {
     script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
     script.async = true;
     script.defer = true;
-
-    const timeoutId = setTimeout(() => {
-      if (!googleMapsLoaded) {
-        console.error('[WebMap] Script load timeout after 20s');
-        googleMapsLoading = false;
-        loadCallbacks.forEach((cb) => cb(false));
-        loadCallbacks.length = 0;
-      }
-    }, 20000);
+    script.setAttribute('data-rork-google-maps', 'true');
 
     script.onload = () => {
-      clearTimeout(timeoutId);
-      const checkReady = () => {
-        if ((window as any).google?.maps) {
-          googleMapsLoaded = true;
-          googleMapsLoading = false;
-          console.log('[WebMap] Google Maps JS API loaded successfully');
-          loadCallbacks.forEach((cb) => cb(true));
-          loadCallbacks.length = 0;
-        } else {
-          setTimeout(checkReady, 100);
-        }
-      };
-      checkReady();
+      waitForGoogleMapsReady();
     };
 
     script.onerror = (e) => {
-      clearTimeout(timeoutId);
-      googleMapsLoading = false;
       console.error('[WebMap] Failed to load Google Maps JS API', e);
-      loadCallbacks.forEach((cb) => cb(false));
-      loadCallbacks.length = 0;
+      resolveGoogleMapsLoad(false);
     };
 
     document.head.appendChild(script);
@@ -158,7 +174,6 @@ export default function WebMapFallback({
   const polylinesRef = useRef<any[]>([]);
   const userMarkerRef = useRef<any>(null);
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
-  const [loadError, setLoadError] = useState<boolean>(false);
   const [retryKey, setRetryKey] = useState<number>(0);
   const initDoneRef = useRef<boolean>(false);
   const retryCountRef = useRef<number>(0);
@@ -169,7 +184,7 @@ export default function WebMapFallback({
 
   const mapId = useMemo(() => {
     instanceCounter += 1;
-    return `webmap-${instanceCounter}-${Date.now()}`;
+    return `webmap-${instanceCounter}-${Date.now()}-${retryKey}`;
   }, [retryKey]);
 
   const centerLat = latitude ?? 41.0082;
@@ -261,7 +276,6 @@ export default function WebMapFallback({
     retryCountRef.current = 0;
     mapInstanceRef.current = null;
     setIsLoaded(false);
-    setLoadError(false);
 
     const apiKey = getGoogleMapsApiKey();
     console.log('[WebMap] API key check:', apiKey ? 'Key found (' + apiKey.substring(0, 8) + '...)' : 'No key');
@@ -279,9 +293,7 @@ export default function WebMapFallback({
       return;
     }
 
-    resetGlobalState();
-
-    loadGoogleMapsScript(apiKey).then((success) => {
+    void loadGoogleMapsScript(apiKey).then((success) => {
       if (success) {
         console.log('[WebMap] Script loaded, scheduling initMap');
         setTimeout(() => initMap(), 200);
@@ -314,7 +326,7 @@ export default function WebMapFallback({
     if (!google?.maps) return;
     const map = mapInstanceRef.current;
 
-    markersRef.current.forEach((m) => { try { m.setMap(null); } catch (_e) {} });
+    markersRef.current.forEach((m) => { try { m.setMap(null); } catch {} });
     markersRef.current = [];
 
     markers.forEach((m) => {
@@ -347,7 +359,7 @@ export default function WebMapFallback({
       try {
         const gMarker = new google.maps.Marker(markerOptions);
         markersRef.current.push(gMarker);
-      } catch (_e) {}
+      } catch {}
     });
   }, [markers, isLoaded]);
 
@@ -357,7 +369,7 @@ export default function WebMapFallback({
     if (!google?.maps) return;
     const map = mapInstanceRef.current;
 
-    polylinesRef.current.forEach((p) => { try { p.setMap(null); } catch (_e) {} });
+    polylinesRef.current.forEach((p) => { try { p.setMap(null); } catch {} });
     polylinesRef.current = [];
 
     polylines.forEach((pl) => {
@@ -372,7 +384,7 @@ export default function WebMapFallback({
           map: map,
         });
         polylinesRef.current.push(gPolyline);
-      } catch (_e) {}
+      } catch {}
     });
   }, [polylines, isLoaded]);
 
@@ -402,15 +414,24 @@ export default function WebMapFallback({
         title: 'Konumunuz',
         zIndex: 999,
       });
-    } catch (_e) {}
+    } catch {}
   }, [centerLat, centerLng, showUserLocation, isLoaded]);
 
   useEffect(() => {
     return () => {
-      markersRef.current.forEach((m) => { try { m.setMap(null); } catch (_e) {} });
-      polylinesRef.current.forEach((p) => { try { p.setMap(null); } catch (_e) {} });
-      if (userMarkerRef.current) { try { userMarkerRef.current.setMap(null); } catch (_e) {} }
+      const google = Platform.OS === 'web' ? (window as any).google : null;
+      if (google?.maps?.event && mapInstanceRef.current) {
+        try {
+          google.maps.event.clearInstanceListeners(mapInstanceRef.current);
+        } catch {}
+      }
+      markersRef.current.forEach((m) => { try { m.setMap(null); } catch {} });
+      polylinesRef.current.forEach((p) => { try { p.setMap(null); } catch {} });
+      if (userMarkerRef.current) { try { userMarkerRef.current.setMap(null); } catch {} }
       if (autoRetryTimerRef.current) { clearTimeout(autoRetryTimerRef.current); }
+      markersRef.current = [];
+      polylinesRef.current = [];
+      userMarkerRef.current = null;
       mapInstanceRef.current = null;
       initDoneRef.current = false;
     };
