@@ -666,10 +666,12 @@ export default function CustomerHomeScreen() {
         useNativeDriver: false,
       }).start();
 
-      Animated.sequence([
-        Animated.timing(venueOpacity, { toValue: 0, duration: 400, useNativeDriver: true }),
-        Animated.timing(venueOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
-      ]).start();
+      if (Platform.OS !== 'web') {
+        Animated.sequence([
+          Animated.timing(venueOpacity, { toValue: 0, duration: 400, useNativeDriver: true }),
+          Animated.timing(venueOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+        ]).start();
+      }
     };
 
     cycleVenue();
@@ -697,6 +699,7 @@ export default function CustomerHomeScreen() {
   }, []);
 
   useEffect(() => {
+    if (Platform.OS === 'web') return;
     const safetyPulse = Animated.loop(
       Animated.sequence([
         Animated.timing(safetyShieldAnim, { toValue: 1, duration: 1800, useNativeDriver: true }),
@@ -1503,13 +1506,15 @@ export default function CustomerHomeScreen() {
         driverCancelTimerRef.current = null;
       }
     };
-  }, [driverFound, currentDriver?.id, tripStarted, reassigning, driverArrived, handleDriverCancelled, pulseAnim]);
+  }, [driverFound, currentDriver?.id, tripStarted, reassigning, driverArrived, handleDriverCancelled]);
 
   useEffect(() => {
     if (!findingDriver) {
       pulseAnim.setValue(1);
       return;
     }
+
+    if (Platform.OS === 'web') return;
 
     const pulse = Animated.loop(
       Animated.sequence([
@@ -3244,10 +3249,12 @@ export default function CustomerHomeScreen() {
                               duration: 10000,
                               useNativeDriver: false,
                             }).start();
-                            Animated.sequence([
-                              Animated.timing(venueOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
-                              Animated.timing(venueOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
-                            ]).start();
+                            if (Platform.OS !== 'web') {
+                              Animated.sequence([
+                                Animated.timing(venueOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
+                                Animated.timing(venueOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+                              ]).start();
+                            }
                           }}
                           activeOpacity={0.7}
                         >
