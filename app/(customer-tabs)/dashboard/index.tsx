@@ -577,6 +577,11 @@ export default function CustomerHomeScreen() {
       : 'Şoför Çağır';
   const isDriverUnavailablePanel = driverSearchPanelState === 'no_drivers';
   const shouldShowDriverSearchStatusPanel = rideRequested && (findingDriver || isDriverUnavailablePanel) && !reassigning;
+  const shouldShowDriverSearchFullScreen = rideRequestSubmitting || shouldShowDriverSearchStatusPanel;
+  const driverSearchOverlayTitle = isDriverUnavailablePanel ? 'Şoför bulunamadı' : 'Şoför aranıyor';
+  const driverSearchOverlaySubtitle = rideRequestSubmitting && driverSearchStatus === DEFAULT_DRIVER_SEARCH_STATUS
+    ? 'Talebiniz alındı. Yakındaki şoförler hemen taranıyor.'
+    : driverSearchStatus;
 
   const couriersByCityQuery = trpc.drivers.getCouriersByCity.useQuery(
     { city: user?.city ?? '', district: user?.district ?? '' },
@@ -1690,6 +1695,15 @@ export default function CustomerHomeScreen() {
     }
 
     setRideRequestSubmitting(true);
+    console.log('[Customer] Priming driver search screen immediately after start ride press');
+    setCurrentBackendRideId(null);
+    setRideRequested(true);
+    setFindingDriver(true);
+    setDriverFound(false);
+    setTripStarted(false);
+    setDriverSearchPanelState('searching');
+    setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
+    toggleSearch(false);
 
     const fallbackPickupLocation: ResolvedPickupLocation = {
       city: user?.city ?? '',
@@ -1721,6 +1735,11 @@ export default function CustomerHomeScreen() {
       } catch (sessionError) {
         const sessionMessage = sessionError instanceof Error ? sessionError.message : 'Oturum doğrulanamadı. Lütfen tekrar giriş yapın.';
         console.log('[Customer] Ride request blocked by session validation:', sessionMessage);
+        setCurrentBackendRideId(null);
+        setRideRequested(false);
+        setFindingDriver(false);
+        setDriverSearchPanelState('searching');
+        setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
         Alert.alert('Yolculuk Başlatılamadı', sessionMessage);
         return;
       }
@@ -1766,12 +1785,22 @@ export default function CustomerHomeScreen() {
           } else if (result.success && result.checkoutFormContent) {
             console.log('[PAYMENT] Got checkout form content, proceeding');
           } else {
+            setCurrentBackendRideId(null);
+            setRideRequested(false);
+            setFindingDriver(false);
+            setDriverSearchPanelState('searching');
+            setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
             Alert.alert('Ödeme Hatası', result.error || 'Kart ödeme başlatılamadı. Nakit ile devam edebilirsiniz.');
             setPaymentLoading(false);
             return;
           }
         } catch (err) {
           console.log('[PAYMENT] Error:', err);
+          setCurrentBackendRideId(null);
+          setRideRequested(false);
+          setFindingDriver(false);
+          setDriverSearchPanelState('searching');
+          setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
           Alert.alert('Ödeme Hatası', 'Kart ödeme sistemi şu an kullanılamıyor. Nakit ile devam edebilirsiniz.');
           setPaymentLoading(false);
           return;
@@ -1856,15 +1885,6 @@ export default function CustomerHomeScreen() {
           Alert.alert('Sıraya Alınamadı', queueErrorMessage);
         }
       };
-
-      setCurrentBackendRideId(null);
-      setRideRequested(true);
-      setFindingDriver(true);
-      setDriverFound(false);
-      setTripStarted(false);
-      setDriverSearchPanelState('searching');
-      setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
-      toggleSearch(false);
 
       const result = await createRideMutation.mutateAsync(rideRequestPayload);
 
@@ -3756,35 +3776,43 @@ export default function CustomerHomeScreen() {
             </SafeAreaView>
           </KeyboardAvoidingView>
         ) : null}
-        {shouldShowDriverSearchStatusPanel ? (
-          <View style={[styles.statusPanel, styles.statusPanelSearching]} testID="driver-search-status-panel">
-            {isDriverUnavailablePanel ? (
-              <View style={styles.statusSearchAlertIcon} testID="driver-search-status-warning-icon">
-                <AlertTriangle size={24} color="#FFFFFF" />
+        {shouldShowDriverSearchFullScreen ? (
+          <View style={styles.statusScreenOverlay} testID="driver-search-status-panel">
+            <SafeAreaView style={styles.statusScreenSafeArea} edges={['top', 'bottom']}>
+              <View style={styles.statusScreenContent}>
+                <View style={styles.statusScreenBadge} testID={isDriverUnavailablePanel ? 'driver-search-status-warning-icon' : 'driver-search-status-loading-icon'}>
+                  {isDriverUnavailablePanel ? (
+                    <AlertTriangle size={30} color="#FFFFFF" />
+                  ) : (
+                    <ActivityIndicator size="large" color="#FFFFFF" />
+                  )}
+                </View>
+                <Text style={styles.statusScreenEyebrow}>CANLI TALEP</Text>
+                <Text style={styles.statusScreenTitle} testID="driver-search-status-title">
+                  {driverSearchOverlayTitle}
+                </Text>
+                <Text style={styles.statusScreenSubtitle} testID="driver-search-status-subtitle">
+                  {driverSearchOverlaySubtitle}
+                </Text>
+                <View style={styles.statusScreenHintCard}>
+                  <Text style={styles.statusScreenHintText}>
+                    {isDriverUnavailablePanel
+                      ? 'İsterseniz hemen tekrar deneyebilir veya biraz sonra yeniden talep oluşturabilirsiniz.'
+                      : 'En uygun şoför bulunur bulunmaz ekran otomatik olarak güncellenecek.'}
+                  </Text>
+                </View>
               </View>
-            ) : (
-              <ActivityIndicator size="large" color="#FFFFFF" />
-            )}
-            <Text style={[styles.statusTitle, styles.statusTitleSearching]} testID="driver-search-status-title">
-              {isDriverUnavailablePanel ? 'Şoför bulunamadı' : 'Şoför aranıyor'}
-            </Text>
-            {isDriverUnavailablePanel ? (
-              <View style={styles.statusSearchMessageCard} testID="driver-search-status-warning-card">
-                <Text style={styles.statusSearchMessageCardText} testID="driver-search-status-subtitle">{driverSearchStatus}</Text>
-              </View>
-            ) : (
-              <Text style={[styles.statusSub, styles.statusSubSearching]} testID="driver-search-status-subtitle">{driverSearchStatus}</Text>
-            )}
-            <TouchableOpacity
-              style={[styles.cancelButton, styles.cancelButtonSearching]}
-              onPress={isDriverUnavailablePanel ? dismissDriverAvailabilityPanel : handleCancelRide}
-              testID="driver-search-cancel-button"
-              activeOpacity={0.85}
-            >
-              <Text style={[styles.cancelButtonText, styles.cancelButtonTextSearching]}>
-                {isDriverUnavailablePanel ? 'Tamam' : 'İptal Et'}
-              </Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.statusScreenActionButton}
+                onPress={isDriverUnavailablePanel ? dismissDriverAvailabilityPanel : handleCancelRide}
+                testID="driver-search-cancel-button"
+                activeOpacity={0.85}
+              >
+                <Text style={styles.statusScreenActionText}>
+                  {isDriverUnavailablePanel ? 'Tamam' : 'İptal Et'}
+                </Text>
+              </TouchableOpacity>
+            </SafeAreaView>
           </View>
         ) : null}
         {showAlternativeSuggestion && alternativeVehicle ? (
@@ -5333,6 +5361,91 @@ const styles = StyleSheet.create({
     fontWeight: '700' as const,
     color: '#FFF',
     includeFontPadding: false,
+  },
+  statusScreenOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+    elevation: 24,
+    backgroundColor: Colors.dark.success,
+  },
+  statusScreenSafeArea: {
+    flex: 1,
+    justifyContent: 'space-between' as const,
+  },
+  statusScreenContent: {
+    flex: 1,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    paddingHorizontal: 28,
+    paddingBottom: 36,
+  },
+  statusScreenBadge: {
+    width: 92,
+    height: 92,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    marginBottom: 28,
+  },
+  statusScreenEyebrow: {
+    fontSize: 12,
+    fontWeight: '700' as const,
+    color: 'rgba(255,255,255,0.74)',
+    letterSpacing: 1.6,
+    textTransform: 'uppercase' as const,
+    marginBottom: 12,
+  },
+  statusScreenTitle: {
+    fontSize: 34,
+    fontWeight: '800' as const,
+    includeFontPadding: false,
+    color: '#FFFFFF',
+    textAlign: 'center' as const,
+  },
+  statusScreenSubtitle: {
+    fontSize: 17,
+    lineHeight: 26,
+    color: '#FFFFFF',
+    textAlign: 'center' as const,
+    marginTop: 14,
+    opacity: 0.96,
+  },
+  statusScreenHintCard: {
+    marginTop: 24,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    borderRadius: 22,
+    backgroundColor: 'rgba(7,44,22,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    width: '100%' as const,
+  },
+  statusScreenHintText: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: 'rgba(255,255,255,0.86)',
+    textAlign: 'center' as const,
+    fontWeight: '600' as const,
+  },
+  statusScreenActionButton: {
+    marginHorizontal: 20,
+    marginBottom: 20,
+    minHeight: 56,
+    borderRadius: 20,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  statusScreenActionText: {
+    fontSize: 17,
+    fontWeight: '700' as const,
+    includeFontPadding: false,
+    color: '#FFFFFF',
   },
   statusPanel: {
     position: 'absolute',
