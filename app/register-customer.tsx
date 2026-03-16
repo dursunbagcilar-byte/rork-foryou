@@ -16,6 +16,7 @@ import { VerificationCodeModal } from '@/components/VerificationCodeModal';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 import { sendRegistrationVerificationCode, type VerificationSmsProvider, verifyRegistrationVerificationCode } from '@/utils/authVerification';
 import { keyboardAvoidingBehavior, keyboardVerticalOffset } from '@/utils/platform';
+import { APP_BRAND } from '@/constants/branding';
 
 interface VerifiedContactSnapshot {
   email: string;
@@ -286,6 +287,7 @@ export default function RegisterCustomerScreen() {
               <User size={16} color={Colors.dark.primary} />
               <Text style={styles.badgeText}>Müşteri Kaydı</Text>
             </View>
+            <Text style={styles.brandText}>{APP_BRAND}</Text>
             <Text style={[styles.title, { fontSize: isSmall ? 26 : isTablet ? 34 : 30 }]}>Hesap Oluştur</Text>
             <Text style={[styles.subtitle, { fontSize: isSmall ? 13 : 15 }]}>Güvenli yolculuk için kayıt olun</Text>
             <View style={styles.formSection}>
@@ -605,6 +607,7 @@ const styles = StyleSheet.create({
 
   badge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(245,166,35,0.1)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, alignSelf: 'flex-start', marginBottom: 16 },
   badgeText: { fontSize: 13, fontWeight: '600', color: Colors.dark.primary },
+  brandText: { fontSize: 12, fontWeight: '800' as const, color: Colors.dark.primary, letterSpacing: 2, marginBottom: 8, textTransform: 'uppercase' },
   title: { fontSize: 30, fontWeight: '800', color: Colors.dark.text, letterSpacing: -0.5 },
   subtitle: { fontSize: 15, color: Colors.dark.textSecondary, marginTop: 6, marginBottom: 28 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: Colors.dark.text, marginBottom: 6 },

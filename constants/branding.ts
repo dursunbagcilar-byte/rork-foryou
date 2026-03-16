@@ -1,1 +1,1 @@
-export const APP_BRAND = 'Dursunkucuk';
+export const APP_BRAND = 'NÖBETÇİ ŞOFÖR';

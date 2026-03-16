@@ -21,6 +21,7 @@ import { VerificationCodeModal } from '@/components/VerificationCodeModal';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
 import { sendRegistrationVerificationCode, type VerificationSmsProvider, verifyRegistrationVerificationCode } from '@/utils/authVerification';
 import { keyboardAvoidingBehavior, keyboardVerticalOffset } from '@/utils/platform';
+import { APP_BRAND } from '@/constants/branding';
 
 type DriverCategory = 'driver' | 'scooter' | 'courier';
 type RegistrationCategory = DriverCategory | 'business';
@@ -780,6 +781,7 @@ export default function RegisterDriverScreen() {
               {registrationCategory === 'business' && <Store size={16} color="#FF8A65" />}
               <Text style={styles.badgeText}>{badgeLabel}</Text>
             </View>
+            <Text style={styles.brandText}>{APP_BRAND}</Text>
             <Text style={[styles.title, { fontSize: isSmall ? 26 : isTablet ? 34 : 30 }]}>{screenTitle}</Text>
             <Text style={[styles.subtitle, { fontSize: isSmall ? 13 : 15 }]}>{screenSubtitle}</Text>
 
@@ -1621,6 +1623,7 @@ const styles = StyleSheet.create({
   backButton: { width: 44, height: 44, borderRadius: 14, backgroundColor: Colors.dark.card, justifyContent: 'center', alignItems: 'center' },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(245,166,35,0.1)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, alignSelf: 'flex-start', marginBottom: 16 },
   badgeText: { fontSize: 13, fontWeight: '600' as const, color: Colors.dark.primary },
+  brandText: { fontSize: 12, fontWeight: '800' as const, color: Colors.dark.primary, letterSpacing: 2, marginBottom: 8, textTransform: 'uppercase' },
   title: { fontSize: 30, fontWeight: '800' as const, color: Colors.dark.text, letterSpacing: -0.5 },
   subtitle: { fontSize: 15, color: Colors.dark.textSecondary, marginTop: 6, marginBottom: 20 },
   categorySelector: {
