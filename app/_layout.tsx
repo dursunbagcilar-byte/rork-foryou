@@ -171,8 +171,8 @@ const bootStyles = StyleSheet.create({
 function AppProviders({ queryClient, ready }: { queryClient: QueryClient; ready: boolean }) {
   return (
     <View style={[bootStyles.container, { opacity: ready ? 1 : 0 }]} pointerEvents={ready ? 'auto' : 'none'}>
-      <trpc.Provider client={trpcClient} queryClient={queryClient}>
-        <QueryClientProvider client={queryClient}>
+      <QueryClientProvider client={queryClient}>
+        <trpc.Provider client={trpcClient} queryClient={queryClient}>
           <GestureHandlerRootView style={{ flex: 1 }}>
             <ErrorBoundary>
               <ThemeProvider>
@@ -193,8 +193,8 @@ function AppProviders({ queryClient, ready }: { queryClient: QueryClient; ready:
               </ThemeProvider>
             </ErrorBoundary>
           </GestureHandlerRootView>
-        </QueryClientProvider>
-      </trpc.Provider>
+        </trpc.Provider>
+      </QueryClientProvider>
     </View>
   );
 }
