@@ -18,7 +18,6 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Car, ShieldCheck, Smartphone, User } from 'lucide-react-native';
 import { useMutation } from '@tanstack/react-query';
-import { APP_BRAND } from '@/constants/branding';
 import { VerificationCodeModal } from '@/components/VerificationCodeModal';
 import { useAuth } from '@/contexts/AuthContext';
 import { getTurkishPhoneValidationError, normalizeTurkishPhone } from '@/utils/phone';
@@ -513,7 +512,7 @@ export default function LoginScreen() {
           </View>
 
           <View style={[styles.heroSection, { paddingHorizontal: isSmall ? 20 : isTablet ? 48 : 28, paddingTop: heroHeight }]}>
-            <Text style={[styles.brand, { fontSize: isSmall ? 38 : isTablet ? 56 : 48 }]}>{APP_BRAND}</Text>
+            <Text style={[styles.brand, { fontSize: isSmall ? 38 : isTablet ? 56 : 48 }]}>NÖBETÇİ ŞOFÖR</Text>
             <Text style={[styles.tagline, { fontSize: isSmall ? 13 : isTablet ? 18 : 16 }]}>Telefonla Güvenli Giriş</Text>
           </View>
 
