@@ -1,11 +1,11 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Animated, Platform,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
-  ArrowLeft, Calendar, Clock, MapPin, Car, CheckCircle, ChevronRight, Bell, X,
+  ArrowLeft, Calendar, Clock, MapPin, Car, CheckCircle, Bell, X,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/contexts/AuthContext';
@@ -83,7 +83,7 @@ export default function ScheduledRideScreen() {
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }).start();
-  }, []);
+  }, [fadeAnim]);
 
   const pickup = user?.city
     ? `${user.city}${user.district ? ' / ' + user.district : ''}`

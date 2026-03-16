@@ -22,12 +22,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from '@/hooks/useLocation';
 import { useAppActive } from '@/hooks/useAppActive';
 import { useMounted } from '@/hooks/useMounted';
-import { ISTANBUL_REGION, generateHeatPoints } from '@/constants/mockData';
-import type { HeatPoint } from '@/constants/mockData';
+import { ISTANBUL_REGION, generateHeatPoints, type HeatPoint, type Driver } from '@/constants/mockData';
 import { getCityByName, getCityRegion } from '@/constants/cities';
 import { calculateDistance, estimateDuration } from '@/constants/pricing';
-import { getVehicleImageUrl } from '@/constants/vehicleImages';
-import type { Driver } from '@/constants/mockData';
 import { buildApiUrl, getSessionToken, trpc } from '@/lib/trpc';
 import { getDbHeaders } from '@/utils/db';
 import { getGoogleMapsApiKey, getGeocodingUrl, logMapsKeyStatus } from '@/utils/maps';
@@ -190,14 +187,9 @@ export default function DriverHomeScreen() {
   const { isAppActive } = useAppActive();
   const isRealtimeScreenActive = isScreenFocused && isAppActive;
 
-  const { location: gpsLocation, permissionGranted: _permissionGranted, isLoading: _locationLoading } = useLocation(true, 5000);
+  const { location: gpsLocation } = useLocation(true, 5000);
 
   const DEFAULT_MEGANE_IMAGE = 'https://r2-pub.rork.com/generated-images/046712ad-abc8-4571-8041-039fc3ac0356.png';
-
-  const _defaultVehicleImageUrl = React.useMemo(
-    () => getVehicleImageUrl(driver?.vehicleModel ?? ''),
-    [driver?.vehicleModel]
-  );
 
   const vehicleImageUrl = customVehicleImage ?? DEFAULT_MEGANE_IMAGE;
 
@@ -241,22 +233,22 @@ export default function DriverHomeScreen() {
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(false);
   const [voiceDisclaimerShown, setVoiceDisclaimerShown] = useState<boolean>(false);
   const [totalDistance, setTotalDistance] = useState<string>('');
-  const [_totalDuration, setTotalDuration] = useState<string>('');
+  const [, setTotalDuration] = useState<string>('');
   const [isFetchingRoute, setIsFetchingRoute] = useState<boolean>(false);
   const [showCourteousWarning, setShowCourteousWarning] = useState<boolean>(false);
   const [dropoffAddressResolved, setDropoffAddressResolved] = useState<string>('');
   const [pickupAddressResolved, setPickupAddressResolved] = useState<string>('');
   const [isProcessingVehicle, setIsProcessingVehicle] = useState<boolean>(false);
-  const [showHeatMap, _setShowHeatMap] = useState<boolean>(true);
+  const [showHeatMap] = useState<boolean>(true);
   const [showDriverCancelReasonModal, setShowDriverCancelReasonModal] = useState<boolean>(false);
   const [selectedDriverCancelReason, setSelectedDriverCancelReason] = useState<string>('');
   const [currentRideId, setCurrentRideId] = useState<string | null>(null);
   const [currentCustomerName, setCurrentCustomerName] = useState<string>('');
   const [showDriverChatModal, setShowDriverChatModal] = useState<boolean>(false);
   const [driverChatInput, setDriverChatInput] = useState<string>('');
-  const [driverChatMessages, setDriverChatMessages] = useState<Array<{ id: string; text: string; fromMe: boolean; time: string }>>([]);
+  const [driverChatMessages, setDriverChatMessages] = useState<{ id: string; text: string; fromMe: boolean; time: string }[]>([]);
   const [currentCustomerPhone, setCurrentCustomerPhone] = useState<string>('');
-  const [_currentRidePrice, setCurrentRidePrice] = useState<number>(0);
+  const [fallbackRidePrice, setCurrentRidePrice] = useState<number>(0);
 
   const mounted = useMounted();
 
@@ -349,7 +341,7 @@ export default function DriverHomeScreen() {
   const activeOrPendingRide = activeRideQuery.data ?? pendingRide;
   const isBusinessDelivery = activeOrPendingRide?.orderType === 'business_delivery' || activeOrPendingRide?.orderType === 'custom_delivery';
   const currentRideIsFree = activeOrPendingRide?.isFreeRide ?? false;
-  const currentRidePrice = activeOrPendingRide?.price ?? _currentRidePrice;
+  const currentRidePrice = activeOrPendingRide?.price ?? fallbackRidePrice;
   const pickupLocationTitle = isBusinessDelivery ? 'İşletme Noktası' : 'Müşteri Konumu';
   const inlineRequestTitle = isBusinessDelivery ? 'Yeni İşletme Siparişi!' : 'Yeni Yolculuk Talebi!';
   const pickupActionLabel = isBusinessDelivery ? 'Siparişi Aldım' : 'Müşteriyi Aldım';
@@ -2411,27 +2403,6 @@ export default function DriverHomeScreen() {
     </View>
   );
 }
-
-const _darkMapStyle = [
-  { elementType: 'geometry', stylers: [{ color: '#242f3e' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#242f3e' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#746855' }] },
-  { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#d59563' }] },
-  { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#d59563' }] },
-  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#263c3f' }] },
-  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#6b9a76' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#38414e' }] },
-  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#212a37' }] },
-  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#9ca5b3' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#746855' }] },
-  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#1f2835' }] },
-  { featureType: 'road.highway', elementType: 'labels.text.fill', stylers: [{ color: '#f3d19c' }] },
-  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#2f3948' }] },
-  { featureType: 'transit.station', elementType: 'labels.text.fill', stylers: [{ color: '#d59563' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#17263c' }] },
-  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#515c6d' }] },
-  { featureType: 'water', elementType: 'labels.text.stroke', stylers: [{ color: '#17263c' }] },
-];
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.dark.background },

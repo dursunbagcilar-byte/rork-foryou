@@ -9,7 +9,6 @@ import {
   Calendar, Award, Zap, CheckCircle, XCircle,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
-import { trpc } from '@/lib/trpc';
 import type { Driver } from '@/constants/mockData';
 
 type Period = 'today' | 'week' | 'month';
@@ -55,11 +54,6 @@ export default function DriverStatsScreen() {
   const driver = user as Driver | null;
   const [period, setPeriod] = useState<Period>('today');
   const fadeAnim = useRef(new Animated.Value(0)).current;
-
-  const _driverRidesQuery = trpc.rides.getDriverRides.useQuery(
-    { driverId: driver?.id ?? '', limit: 50 },
-    { enabled: !!driver?.id }
-  );
 
   const stats = useMemo(() => generateMockStats(driver, period), [driver, period]);
 

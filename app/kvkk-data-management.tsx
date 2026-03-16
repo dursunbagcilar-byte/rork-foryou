@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
   ArrowLeft, Shield, Eye, Trash2, Download, MapPin, Lock,
-  User, Phone, Mail, Car, FileText, ToggleLeft, ChevronRight, AlertTriangle, CheckCircle,
+  User, Car, FileText, ToggleLeft, ChevronRight, AlertTriangle, CheckCircle,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePrivacy } from '@/contexts/PrivacyContext';
@@ -138,9 +138,9 @@ export default function KvkkDataManagementScreen() {
           text: hasLocationConsent ? 'Geri Çek' : 'Etkinleştir',
           onPress: () => {
             if (hasLocationConsent) {
-              revokeLocationConsent();
+              void revokeLocationConsent();
             } else {
-              acceptLocationTracking();
+              void acceptLocationTracking();
             }
           },
         },

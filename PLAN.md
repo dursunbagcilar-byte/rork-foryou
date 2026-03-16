@@ -18,10 +18,12 @@
 - [x] `app/(driver-tabs)/profile/vehicle.tsx` içinde map fragment yapısını stabilize et
 - [x] `app/ai-photo-editor.tsx` içinde ScrollView altındaki fragment wrapper'ını stabilize et
 - [x] Web uyumluluğu için ilgili effect dependency dizilerini netleştir
+- [x] Lint uyarılarına neden olan kullanılmayan state/import ve tip tanımlarını temizle
 
 ## Doğrulama
 - [x] TypeScript typecheck çalıştır
 - [x] Lint çalıştır
+- [x] Web bundle export doğrulaması çalıştır
 - [ ] Web platformunda sayfalar arası geçiş testi
 - [ ] Login/logout sonrası render kontrolü
 - [ ] Driver approval overlay açıp kapatma testi

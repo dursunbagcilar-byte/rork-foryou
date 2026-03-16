@@ -278,11 +278,13 @@ export default function RootLayout() {
 
   const queryClient = getQueryClient();
   const isWebReady = Platform.OS !== 'web' || mounted;
+  const providerTreeKey = Platform.OS === 'web' ? 'web-hydrated-providers' : 'native-providers';
 
   if (!isWebReady) {
     console.log('[Layout] Waiting for web mount before rendering providers');
     return <HydrationShell />;
   }
 
-  return <AppProviders queryClient={queryClient} />;
+  console.log('[Layout] Rendering provider tree with key:', providerTreeKey);
+  return <AppProviders key={providerTreeKey} queryClient={queryClient} />;
 }

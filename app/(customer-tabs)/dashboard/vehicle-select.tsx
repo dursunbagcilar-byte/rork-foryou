@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Animated, Dimensions,
+  View, Text, StyleSheet, TouchableOpacity, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -10,8 +10,6 @@ import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/contexts/AuthContext';
 import { getCityByName } from '@/constants/cities';
 import { useWeather } from '@/hooks/useWeather';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function VehicleSelectScreen() {
   const router = useRouter();
@@ -33,7 +31,7 @@ export default function VehicleSelectScreen() {
       Animated.spring(motoAnim, { toValue: 1, useNativeDriver: true, tension: 60, friction: 10 }),
       Animated.spring(btnAnim, { toValue: 1, useNativeDriver: true, tension: 60, friction: 10 }),
     ]).start();
-  }, []);
+  }, [btnAnim, carAnim, fadeAnim, motoAnim, scooterAnim]);
 
   const isWeatherRestricted = useCallback((pkg: string) => {
     return isRainy && (pkg === 'scooter' || pkg === 'motorcycle');

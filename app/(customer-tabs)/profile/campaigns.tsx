@@ -1,9 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Clock, Megaphone } from 'lucide-react-native';
-import { TouchableOpacity } from 'react-native';
 import { Colors } from '@/constants/colors';
 
 export default function CampaignsScreen() {

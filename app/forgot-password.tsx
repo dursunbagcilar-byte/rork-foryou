@@ -149,7 +149,7 @@ export default function ForgotPasswordScreen() {
   const [confirmPassword, setConfirmPassword] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [localRecoveryMode, setLocalRecoveryMode] = useState<boolean>(false);
-  const [_deliveryIssue, setDeliveryIssue] = useState<string | null>(null);
+  const [, setDeliveryIssue] = useState<string | null>(null);
   const [registeredPhoneMask, setRegisteredPhoneMask] = useState<string | null>(null);
   const [deliveryNote, setDeliveryNote] = useState<string | null>(null);
 

@@ -89,7 +89,7 @@ export default function DriverRatingsScreen() {
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-  }, []);
+  }, [fadeAnim]);
 
   const formatDate = (iso: string) => {
     const d = new Date(iso);

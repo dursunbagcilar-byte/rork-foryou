@@ -343,7 +343,7 @@ export default function CustomerHomeScreen() {
   const venueProgress = useRef(new Animated.Value(0)).current;
   const [venueProgressValue, setVenueProgressValue] = useState(0);
   const [ratingScaleValue, setRatingScaleValue] = useState(0);
-  const [chatMessages, setChatMessages] = useState<Array<{ id: string; text: string; fromMe: boolean; time: string }>>([
+  const [chatMessages, setChatMessages] = useState<{ id: string; text: string; fromMe: boolean; time: string }[]>([
     { id: '1', text: 'Merhaba, yoldayım!', fromMe: false, time: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) },
   ]);
   const [chatInput, setChatInput] = useState<string>('');
@@ -363,10 +363,7 @@ export default function CustomerHomeScreen() {
   const driverPathIndexRef = useRef<number>(0);
   const trackingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const panelAnim = useRef(new Animated.Value(0)).current;
-  const _sheetTranslateY = useRef(new Animated.Value(0)).current;
-  const _sheetDragOffset = useRef(0);
   const sheetScrollOffsetRef = useRef(0);
-  const _sheetMaxExpandRef = useRef(Math.round(SCREEN_HEIGHT * 0.35));
 
   const onPanelLayout = useCallback((_e: { nativeEvent: { layout: { height: number } } }) => {
   }, []);
@@ -860,7 +857,6 @@ export default function CustomerHomeScreen() {
   }, [driverArrived, tripStarted, playArrivalMelody, vehicleEmoji]);
 
   const showGoogleResults = destination.length >= 2;
-  const _showPopularFallback = !showGoogleResults;
 
   const fetchDrivingDistance = useCallback(async (
     originLat: number, originLng: number,
@@ -1402,32 +1398,6 @@ export default function CustomerHomeScreen() {
     }
     return assignedDriver;
   }, [selectedDest, mapRegion.latitude, mapRegion.longitude, fetchDriverRoute, densifyPath, user?.city, user?.district]);
-
-  const _resetRideSearchState = useCallback(() => {
-    console.log('[Customer] Resetting ride search state to idle');
-    setCurrentBackendRideId(null);
-    setRideRequested(false);
-    setFindingDriver(false);
-    setDriverFound(false);
-    setReassigning(false);
-    setShowReassignRecoveryCard(false);
-    setReassignRecoveryDriverName('Şoför');
-    setDestination('');
-    setSelectedDest(null);
-    setCurrentRideFree(false);
-    setCurrentRideRewardSource(null);
-    setDriverLocation(null);
-    setDriverEta(0);
-    setDriverRoutePath([]);
-    setCurrentDriver(null);
-    setPreviousDriverIds([]);
-    setAlternativeVehicle(null);
-    setShowAlternativeSuggestion(false);
-    setDriverArrived(false);
-    setDriverApproaching(false);
-    setDriverSearchPanelState('searching');
-    setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
-  }, []);
 
   const prepareRideRecoveryState = useCallback((cancelledDriverShortName: string) => {
     console.log('[Customer] Preparing recovery state after reassignment failure for:', cancelledDriverShortName);
@@ -2367,28 +2337,6 @@ export default function CustomerHomeScreen() {
     });
     console.log('[SOS] Calling 155 Police');
   }, []);
-
-  const _openInNativeMaps = useCallback((destLat: number, destLng: number, destName: string) => {
-    const encodedName = encodeURIComponent(destName);
-    const originLat = mapRegion.latitude;
-    const originLng = mapRegion.longitude;
-
-    if (Platform.OS === 'ios') {
-      const appleUrl = `maps:0,0?q=${encodedName}&saddr=${originLat},${originLng}&daddr=${destLat},${destLng}`;
-      void Linking.openURL(appleUrl).catch(() => {
-        void Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destLat},${destLng}&travelmode=driving`);
-      });
-    } else if (Platform.OS === 'android') {
-      const googleUrl = `google.navigation:q=${destLat},${destLng}`;
-      void Linking.openURL(googleUrl).catch(() => {
-        void Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destLat},${destLng}&travelmode=driving`);
-      });
-    } else {
-      void Linking.openURL(`https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destLat},${destLng}&travelmode=driving`);
-    }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    console.log('[Maps] Opening native maps for:', destName, 'Platform:', Platform.OS);
-  }, [mapRegion.latitude, mapRegion.longitude]);
 
   useEffect(() => {
     if (rideMessagesQuery.data && rideMessagesQuery.data.length > 0) {

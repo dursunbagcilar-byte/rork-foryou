@@ -2,7 +2,6 @@ import React, { useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated, Linking, Platform,
 } from 'react-native';
-import { Music } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 
 const SPOTIFY_URL = 'spotify://';
@@ -55,7 +54,7 @@ const TrendingMusicPlayer = React.memo(function TrendingMusicPlayer() {
       note1.stop();
       clearTimeout(note2Loop);
     };
-  }, []);
+  }, [glowAnim, noteAnim1, noteAnim2, pulseAnim]);
 
   const handleOpenSpotify = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
