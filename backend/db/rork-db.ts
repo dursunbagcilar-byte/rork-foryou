@@ -43,6 +43,31 @@ function findSingleEnvValue(key: string): string {
   return '';
 }
 
+function syncCachedConfigFromResolvedValues(endpoint: string, namespace: string, token: string): void {
+  const normalizedEndpoint = endpoint.trim();
+  const normalizedNamespace = namespace.trim();
+  const normalizedToken = token.trim();
+
+  if (!normalizedEndpoint || !normalizedNamespace || !normalizedToken || !isValidUrl(normalizedEndpoint)) {
+    return;
+  }
+
+  if (
+    _cachedConfig?.endpoint === normalizedEndpoint
+    && _cachedConfig?.namespace === normalizedNamespace
+    && _cachedConfig?.token === normalizedToken
+  ) {
+    return;
+  }
+
+  _cachedConfig = {
+    endpoint: normalizedEndpoint,
+    namespace: normalizedNamespace,
+    token: normalizedToken,
+  };
+  console.log('[RORK-DB] Cached config hydrated from resolved runtime values');
+}
+
 function tryReadEnvVars(): void {
   const ENV_KEYS_ENDPOINT = ['EXPO_PUBLIC_RORK_DB_ENDPOINT', 'RORK_DB_ENDPOINT', 'DB_ENDPOINT', 'SURREAL_ENDPOINT'];
   const ENV_KEYS_NAMESPACE = ['EXPO_PUBLIC_RORK_DB_NAMESPACE', 'RORK_DB_NAMESPACE', 'DB_NAMESPACE', 'SURREAL_NAMESPACE'];
@@ -59,6 +84,8 @@ function tryReadEnvVars(): void {
   if (!STATIC_ENDPOINT) STATIC_ENDPOINT = findEnvValue(ENV_KEYS_ENDPOINT);
   if (!STATIC_NAMESPACE) STATIC_NAMESPACE = findEnvValue(ENV_KEYS_NAMESPACE);
   if (!STATIC_TOKEN) STATIC_TOKEN = findEnvValue(ENV_KEYS_TOKEN);
+
+  syncCachedConfigFromResolvedValues(STATIC_ENDPOINT, STATIC_NAMESPACE, STATIC_TOKEN);
 }
 
 tryReadEnvVars();
@@ -115,6 +142,8 @@ function getConfig() {
     if (!namespace && _cachedConfig.namespace) namespace = _cachedConfig.namespace;
     if (!token && _cachedConfig.token) token = _cachedConfig.token;
   }
+
+  syncCachedConfigFromResolvedValues(endpoint, namespace, token);
 
   return { endpoint, namespace, token };
 }
@@ -433,6 +462,8 @@ export function reapplyDbConfig(): boolean {
 }
 
 export function getCachedDbConfig(): { endpoint: string; namespace: string; token: string } | null {
+  const config = getConfig();
+  syncCachedConfigFromResolvedValues(config.endpoint, config.namespace, config.token);
   return _cachedConfig;
 }
 
