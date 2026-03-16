@@ -9,10 +9,9 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { X, UserCircle, Settings, Clock, CreditCard, Megaphone, HelpCircle, LogOut, ChevronRight, Shield } from 'lucide-react-native';
+import { X, UserCircle, Settings, Clock, CreditCard, Megaphone, HelpCircle, LogOut, ChevronRight } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -95,11 +94,13 @@ function CustomerDrawerMenu({ visible, onClose }: CustomerDrawerMenuProps) {
     }, 280);
   }, [onClose, logout, router]);
 
-  if (!visible) return null;
-
   const initials = user?.name
     ? user.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
     : 'U';
+
+  if (!visible) {
+    return <View style={{ display: 'none' }} />;
+  }
 
   return (
     <View style={styles.root} pointerEvents="box-none">

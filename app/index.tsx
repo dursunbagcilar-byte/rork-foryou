@@ -73,7 +73,9 @@ export default function WelcomeScreen() {
     );
   }
 
-  if (user) return null;
+  if (user) {
+    return <View style={styles.container} />;
+  }
 
   const iconSize = Math.round(isSmall ? 22 : isTablet ? 34 : 28 * scale);
   const bubbleSize = Math.round(isSmall ? 48 : isTablet ? 72 : 60 * scale);

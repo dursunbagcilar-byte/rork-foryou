@@ -23,7 +23,9 @@ export default function LocationPermissionBanner({
     });
   }, []);
 
-  if (isLoading || permissionGranted) return null;
+  if (isLoading || permissionGranted) {
+    return <View style={{ display: 'none' }} />;
+  }
 
   return (
     <View style={styles.container}>

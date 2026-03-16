@@ -133,11 +133,14 @@ export default function OnboardingScreen() {
           <View style={styles.brandRow}>
             <Text style={styles.brandText}>{APP_BRAND}</Text>
           </View>
-          {!isLast ? (
-            <TouchableOpacity onPress={handleSkip} style={styles.skipBtn} activeOpacity={0.7}>
-              <Text style={styles.skipText}>Atla</Text>
-            </TouchableOpacity>
-          ) : <View style={{ width: 60 }} />}
+          <TouchableOpacity
+            onPress={handleSkip}
+            style={[styles.skipBtn, { display: isLast ? 'none' : 'flex' }]}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.skipText}>Atla</Text>
+          </TouchableOpacity>
+          <View style={{ width: 60, display: isLast ? 'flex' : 'none' }} />
         </View>
 
         <View style={styles.spacer} />
@@ -182,17 +185,13 @@ export default function OnboardingScreen() {
               end={{ x: 1, y: 0 }}
               style={styles.nextBtn}
             >
-              {isLast ? (
-                <>
-                  <Text style={styles.nextBtnText}>Başla</Text>
-                  <Sparkles size={18} color="#FFF" strokeWidth={2} />
-                </>
-              ) : (
-                <>
-                  <Text style={styles.nextBtnText}>Devam</Text>
-                  <ArrowRight size={18} color="#FFF" strokeWidth={2} />
-                </>
-              )}
+              <Text style={styles.nextBtnText}>{isLast ? 'Başla' : 'Devam'}</Text>
+              <View style={{ display: isLast ? 'flex' : 'none' }}>
+                <Sparkles size={18} color="#FFF" strokeWidth={2} />
+              </View>
+              <View style={{ display: isLast ? 'none' : 'flex' }}>
+                <ArrowRight size={18} color="#FFF" strokeWidth={2} />
+              </View>
             </LinearGradient>
           </TouchableOpacity>
         </View>

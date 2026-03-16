@@ -458,11 +458,14 @@ export default function WebMapFallback({
 
     return () => {
       try {
-        if (mapDiv.parentNode === domNode) {
-          domNode.removeChild(mapDiv);
+        if (mapDiv && mapDiv.parentNode) {
+          mapDiv.parentNode.removeChild(mapDiv);
         }
       } catch (e) {
-        console.log('[WebMap] Cleanup error:', e);
+        console.log('[WebMap] Cleanup error (safe):', e);
+        try {
+          mapDiv.remove();
+        } catch {}
       }
     };
   }, [mapId]);

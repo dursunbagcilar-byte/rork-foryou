@@ -116,11 +116,10 @@ export function VerificationCodeModal({
               activeOpacity={0.85}
               testID={`${testIDPrefix}-confirm-button`}
             >
-              {isConfirming ? (
+              <View style={{ display: isConfirming ? 'flex' : 'none' }}>
                 <ActivityIndicator color={Colors.dark.background} size="small" />
-              ) : (
-                <Text style={styles.confirmButtonText}>{confirmLabel}</Text>
-              )}
+              </View>
+              <Text style={[styles.confirmButtonText, { display: isConfirming ? 'none' : 'flex' }]}>{confirmLabel}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -130,14 +129,13 @@ export function VerificationCodeModal({
               activeOpacity={0.75}
               testID={`${testIDPrefix}-resend-button`}
             >
-              {isResending ? (
+              <View style={{ display: isResending ? 'flex' : 'none' }}>
                 <ActivityIndicator color={Colors.dark.primary} size="small" />
-              ) : (
-                <>
-                  <RefreshCw size={16} color={Colors.dark.primary} />
-                  <Text style={styles.resendButtonText}>{resendLabel}</Text>
-                </>
-              )}
+              </View>
+              <View style={{ display: isResending ? 'none' : 'flex', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <RefreshCw size={16} color={Colors.dark.primary} />
+                <Text style={styles.resendButtonText}>{resendLabel}</Text>
+              </View>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>

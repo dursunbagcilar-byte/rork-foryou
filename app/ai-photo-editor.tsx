@@ -319,19 +319,16 @@ export default function AIPhotoEditorScreen() {
               <Text style={styles.headerTitle}>AI Editör</Text>
             </View>
             <View style={styles.headerRight}>
-              {editedImage ? (
-                <TouchableOpacity
-                  onPress={handleApply}
-                  style={styles.applyBtn}
-                  activeOpacity={0.7}
-                  testID="photo-editor-apply"
-                >
-                  <Check size={16} color="#0A0A12" strokeWidth={3} />
-                  <Text style={styles.applyBtnText}>Oluştur</Text>
-                </TouchableOpacity>
-              ) : (
-                <View style={styles.headerPlaceholder} />
-              )}
+              <TouchableOpacity
+                onPress={handleApply}
+                style={[styles.applyBtn, { display: editedImage ? 'flex' : 'none' }]}
+                activeOpacity={0.7}
+                testID="photo-editor-apply"
+              >
+                <Check size={16} color="#0A0A12" strokeWidth={3} />
+                <Text style={styles.applyBtnText}>Oluştur</Text>
+              </TouchableOpacity>
+              <View style={[styles.headerPlaceholder, { display: editedImage ? 'none' : 'flex' }]} />
             </View>
           </View>
 

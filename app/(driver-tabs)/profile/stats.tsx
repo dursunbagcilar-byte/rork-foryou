@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
   ArrowLeft, TrendingUp, Car, Clock, Star, Target,
-  Percent, Calendar, Award, Zap, CheckCircle, XCircle,
+  Calendar, Award, Zap, CheckCircle, XCircle,
 } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { trpc } from '@/lib/trpc';
@@ -56,7 +56,7 @@ export default function DriverStatsScreen() {
   const [period, setPeriod] = useState<Period>('today');
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  const driverRidesQuery = trpc.rides.getDriverRides.useQuery(
+  const _driverRidesQuery = trpc.rides.getDriverRides.useQuery(
     { driverId: driver?.id ?? '', limit: 50 },
     { enabled: !!driver?.id }
   );
@@ -66,9 +66,11 @@ export default function DriverStatsScreen() {
   useEffect(() => {
     fadeAnim.setValue(0);
     Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
-  }, [period]);
+  }, [period, fadeAnim]);
 
-  if (!stats) return null;
+  if (!stats) {
+    return <View style={styles.container} />;
+  }
 
   return (
     <View style={styles.container}>

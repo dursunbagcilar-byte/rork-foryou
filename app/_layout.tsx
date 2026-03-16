@@ -1,3 +1,4 @@
+import '@/utils/webDomPatch';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
@@ -63,7 +64,7 @@ function getQueryClient() {
   return queryClientSingleton;
 }
 
-console.log('[Layout] Root layout module loaded v3 - Platform:', Platform.OS);
+console.log('[Layout] Root layout module loaded v5 - Platform:', Platform.OS);
 
 function NotificationOverlay() {
   const { notification, dismiss } = useNotificationContext();
@@ -167,36 +168,34 @@ const bootStyles = StyleSheet.create({
   },
 });
 
-function BootShell() {
-  return <View style={bootStyles.container} testID="web-hydration-shell" />;
-}
-
-function AppProviders({ queryClient }: { queryClient: QueryClient }) {
+function AppProviders({ queryClient, ready }: { queryClient: QueryClient; ready: boolean }) {
   return (
-    <trpc.Provider client={trpcClient} queryClient={queryClient}>
-      <QueryClientProvider client={queryClient}>
-        <GestureHandlerRootView style={{ flex: 1 }}>
-          <ErrorBoundary>
-            <ThemeProvider>
-              <PrivacyProvider>
-                <SecurityProvider>
-                  <AuthProvider>
-                    <RideForOthersProvider>
-                      <LanguageProvider>
-                        <NotificationProvider>
-                          <NotificationOverlay />
-                          <RootLayoutNav />
-                        </NotificationProvider>
-                      </LanguageProvider>
-                    </RideForOthersProvider>
-                  </AuthProvider>
-                </SecurityProvider>
-              </PrivacyProvider>
-            </ThemeProvider>
-          </ErrorBoundary>
-        </GestureHandlerRootView>
-      </QueryClientProvider>
-    </trpc.Provider>
+    <View style={[bootStyles.container, { opacity: ready ? 1 : 0 }]} pointerEvents={ready ? 'auto' : 'none'}>
+      <trpc.Provider client={trpcClient} queryClient={queryClient}>
+        <QueryClientProvider client={queryClient}>
+          <GestureHandlerRootView style={{ flex: 1 }}>
+            <ErrorBoundary>
+              <ThemeProvider>
+                <PrivacyProvider>
+                  <SecurityProvider>
+                    <AuthProvider>
+                      <RideForOthersProvider>
+                        <LanguageProvider>
+                          <NotificationProvider>
+                            <NotificationOverlay />
+                            <RootLayoutNav />
+                          </NotificationProvider>
+                        </LanguageProvider>
+                      </RideForOthersProvider>
+                    </AuthProvider>
+                  </SecurityProvider>
+                </PrivacyProvider>
+              </ThemeProvider>
+            </ErrorBoundary>
+          </GestureHandlerRootView>
+        </QueryClientProvider>
+      </trpc.Provider>
+    </View>
   );
 }
 
@@ -270,12 +269,12 @@ export default function RootLayout() {
     return <CrashFallback error={initError} onRetry={() => setInitError(null)} />;
   }
 
-  if (Platform.OS === 'web' && !mounted) {
+  const queryClient = getQueryClient();
+  const isWebReady = Platform.OS !== 'web' || mounted;
+
+  if (!isWebReady) {
     console.log('[Layout] Waiting for web mount before rendering providers');
-    return <BootShell />;
   }
 
-  const queryClient = getQueryClient();
-
-  return <AppProviders queryClient={queryClient} />;
+  return <AppProviders queryClient={queryClient} ready={isWebReady} />;
 }
