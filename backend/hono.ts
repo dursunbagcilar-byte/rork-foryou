@@ -4,7 +4,7 @@ import { cors } from "hono/cors";
 
 import { appRouter } from "./trpc/app-router";
 import { createContext } from "./trpc/create-context";
-import { db, initializeStore, bootstrapDbConfig, reinitializeStore, forceReloadStore, getPersistentStoreStatus } from "./db/store";
+import { db, initializeStore, bootstrapDbConfig, ensureBootstrapStoreReady, isStoreReadyForDatabaseMode, reinitializeStore, forceReloadStore, getPersistentStoreStatus } from "./db/store";
 import { setDbConfig, isDbConfigured, getCachedDbConfig, dbGet } from "./db/rork-db";
 import type { User, Driver, Business, BusinessMenuItem, Session } from "./db/types";
 import { createSignedSessionRecord, parseSignedSessionToken } from "./utils/session-token";
@@ -829,22 +829,23 @@ async function ensureDbReady(dbEp?: string, dbNs?: string, dbTk?: string): Promi
 
     if (_dbInitPromise) {
       await _dbInitPromise;
-      return _dbReady;
+      return _dbReady || isStoreReadyForDatabaseMode();
     }
 
     const initStart = Date.now();
     _dbInitPromise = (async () => {
       try {
         await reinitializeStore();
-        _dbReady = isDbConfigured();
-        console.log('[SERVER] DB reloaded from cached config in', Date.now() - initStart, 'ms, users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
+        _dbReady = isStoreReadyForDatabaseMode();
+        console.log('[SERVER] DB reloaded from cached config in', Date.now() - initStart, 'ms, users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length, 'ready:', _dbReady);
       } catch (error) {
-        console.log('[SERVER] Cached DB reload error:', error, 'elapsed:', Date.now() - initStart, 'ms');
+        _dbReady = isStoreReadyForDatabaseMode();
+        console.log('[SERVER] Cached DB reload error:', error, 'elapsed:', Date.now() - initStart, 'ms', 'ready:', _dbReady);
       }
     })();
     await _dbInitPromise;
     _dbInitPromise = null;
-    return _dbReady;
+    return _dbReady || isStoreReadyForDatabaseMode();
   }
 
   if (!isValidDbUrl(resolvedEndpoint)) {
@@ -855,10 +856,10 @@ async function ensureDbReady(dbEp?: string, dbNs?: string, dbTk?: string): Promi
   const wasConfigured = isDbConfigured();
   setDbConfig(resolvedEndpoint, resolvedNamespace, resolvedToken);
 
-  if (!_dbReady) {
+  if (!_dbReady || !isStoreReadyForDatabaseMode()) {
     if (_dbInitPromise) {
       await _dbInitPromise;
-      if (_dbReady) return true;
+      if (_dbReady || isStoreReadyForDatabaseMode()) return true;
     }
 
     const initStart = Date.now();
@@ -866,19 +867,20 @@ async function ensureDbReady(dbEp?: string, dbNs?: string, dbTk?: string): Promi
       try {
         setDbConfig(resolvedEndpoint, resolvedNamespace, resolvedToken);
         await reinitializeStore();
-        _dbReady = true;
-        console.log('[SERVER] DB ready in', Date.now() - initStart, 'ms, users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length);
+        _dbReady = isStoreReadyForDatabaseMode();
+        console.log('[SERVER] DB ready in', Date.now() - initStart, 'ms, users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length, 'ready:', _dbReady);
       } catch (e) {
         console.log('[SERVER] DB init error:', e, 'elapsed:', Date.now() - initStart, 'ms');
         setDbConfig(resolvedEndpoint, resolvedNamespace, resolvedToken);
         try {
           await bootstrapDbConfig(resolvedEndpoint, resolvedNamespace, resolvedToken);
-          _dbReady = isDbConfigured();
+          _dbReady = isStoreReadyForDatabaseMode();
           if (_dbReady) {
             console.log('[SERVER] DB recovered via bootstrap fallback in', Date.now() - initStart, 'ms');
           }
         } catch (e2) {
-          console.log('[SERVER] DB bootstrap fallback also failed:', e2);
+          _dbReady = isStoreReadyForDatabaseMode();
+          console.log('[SERVER] DB bootstrap fallback also failed:', e2, 'ready:', _dbReady);
         }
       }
     })();
@@ -888,12 +890,13 @@ async function ensureDbReady(dbEp?: string, dbNs?: string, dbTk?: string): Promi
     setDbConfig(resolvedEndpoint, resolvedNamespace, resolvedToken);
   }
 
+  _dbReady = isStoreReadyForDatabaseMode();
   return _dbReady;
 }
 
 function getCurrentStorageMode(): 'database' | 'snapshot' | 'memory' {
   const persistentStore = getPersistentStoreStatus();
-  if (_dbReady || isDbConfigured()) {
+  if (_dbReady || isStoreReadyForDatabaseMode()) {
     return 'database';
   }
   return persistentStore.available ? 'snapshot' : 'memory';
@@ -1247,21 +1250,17 @@ app.get("/health", async (c) => {
     } catch (e) {
       console.log('[SERVER] Health: ensureDbReady error:', e);
     }
-    if (!_dbReady && !isDbConfigured()) {
+    if (!isStoreReadyForDatabaseMode()) {
       try {
-        const bootstrapResult = await bootstrapDbConfig(ep, ns, tk);
-        if (bootstrapResult) {
-          _dbReady = true;
-          console.log('[SERVER] Health: DB bootstrapped');
-        }
+        const bootstrapResult = await ensureBootstrapStoreReady('health-check');
+        _dbReady = bootstrapResult || isStoreReadyForDatabaseMode();
+        console.log('[SERVER] Health: bootstrap sync attempted, ready:', _dbReady);
       } catch (e) {
-        console.log('[SERVER] Health: bootstrap fallback failed:', e);
+        _dbReady = isStoreReadyForDatabaseMode();
+        console.log('[SERVER] Health: bootstrap fallback failed:', e, 'ready:', _dbReady);
       }
-    }
-    if (!_dbReady) {
-      setDbConfig(ep, ns, tk);
-      _dbReady = isDbConfigured();
-      console.log('[SERVER] Health: forced dbReady after setDbConfig:', _dbReady);
+    } else {
+      _dbReady = true;
     }
   } else {
     console.log('[SERVER] Health: DB config incomplete - endpoint:', !!ep, 'namespace:', !!ns, 'token:', !!tk);
@@ -2756,13 +2755,11 @@ app.post("/bootstrap-db", async (c) => {
 
     setDbConfig(ep, ns, tk);
     const result = await bootstrapDbConfig(ep, ns, tk);
-    if (result || isDbConfigured()) {
-      _dbReady = true;
-    }
+    _dbReady = result || isStoreReadyForDatabaseMode();
     const persistentStore = getPersistentStoreStatus();
     return c.json({
-      success: result || isDbConfigured(),
-      configured: result || isDbConfigured(),
+      success: _dbReady,
+      configured: isDbConfigured(),
       storageMode: getCurrentStorageMode(),
       persistentStoreAvailable: persistentStore.available,
       persistentStoreLastSavedAt: persistentStore.lastSavedAt,

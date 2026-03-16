@@ -807,6 +807,112 @@ function tryRecoverDbConfig(): boolean {
   return isDbConfigured();
 }
 
+function hasLoadedPersistentStoreData(): boolean {
+  return users.size > 0
+    || drivers.size > 0
+    || rides.size > 0
+    || passwords.size > 0
+    || sessions.size > 0
+    || driverDocuments.size > 0
+    || businesses.size > 0;
+}
+
+function markDbAsConfigured(): void {
+  _dbWasConfigured = true;
+  _lastDbCheckTime = Date.now();
+}
+
+async function flushPendingOpsIfNeeded(reason: string): Promise<void> {
+  const pendingCount = getPendingOpsCount();
+  if (pendingCount <= 0) {
+    return;
+  }
+
+  console.log(`[STORE] Flushing ${pendingCount} pending ops after ${reason}...`);
+  await flushPendingOps();
+}
+
+async function syncStoreAfterBootstrap(reason: string): Promise<void> {
+  console.log('[STORE] Bootstrap sync start:', reason, 'initialized:', _initialized, 'dbWasConfigured:', _dbWasConfigured, 'users:', users.size, 'drivers:', drivers.size);
+  await loadFromDb();
+  await seedAdminAccount();
+  await flushPendingOpsIfNeeded(reason);
+  await persistSnapshotNow(reason);
+  console.log('[STORE] Bootstrap sync complete:', reason, 'users:', users.size, 'drivers:', drivers.size, 'rides:', rides.size, 'sessions:', sessions.size);
+}
+
+async function persistBootstrapSnapshot(reason: string): Promise<void> {
+  await flushPendingOpsIfNeeded(reason);
+  await persistSnapshotNow(reason);
+}
+
+function shouldReloadStoreOnBootstrap(): boolean {
+  if (!_initialized || !_dbWasConfigured) {
+    return true;
+  }
+
+  return !hasLoadedPersistentStoreData();
+}
+
+function isStoreCurrentlyUsable(): boolean {
+  if (!_initialized && !hasLoadedPersistentStoreData()) {
+    return false;
+  }
+
+  return _dbWasConfigured || hasLoadedPersistentStoreData();
+}
+
+export function getStoreInitializationStatus(): {
+  initialized: boolean;
+  dbWasConfigured: boolean;
+  hasLoadedData: boolean;
+  users: number;
+  drivers: number;
+} {
+  return {
+    initialized: _initialized,
+    dbWasConfigured: _dbWasConfigured,
+    hasLoadedData: hasLoadedPersistentStoreData(),
+    users: users.size,
+    drivers: drivers.size,
+  };
+}
+
+export function isStoreReadyForDatabaseMode(): boolean {
+  return isStoreCurrentlyUsable();
+}
+
+export async function ensureBootstrapStoreReady(reason: string): Promise<boolean> {
+  if (!isDbConfigured()) {
+    console.log('[STORE] ensureBootstrapStoreReady skipped - DB not configured:', reason);
+    return false;
+  }
+
+  try {
+    if (shouldReloadStoreOnBootstrap()) {
+      markDbAsConfigured();
+      await syncStoreAfterBootstrap(reason);
+      return true;
+    }
+
+    markDbAsConfigured();
+    await persistBootstrapSnapshot(reason);
+    return true;
+  } catch (error) {
+    console.log('[STORE] ensureBootstrapStoreReady error:', reason, error);
+    return false;
+  }
+}
+
+export async function bootstrapDbConfig(endpoint: string, namespace: string, token: string): Promise<boolean> {
+  const result = setDbConfig(endpoint, namespace, token);
+  if (!result) {
+    return false;
+  }
+
+  return ensureBootstrapStoreReady('bootstrap-db-config');
+}
+
 export async function initializeStore(): Promise<void> {
   if (_initialized) {
     if (!_dbWasConfigured && isDbConfigured()) {
@@ -894,24 +1000,6 @@ export async function initializeStore(): Promise<void> {
   return _initPromise;
 }
 
-export async function bootstrapDbConfig(endpoint: string, namespace: string, token: string): Promise<boolean> {
-  const wasConfigured = isDbConfigured();
-  const result = setDbConfig(endpoint, namespace, token);
-  if (!result) return false;
-  
-  if (!wasConfigured && isDbConfigured()) {
-    console.log('[STORE] DB config bootstrapped from frontend, loading data...');
-    _dbWasConfigured = true;
-    await loadFromDb();
-    await seedAdminAccount();
-    await persistSnapshotNow('bootstrap-db-config');
-    console.log('[STORE] Bootstrap load complete - users:', users.size, 'drivers:', drivers.size);
-    return true;
-  }
-
-  await persistSnapshotNow('bootstrap-db-config-existing');
-  return result;
-}
 
 export async function reinitializeStore(): Promise<void> {
   console.log('[STORE] Full reinitialize requested... dbConfigured:', isDbConfigured());
