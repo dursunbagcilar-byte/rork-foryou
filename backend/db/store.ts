@@ -33,6 +33,7 @@ type DriverLocationEntry = { latitude: number; longitude: number; updatedAt: num
 interface StoreSnapshot {
   version: number;
   savedAt: string;
+  dbConfig?: { endpoint: string; namespace: string; token: string };
   users: User[];
   drivers: Driver[];
   rides: Ride[];
@@ -435,9 +436,13 @@ function hydrateSnapshot(snapshot: StoreSnapshot): void {
 }
 
 function buildStoreSnapshot(): StoreSnapshot {
+  const currentDbConfig = getCachedDbConfig();
   return {
     version: SNAPSHOT_VERSION,
     savedAt: new Date().toISOString(),
+    dbConfig: currentDbConfig && currentDbConfig.endpoint && currentDbConfig.namespace && currentDbConfig.token
+      ? { endpoint: currentDbConfig.endpoint, namespace: currentDbConfig.namespace, token: currentDbConfig.token }
+      : undefined,
     users: Array.from(users.values()),
     drivers: Array.from(drivers.values()),
     rides: Array.from(rides.values()),
@@ -560,6 +565,12 @@ async function loadFromSnapshot(): Promise<boolean> {
         referralCodeIndex: Array.isArray(parsed.meta?.referralCodeIndex) ? parsed.meta.referralCodeIndex as Array<{ code: string; userId: string }> : [],
       },
     };
+
+    if (snapshot.dbConfig && snapshot.dbConfig.endpoint && snapshot.dbConfig.namespace && snapshot.dbConfig.token) {
+      console.log('[STORE] Recovering DB config from snapshot...');
+      setDbConfig(snapshot.dbConfig.endpoint, snapshot.dbConfig.namespace, snapshot.dbConfig.token);
+      console.log('[STORE] DB config recovered from snapshot, endpoint:', snapshot.dbConfig.endpoint.substring(0, 30) + '...');
+    }
 
     hydrateSnapshot(snapshot);
     _snapshotAvailable = true;

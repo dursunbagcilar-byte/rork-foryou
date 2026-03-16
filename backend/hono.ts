@@ -1217,6 +1217,16 @@ app.use("*", async (c, next) => {
   const { ep, ns, tk } = resolveBootstrapDbConfig(c, bootstrapBody);
   if (ep && ns && tk) {
     await ensureDbReady(ep, ns, tk);
+  } else if (!_dbReady && !isDbConfigured()) {
+    try {
+      await initializeStore();
+      if (isDbConfigured() || isStoreReadyForDatabaseMode()) {
+        _dbReady = true;
+        console.log('[SERVER] DB recovered from snapshot during middleware init');
+      }
+    } catch (e) {
+      console.log('[SERVER] Middleware snapshot recovery attempt failed:', e);
+    }
   }
   await next();
 });
@@ -1263,26 +1273,38 @@ app.get("/health", async (c) => {
       _dbReady = true;
     }
   } else {
-    console.log('[SERVER] Health: DB config incomplete - endpoint:', !!ep, 'namespace:', !!ns, 'token:', !!tk);
+    console.log('[SERVER] Health: DB config incomplete from headers - endpoint:', !!ep, 'namespace:', !!ns, 'token:', !!tk);
+    if (!isDbConfigured()) {
+      try {
+        await initializeStore();
+        if (isDbConfigured() || isStoreReadyForDatabaseMode()) {
+          _dbReady = true;
+          console.log('[SERVER] Health: DB recovered from snapshot/cache');
+        }
+      } catch (e) {
+        console.log('[SERVER] Health: snapshot recovery failed:', e);
+      }
+    }
   }
 
-  const configured = isDbConfigured();
-  const persistentStore = getPersistentStoreStatus();
-  const storageMode = getCurrentStorageMode();
-  const ready = storageMode !== 'memory';
   const netgsmStatus = getNetgsmConfigStatus();
+  const finalConfigured = isDbConfigured();
+  const finalStorageMode = getCurrentStorageMode();
+  const finalReady = finalStorageMode !== 'memory';
+  const finalPersistentStore = getPersistentStoreStatus();
   const resolvedHealthConfig = resolveDbHeaders(c);
-  console.log('[SERVER] Health response: configured:', configured, 'ready:', ready, 'storageMode:', storageMode, 'snapshotAvailable:', persistentStore.available, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length, 'smsConfigured:', netgsmStatus.configured, 'smsSenderName:', netgsmStatus.senderName ?? 'none', 'smsConfiguredHeader:', netgsmStatus.configuredSenderName ?? 'none', 'smsHeaderMismatch:', netgsmStatus.senderHeaderMismatch, 'smsSenderLocked:', netgsmStatus.senderLocked);
+  const effectiveDbAvailable = finalConfigured || resolvedHealthConfig.ep && resolvedHealthConfig.ns && resolvedHealthConfig.tk;
+  console.log('[SERVER] Health response: configured:', finalConfigured, 'ready:', finalReady, 'storageMode:', finalStorageMode, 'snapshotAvailable:', finalPersistentStore.available, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length, 'smsConfigured:', netgsmStatus.configured);
   return c.json({
     status: "ok",
-    version: "67",
-    dbConfigured: configured,
-    dbReady: ready,
-    storageMode,
-    persistentStoreAvailable: persistentStore.available,
-    persistentStoreLastSavedAt: persistentStore.lastSavedAt,
-    dbMissing: (!resolvedHealthConfig.ep || !resolvedHealthConfig.ns || !resolvedHealthConfig.tk)
-      ? { endpoint: !resolvedHealthConfig.ep, namespace: !resolvedHealthConfig.ns, token: !resolvedHealthConfig.tk }
+    version: "68",
+    dbConfigured: finalConfigured,
+    dbReady: finalReady,
+    storageMode: finalStorageMode,
+    persistentStoreAvailable: finalPersistentStore.available,
+    persistentStoreLastSavedAt: finalPersistentStore.lastSavedAt,
+    dbMissing: !effectiveDbAvailable
+      ? { endpoint: !resolvedHealthConfig.ep && !finalConfigured, namespace: !resolvedHealthConfig.ns && !finalConfigured, token: !resolvedHealthConfig.tk && !finalConfigured }
       : undefined,
     smsProvider: AUTH_SMS_PROVIDER,
     smsConfigured: netgsmStatus.configured,
