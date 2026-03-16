@@ -364,6 +364,7 @@ export default function CustomerHomeScreen() {
   const trackingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const panelAnim = useRef(new Animated.Value(0)).current;
   const sheetScrollOffsetRef = useRef(0);
+  const destinationInputRef = useRef<TextInput | null>(null);
 
   const onPanelLayout = useCallback((_e: { nativeEvent: { layout: { height: number } } }) => {
   }, []);
@@ -374,15 +375,25 @@ export default function CustomerHomeScreen() {
   const onPromoSectionLayout = useCallback((_e: { nativeEvent: { layout: { y: number } } }) => {
   }, []);
 
+  const blurRoutePickerInput = useCallback(() => {
+    const input = destinationInputRef.current;
+    if (input) {
+      input.blur();
+      console.log('[RoutePicker] Destination input blurred');
+    }
+    Keyboard.dismiss();
+  }, []);
+
   const toggleSearch = useCallback((open: boolean) => {
     if (open) {
       panelAnim.setValue(1);
       setIsSearching(true);
     } else {
+      blurRoutePickerInput();
       panelAnim.setValue(0);
       setIsSearching(false);
     }
-  }, [panelAnim]);
+  }, [blurRoutePickerInput, panelAnim]);
 
   const showNoDriverAvailabilityPanel = useCallback((message: string) => {
     console.log('[Customer] Showing no-driver availability panel:', message);
@@ -1590,7 +1601,7 @@ export default function CustomerHomeScreen() {
 
     if (typeof item.latitude === 'number' && typeof item.longitude === 'number') {
       clearPredictions();
-      Keyboard.dismiss();
+      blurRoutePickerInput();
       void selectDestination({
         name: item.title,
         latitude: item.latitude,
@@ -1604,7 +1615,7 @@ export default function CustomerHomeScreen() {
     setSelectedDest(null);
     void fetchPredictions(item.title);
     console.log('[RoutePicker] Searching quick destination:', item.title);
-  }, [clearPredictions, fetchPredictions, selectDestination]);
+  }, [blurRoutePickerInput, clearPredictions, fetchPredictions, selectDestination]);
 
   const handleRoutePickerMapSelection = useCallback(() => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -3336,7 +3347,7 @@ export default function CustomerHomeScreen() {
                 <View style={styles.routePickerHeader}>
                   <TouchableOpacity
                     style={styles.routePickerHeaderButton}
-                    onPress={() => { Keyboard.dismiss(); toggleSearch(false); }}
+                    onPress={() => toggleSearch(false)}
                     activeOpacity={0.7}
                     testID="route-picker-close"
                   >
@@ -3376,6 +3387,7 @@ export default function CustomerHomeScreen() {
                       <View style={styles.routeComposerDestinationTextWrap}>
                         <Text style={styles.routeComposerFieldLabel}>Varış noktası</Text>
                         <TextInput
+                          ref={destinationInputRef}
                           style={styles.routeComposerDestinationInput}
                           placeholder="Adres veya mekan ara"
                           placeholderTextColor="#A6AAB6"
@@ -3434,7 +3446,7 @@ export default function CustomerHomeScreen() {
                 <ScrollView
                   style={styles.routePickerList}
                   contentContainerStyle={styles.routePickerListContent}
-                  keyboardShouldPersistTaps="handled"
+                  keyboardShouldPersistTaps="always"
                   showsVerticalScrollIndicator={false}
                 >
                   <Text style={styles.routePickerSectionLabel}>
@@ -3462,7 +3474,7 @@ export default function CustomerHomeScreen() {
                               setDestination(dest.name);
                               clearPredictions();
                               void selectDestination(dest);
-                              Keyboard.dismiss();
+                              blurRoutePickerInput();
                             } else {
                               console.warn('[Selection] Details returned null for:', prediction.place_id);
                               Alert.alert('Hata', 'Adres detayları alınamadı. Lütfen tekrar deneyin.');
