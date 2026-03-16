@@ -194,7 +194,7 @@ export default function SecurityScreen() {
               <ChevronRight size={18} color={Colors.light.textMuted} style={{ transform: [{ rotate: showPasswordForm ? '90deg' : '0deg' }] }} />
             </TouchableOpacity>
 
-            {showPasswordForm && (
+            {showPasswordForm ? (
               <View style={styles.formWrap}>
                 <View style={styles.inputRow}>
                   <TextInput
@@ -234,7 +234,7 @@ export default function SecurityScreen() {
                   <Text style={styles.saveBtnText}>Şifreyi Güncelle</Text>
                 </TouchableOpacity>
               </View>
-            )}
+            ) : null}
 
             <View style={styles.divider} />
 

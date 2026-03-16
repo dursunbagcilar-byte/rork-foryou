@@ -197,10 +197,8 @@ function AppProviders({ queryClient }: { queryClient: QueryClient }) {
 
 export default function RootLayout() {
   const [initError, setInitError] = useState<string | null>(null);
-  const [clientProvidersReady, setClientProvidersReady] = useState<boolean>(Platform.OS !== 'web');
 
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clientProvidersTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -208,18 +206,6 @@ export default function RootLayout() {
     mountedRef.current = true;
     resetCircuitBreaker();
     void safelyCompleteAuthSession();
-
-    if (Platform.OS === 'web') {
-      console.log('[Layout] Delaying provider mount on web to avoid concurrent renderer context conflicts');
-      clientProvidersTimerRef.current = setTimeout(() => {
-        if (mountedRef.current) {
-          console.log('[Layout] Web providers ready');
-          setClientProvidersReady(true);
-        }
-      }, 0);
-    } else {
-      setClientProvidersReady(true);
-    }
 
     const bootstrapDb = async () => {
       if (!mountedRef.current) return;
@@ -271,19 +257,11 @@ export default function RootLayout() {
         clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;
       }
-      if (clientProvidersTimerRef.current) {
-        clearTimeout(clientProvidersTimerRef.current);
-        clientProvidersTimerRef.current = null;
-      }
     };
   }, []);
 
   if (initError) {
     return <CrashFallback error={initError} onRetry={() => setInitError(null)} />;
-  }
-
-  if (!clientProvidersReady) {
-    return <View style={bootStyles.container} />;
   }
 
   const queryClient = getQueryClient();

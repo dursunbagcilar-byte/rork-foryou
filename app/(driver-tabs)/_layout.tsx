@@ -462,13 +462,17 @@ export default function DriverTabsLayout() {
         />
       </Tabs>
 
-      {showSuccessOverlay ? (
-        <ApprovalSuccessOverlay onFinish={() => setShowSuccessOverlay(false)} />
-      ) : null}
+      <View style={StyleSheet.absoluteFillObject} pointerEvents={showSuccessOverlay ? 'auto' : 'none'}>
+        {showSuccessOverlay && (
+          <ApprovalSuccessOverlay onFinish={() => setShowSuccessOverlay(false)} />
+        )}
+      </View>
 
-      {showWaiting && !showSuccessOverlay ? (
-        <DriverApprovalWaiting onDismiss={() => setDismissedApproval(true)} />
-      ) : null}
+      <View style={StyleSheet.absoluteFillObject} pointerEvents={showWaiting && !showSuccessOverlay ? 'auto' : 'none'}>
+        {showWaiting && !showSuccessOverlay && (
+          <DriverApprovalWaiting onDismiss={() => setDismissedApproval(true)} />
+        )}
+      </View>
     </View>
   );
 }

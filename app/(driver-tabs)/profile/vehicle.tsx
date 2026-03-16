@@ -203,7 +203,7 @@ export default function VehicleInfoScreen() {
             </View>
           </View>
 
-          {isEditing && (
+          {isEditing ? (
             <View style={styles.actionBtns}>
               <TouchableOpacity
                 style={styles.cancelButton}
@@ -222,7 +222,7 @@ export default function VehicleInfoScreen() {
                 <Text style={styles.saveButtonText}>Kaydet</Text>
               </TouchableOpacity>
             </View>
-          )}
+          ) : null}
 
           <View style={{ height: 40 }} />
         </ScrollView>

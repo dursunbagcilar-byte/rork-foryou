@@ -1,26 +1,43 @@
-# Müşteri sürüş başlatma ve şoför uygunluk uyarılarını netleştir
+# React DOM removeChild hatası düzeltmesi
 
-## Özellikler
-- [x] Müşteri haritadan varış noktasını seçip **Sürüş Başlat**’a bastığında ekran yeniden **Şoför aranıyor** durumuna geçecek.
-- [x] Müşterinin bulunduğu ilçede kayıtlı şoför yoksa açık bir uyarı gösterilecek: **Şu an ilçenizde kayıtlı şoför yok**.
-- [x] Müşterinin bulunduğu il ve ilçede aktif şoför varsa ama hepsi başka yolculuktaysa şu uyarı gösterilecek: **Bölgenizde aktif şoförlerimiz var, başka bir yolculuk yapıyor**.
-- [x] Bu durumda uyarının içinde şoförün tahmini ne kadar süre sonra müsait olacağı dakika cinsinden gösterilecek.
-- [x] Tahmini süre önce şoförün mevcut yolculuğunun kalan süresine göre hesaplanacak.
-- [x] Kalan süre net değilse yaklaşık bir yedek hesaplama ile yine müşteriye tahmini dakika bilgisi gösterilecek.
-- [x] Aktif ama meşgul şoför durumunda müşteriye ayrıca **sıraya alınmak isteyip istemediği** sorulacak.
-- [x] Müşteri kabul ederse talebi sıraya alınacak, kabul etmezse rota korunup tekrar deneme imkanı kalacak.
+## Sorun
+"Failed to execute 'removeChild' on 'Node'" hatası - React sanal DOM ile gerçek DOM arasında uyumsuzluk.
 
-## Tasarım
-- [x] Uyarılar kısa, net ve güven veren bir dille gösterilecek.
-- [x] **Şoför aranıyor** ekranı kararsız görünmeyecek; tek bir sabit durum akışıyla daha profesyonel hissettirecek.
-- [x] İlçede uygun şoför bulunamadığında uyarı ayrı bir alert yerine yeşil arama panelinin içinde gösterilecek.
-- [x] Rota seçim ekranındaki ayrı canlı müsaitlik kartı kaldırılacak; akış yalnızca yeşil arama paneli üzerinden ilerleyecek.
-- [x] Tahmini bekleme süresi uyarının içinde öne çıkarılarak müşterinin hemen anlaması sağlanacak.
-- [x] Sıra teklifi tek ekranda, kolay anlaşılır iki seçimle sunulacak.
+## Olası Nedenler
+1. **Hydration mismatch**: Sunucu ve istemci farklı HTML render ediyor
+2. **Köşe durumlarındaki conditional render**: `clientProvidersReady` kontrolündeki erken return
+3. **Overlay component'leri**: `DriverApprovalWaiting` ve `ApprovalSuccessOverlay` absolute position elementleri
+4. **React.Fragment kullanımı**: Koşullu render edilen fragment'lerde key eksikliği
 
-## Ekranlar
-- [x] **Müşteri rota ekranı:** Haritadan hedef seçildikten sonra sürüş başlatma akışı daha net çalışacak.
-- [x] **Şoför aranıyor durumu:** Arama, uyarı ve bekleme bilgisi tek mantıklı akışta gösterilecek.
-- [x] **Meşgul şoför uyarısı:** Tahmini müsaitlik süresi ve sıraya alınma seçimi burada sunulacak.
-- [x] **Sürüş başlat performansı:** Basış sonrası pickup çözümleme önbellekten ve paralel doğrulama ile daha hızlı ilerleyecek.
-- [x] **Ücretsiz sürüş alanı:** Buton ve ücret alanı sabit yükseklikle ve kilitli ücretsiz durum gösterimiyle titreşmeden kalacak.
+## Düzeltme Planı
+
+### 1. Root Layout Hydration Düzeltmesi
+`app/_layout.tsx` dosyasında:
+- `clientProvidersReady` kontrolünü kaldır veya suppressHydrationWarning ekle
+- Web platformunda tutarlı başlangıç render'ı sağla
+
+### 2. Driver Tabs Overlay Düzeltmesi  
+`app/(driver-tabs)/_layout.tsx` dosyasında:
+- Overlay component'lerine key prop ekle
+- Conditional render mantığını düzenle - fragment yerine View kullan
+- zIndex ve absolute positioning düzenlemesi
+
+### 3. Security Screen Düzeltmeleri
+`app/(customer-tabs)/profile/security.tsx` ve `app/(driver-tabs)/profile/security.tsx`:
+- React.Fragment kullanılan map işlemlerinde key kontrolü
+- Conditional render bloklarında parantez eşleşmesi kontrolü
+
+### 4. Vehicle Screen Düzeltmesi
+`app/(driver-tabs)/profile/vehicle.tsx`:
+- Benzer şekilde conditional render ve fragment kontrolü
+
+### 5. AI Photo Editor Düzeltmesi
+`app/ai-photo-editor.tsx`:
+- ScrollView içindeki conditional render düzenlemesi
+- React Native Web uyumluluğu için ek kontroller
+
+## Test Planı
+1. Web platformunda sayfalar arası geçiş testi
+2. Login/logout sonrası render kontrolü
+3. Driver approval overlay açıp kapatma testi
+4. Customer security sayfası şifre formu açıp kapatma
