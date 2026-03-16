@@ -163,17 +163,24 @@ const bootStyles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.dark.background,
   },
+  gestureRoot: {
+    flex: 1,
+  },
   rootLayoutNavContainer: {
     flex: 1,
   },
 });
 
-function AppProviders({ queryClient, ready }: { queryClient: QueryClient; ready: boolean }) {
+function HydrationShell() {
+  return <View style={bootStyles.container} />;
+}
+
+function AppProviders({ queryClient }: { queryClient: QueryClient }) {
   return (
-    <View style={[bootStyles.container, { opacity: ready ? 1 : 0 }]} pointerEvents={ready ? 'auto' : 'none'}>
+    <View style={bootStyles.container}>
       <QueryClientProvider client={queryClient}>
         <trpc.Provider client={trpcClient} queryClient={queryClient}>
-          <GestureHandlerRootView style={{ flex: 1 }}>
+          <GestureHandlerRootView style={bootStyles.gestureRoot}>
             <ErrorBoundary>
               <ThemeProvider>
                 <PrivacyProvider>
@@ -274,7 +281,8 @@ export default function RootLayout() {
 
   if (!isWebReady) {
     console.log('[Layout] Waiting for web mount before rendering providers');
+    return <HydrationShell />;
   }
 
-  return <AppProviders queryClient={queryClient} ready={isWebReady} />;
+  return <AppProviders queryClient={queryClient} />;
 }
