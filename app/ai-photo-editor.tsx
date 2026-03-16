@@ -364,19 +364,14 @@ export default function AIPhotoEditorScreen() {
                         contentFit={editedImage && selectedMode === 'remove-bg' ? 'contain' : 'cover'}
                         testID={editedImage ? "edited-image" : "original-image"}
                       />
-                      {editedImage && selectedMode === 'remove-bg' && (
-                        <View style={styles.carShadow} />
-                      )}
+                      <View style={[styles.carShadow, { display: editedImage && selectedMode === 'remove-bg' ? 'flex' : 'none' }]} />
 
-                      {editedImage && (
-                        <View style={styles.editedBadge}>
-                          <Sparkles size={10} color="#F5A623" />
-                          <Text style={styles.editedBadgeText}>AI</Text>
-                        </View>
-                      )}
+                      <View style={[styles.editedBadge, { display: editedImage ? 'flex' : 'none' }]}>
+                        <Sparkles size={10} color="#F5A623" />
+                        <Text style={styles.editedBadgeText}>AI</Text>
+                      </View>
 
-                      {editMutation.isPending && (
-                        <View style={styles.processingOverlay}>
+                      <View style={[styles.processingOverlay, { display: editMutation.isPending ? 'flex' : 'none' }]}>
                           <Animated.View style={[styles.processingShimmer, { opacity: shimmerOpacity }]} />
                           <View style={styles.processingContent}>
                             <ActivityIndicator size="large" color="#F5A623" />
@@ -400,7 +395,6 @@ export default function AIPhotoEditorScreen() {
                             </View>
                           </View>
                         </View>
-                      )}
                     </View>
 
                     <LinearGradient
@@ -420,23 +414,19 @@ export default function AIPhotoEditorScreen() {
                       <ImagePlus size={15} color="#9595A8" />
                       <Text style={styles.controlBtnText}>Değiştir</Text>
                     </TouchableOpacity>
-                    {editedImage && (
-                      <TouchableOpacity
-                        style={styles.controlBtn}
-                        onPress={handleReset}
-                        activeOpacity={0.7}
-                      >
-                        <RotateCcw size={15} color="#9595A8" />
-                        <Text style={styles.controlBtnText}>Sıfırla</Text>
-                      </TouchableOpacity>
-                    )}
+                    <TouchableOpacity
+                      style={[styles.controlBtn, { display: editedImage ? 'flex' : 'none' }]}
+                      onPress={handleReset}
+                      activeOpacity={0.7}
+                    >
+                      <RotateCcw size={15} color="#9595A8" />
+                      <Text style={styles.controlBtnText}>Sıfırla</Text>
+                    </TouchableOpacity>
                   </View>
 
-                  {!editedImage && !editMutation.isPending && (
-                    <Animated.View style={[styles.createBtnWrap, { transform: [{ scale: pulseAnim }]}]}>
-                      <Text style={styles.createHint}>Bir efekt seçerek aracınızı dönüştürün</Text>
-                    </Animated.View>
-                  )}
+                  <Animated.View style={[styles.createBtnWrap, { transform: [{ scale: pulseAnim }], display: !editedImage && !editMutation.isPending ? 'flex' : 'none' }]}>
+                    <Text style={styles.createHint}>Bir efekt seçerek aracınızı dönüştürün</Text>
+                  </Animated.View>
                 </View>
 
                 <View style={styles.optionsSection}>

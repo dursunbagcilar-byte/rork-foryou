@@ -437,6 +437,36 @@ export default function WebMapFallback({
     };
   }, []);
 
+  const mapContainerRef = useRef<View>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const node = mapContainerRef.current as any;
+    if (!node) return;
+
+    const domNode = node instanceof HTMLElement ? node : (node as any)?.getNode?.() ?? null;
+    if (!domNode) return;
+
+    const mapDiv = document.createElement('div');
+    mapDiv.id = mapId;
+    mapDiv.style.width = '100%';
+    mapDiv.style.height = '100%';
+    mapDiv.style.position = 'absolute';
+    mapDiv.style.top = '0';
+    mapDiv.style.left = '0';
+    domNode.appendChild(mapDiv);
+
+    return () => {
+      try {
+        if (mapDiv.parentNode === domNode) {
+          domNode.removeChild(mapDiv);
+        }
+      } catch (e) {
+        console.log('[WebMap] Cleanup error:', e);
+      }
+    };
+  }, [mapId]);
+
   if (Platform.OS !== 'web') {
     return (
       <View style={[styles.container, style]}>
@@ -464,15 +494,13 @@ export default function WebMapFallback({
   return (
     <View style={[styles.container, style]}>
       <View
-        nativeID={mapId}
+        ref={mapContainerRef}
         style={styles.mapView}
       />
-      {!isLoaded && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color={Colors.dark.primary} />
-          <Text style={styles.loadingText}>Harita yükleniyor...</Text>
-        </View>
-      )}
+      <View style={[styles.loadingOverlay, { display: isLoaded ? 'none' : 'flex' }]}>
+        <ActivityIndicator size="large" color={Colors.dark.primary} />
+        <Text style={styles.loadingText}>Harita yükleniyor...</Text>
+      </View>
       {children}
     </View>
   );

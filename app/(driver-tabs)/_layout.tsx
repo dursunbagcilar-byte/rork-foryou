@@ -473,7 +473,7 @@ export default function DriverTabsLayout() {
         />
       </Tabs>
 
-      <View style={styles.overlayHost} pointerEvents={showSuccessOverlayHost ? 'auto' : 'none'}>
+      <View style={[styles.overlayHost, { display: showSuccessOverlayHost ? 'flex' : 'none' }]} pointerEvents={showSuccessOverlayHost ? 'auto' : 'none'}>
         {showSuccessOverlayHost ? (
           <ApprovalSuccessOverlay
             key="driver-approval-success-overlay"
@@ -482,7 +482,7 @@ export default function DriverTabsLayout() {
         ) : null}
       </View>
 
-      <View style={styles.overlayHost} pointerEvents={showWaitingOverlayHost ? 'auto' : 'none'}>
+      <View style={[styles.overlayHost, { display: showWaitingOverlayHost ? 'flex' : 'none' }]} pointerEvents={showWaitingOverlayHost ? 'auto' : 'none'}>
         {showWaitingOverlayHost ? (
           <DriverApprovalWaiting
             key="driver-approval-waiting-overlay"

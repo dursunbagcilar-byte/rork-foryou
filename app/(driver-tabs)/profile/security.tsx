@@ -191,47 +191,45 @@ export default function DriverSecurityScreen() {
               <ChevronRight size={18} color={Colors.light.textMuted} style={{ transform: [{ rotate: showPasswordForm ? '90deg' : '0deg' }] }} />
             </TouchableOpacity>
 
-            {showPasswordForm ? (
-              <View style={styles.formWrap}>
-                <View style={styles.inputRow}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Mevcut şifre"
-                    placeholderTextColor={Colors.light.textMuted}
-                    secureTextEntry={!showCurrentPass}
-                    value={currentPassword}
-                    onChangeText={setCurrentPassword}
-                  />
-                  <TouchableOpacity onPress={() => setShowCurrentPass(!showCurrentPass)} style={styles.eyeBtn}>
-                    {showCurrentPass ? <EyeOff size={18} color={Colors.light.textMuted} /> : <Eye size={18} color={Colors.light.textMuted} />}
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.inputRow}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Yeni şifre"
-                    placeholderTextColor={Colors.light.textMuted}
-                    secureTextEntry={!showNewPass}
-                    value={newPassword}
-                    onChangeText={setNewPassword}
-                  />
-                  <TouchableOpacity onPress={() => setShowNewPass(!showNewPass)} style={styles.eyeBtn}>
-                    {showNewPass ? <EyeOff size={18} color={Colors.light.textMuted} /> : <Eye size={18} color={Colors.light.textMuted} />}
-                  </TouchableOpacity>
-                </View>
+            <View style={[styles.formWrap, { display: showPasswordForm ? 'flex' : 'none' }]}>
+              <View style={styles.inputRow}>
                 <TextInput
-                  style={[styles.input, { marginBottom: 12 }]}
-                  placeholder="Yeni şifre tekrar"
+                  style={styles.input}
+                  placeholder="Mevcut şifre"
                   placeholderTextColor={Colors.light.textMuted}
-                  secureTextEntry
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
+                  secureTextEntry={!showCurrentPass}
+                  value={currentPassword}
+                  onChangeText={setCurrentPassword}
                 />
-                <TouchableOpacity style={styles.saveBtn} onPress={handlePasswordChange} activeOpacity={0.8}>
-                  <Text style={styles.saveBtnText}>Şifreyi Güncelle</Text>
+                <TouchableOpacity onPress={() => setShowCurrentPass(!showCurrentPass)} style={styles.eyeBtn}>
+                  {showCurrentPass ? <EyeOff size={18} color={Colors.light.textMuted} /> : <Eye size={18} color={Colors.light.textMuted} />}
                 </TouchableOpacity>
               </View>
-            ) : null}
+              <View style={styles.inputRow}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Yeni şifre"
+                  placeholderTextColor={Colors.light.textMuted}
+                  secureTextEntry={!showNewPass}
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                />
+                <TouchableOpacity onPress={() => setShowNewPass(!showNewPass)} style={styles.eyeBtn}>
+                  {showNewPass ? <EyeOff size={18} color={Colors.light.textMuted} /> : <Eye size={18} color={Colors.light.textMuted} />}
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                style={[styles.input, { marginBottom: 12 }]}
+                placeholder="Yeni şifre tekrar"
+                placeholderTextColor={Colors.light.textMuted}
+                secureTextEntry
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+              />
+              <TouchableOpacity style={styles.saveBtn} onPress={handlePasswordChange} activeOpacity={0.8}>
+                <Text style={styles.saveBtnText}>Şifreyi Güncelle</Text>
+              </TouchableOpacity>
+            </View>
 
             <View style={styles.divider} />
 
@@ -292,46 +290,43 @@ export default function DriverSecurityScreen() {
               </View>
             ))}
 
-            {showContactForm ? (
-              <View style={styles.formWrap}>
-                <View style={styles.divider} />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Kişi adı"
-                  placeholderTextColor={Colors.light.textMuted}
-                  value={contactName}
-                  onChangeText={setContactName}
-                />
-                <TextInput
-                  style={[styles.input, { marginBottom: 12 }]}
-                  placeholder="Telefon numarası"
-                  placeholderTextColor={Colors.light.textMuted}
-                  value={contactPhone}
-                  onChangeText={setContactPhone}
-                  keyboardType="phone-pad"
-                />
-                <View style={styles.formBtns}>
-                  <TouchableOpacity
-                    style={[styles.formActionBtn, styles.cancelBtn]}
-                    onPress={() => { setShowContactForm(false); setContactName(''); setContactPhone(''); }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.cancelBtnText}>İptal</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.formActionBtn, styles.addBtn]} onPress={handleAddContact} activeOpacity={0.8}>
-                    <Text style={styles.addBtnText}>Ekle</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
-              <View>
-                <View style={styles.divider} />
-                <TouchableOpacity style={styles.addContactBtn} onPress={() => setShowContactForm(true)} activeOpacity={0.7}>
-                  <Plus size={18} color={Colors.light.primary} />
-                  <Text style={styles.addContactText}>Kişi Ekle</Text>
+            <View style={[styles.formWrap, { display: showContactForm ? 'flex' : 'none' }]}>
+              <View style={styles.divider} />
+              <TextInput
+                style={styles.input}
+                placeholder="Kişi adı"
+                placeholderTextColor={Colors.light.textMuted}
+                value={contactName}
+                onChangeText={setContactName}
+              />
+              <TextInput
+                style={[styles.input, { marginBottom: 12 }]}
+                placeholder="Telefon numarası"
+                placeholderTextColor={Colors.light.textMuted}
+                value={contactPhone}
+                onChangeText={setContactPhone}
+                keyboardType="phone-pad"
+              />
+              <View style={styles.formBtns}>
+                <TouchableOpacity
+                  style={[styles.formActionBtn, styles.cancelBtn]}
+                  onPress={() => { setShowContactForm(false); setContactName(''); setContactPhone(''); }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.cancelBtnText}>İptal</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.formActionBtn, styles.addBtn]} onPress={handleAddContact} activeOpacity={0.8}>
+                  <Text style={styles.addBtnText}>Ekle</Text>
                 </TouchableOpacity>
               </View>
-            )}
+            </View>
+            <View style={{ display: showContactForm ? 'none' : 'flex' }}>
+              <View style={styles.divider} />
+              <TouchableOpacity style={styles.addContactBtn} onPress={() => setShowContactForm(true)} activeOpacity={0.7}>
+                <Plus size={18} color={Colors.light.primary} />
+                <Text style={styles.addContactText}>Kişi Ekle</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <Text style={styles.sectionTitle}>Oturumlar</Text>

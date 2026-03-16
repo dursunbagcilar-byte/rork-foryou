@@ -77,10 +77,9 @@ export default function InAppNotification({
     };
   }, [dismiss, duration, opacity, translateY, visible]);
 
-  if (!visible) return null;
-
   return (
     <Animated.View
+      pointerEvents={visible ? 'auto' : 'none'}
       style={[
         styles.container,
         {

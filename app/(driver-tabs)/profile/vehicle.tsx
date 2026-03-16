@@ -203,26 +203,24 @@ export default function VehicleInfoScreen() {
             </View>
           </View>
 
-          {isEditing ? (
-            <View style={styles.actionBtns}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => {
-                  setIsEditing(false);
-                  setVehicleModel(driver?.vehicleModel ?? '');
-                  setVehiclePlate(driver?.vehiclePlate ?? '');
-                  setVehicleColor(driver?.vehicleColor ?? '');
-                }}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.cancelButtonText}>İptal</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.saveButton} onPress={handleSave} activeOpacity={0.8}>
-                <Save size={18} color={Colors.light.background} />
-                <Text style={styles.saveButtonText}>Kaydet</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
+          <View style={[styles.actionBtns, { display: isEditing ? 'flex' : 'none' }]}>
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => {
+                setIsEditing(false);
+                setVehicleModel(driver?.vehicleModel ?? '');
+                setVehiclePlate(driver?.vehiclePlate ?? '');
+                setVehicleColor(driver?.vehicleColor ?? '');
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.cancelButtonText}>İptal</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.saveButton} onPress={handleSave} activeOpacity={0.8}>
+              <Save size={18} color={Colors.light.background} />
+              <Text style={styles.saveButtonText}>Kaydet</Text>
+            </TouchableOpacity>
+          </View>
 
           <View style={{ height: 40 }} />
         </ScrollView>
