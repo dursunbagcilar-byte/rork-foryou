@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Tabs } from 'expo-router';
 import { Map, Wallet, User, Clock, ShieldCheck, FileText, X, PartyPopper, CheckCircle2 } from 'lucide-react-native';
-import { View, Text, StyleSheet, Animated, Easing, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Animated, Easing, TouchableOpacity, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
@@ -9,6 +9,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useNotifications } from '@/hooks/useNotifications';
 import { androidTextFix, crossPlatformShadow, isAndroid } from '@/utils/platform';
 import * as Haptics from 'expo-haptics';
+import { useMounted } from '@/hooks/useMounted';
 
 function DriverApprovalWaiting({ onDismiss }: { onDismiss: () => void }) {
   const insets = useSafeAreaInsets();
@@ -380,9 +381,16 @@ const successStyles = StyleSheet.create({
   },
 });
 
+const styles = StyleSheet.create({
+  overlayHost: {
+    ...StyleSheet.absoluteFillObject,
+  },
+});
+
 export default function DriverTabsLayout() {
   const { user, driverApproved } = useAuth();
   const { colors } = useTheme();
+  const mounted = useMounted();
   const { scheduleEveningNotifications } = useNotifications(user?.id ?? null);
   const [showSuccessOverlay, setShowSuccessOverlay] = useState<boolean>(false);
   const prevApprovedRef = useRef<boolean>(false);
@@ -408,6 +416,9 @@ export default function DriverTabsLayout() {
   const driver = user?.type === 'driver' ? user as any : null;
   const localApproved = driver?.isApproved === true;
   const showWaiting = user?.type === 'driver' && !driverApproved && !localApproved && !dismissedApproval;
+  const overlaysReady = Platform.OS !== 'web' || mounted;
+  const showSuccessOverlayHost = overlaysReady && showSuccessOverlay;
+  const showWaitingOverlayHost = overlaysReady && showWaiting && !showSuccessOverlay;
 
   return (
     <View style={{ flex: 1 }}>
@@ -462,16 +473,22 @@ export default function DriverTabsLayout() {
         />
       </Tabs>
 
-      <View style={StyleSheet.absoluteFillObject} pointerEvents={showSuccessOverlay ? 'auto' : 'none'}>
-        {showSuccessOverlay && (
-          <ApprovalSuccessOverlay onFinish={() => setShowSuccessOverlay(false)} />
-        )}
+      <View style={styles.overlayHost} pointerEvents={showSuccessOverlayHost ? 'auto' : 'none'}>
+        {showSuccessOverlayHost ? (
+          <ApprovalSuccessOverlay
+            key="driver-approval-success-overlay"
+            onFinish={() => setShowSuccessOverlay(false)}
+          />
+        ) : null}
       </View>
 
-      <View style={StyleSheet.absoluteFillObject} pointerEvents={showWaiting && !showSuccessOverlay ? 'auto' : 'none'}>
-        {showWaiting && !showSuccessOverlay && (
-          <DriverApprovalWaiting onDismiss={() => setDismissedApproval(true)} />
-        )}
+      <View style={styles.overlayHost} pointerEvents={showWaitingOverlayHost ? 'auto' : 'none'}>
+        {showWaitingOverlayHost ? (
+          <DriverApprovalWaiting
+            key="driver-approval-waiting-overlay"
+            onDismiss={() => setDismissedApproval(true)}
+          />
+        ) : null}
       </View>
     </View>
   );

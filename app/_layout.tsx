@@ -17,6 +17,7 @@ import { Colors } from "@/constants/colors";
 import { trpc, trpcClient, resetCircuitBreaker } from "@/lib/trpc";
 import { getDbBootstrapPayload, getDbHeaders, hasDbConfig } from "@/utils/db";
 import { androidTextFix, crossPlatformShadow, getStatusBarConfig } from "@/utils/platform";
+import { useMounted } from "@/hooks/useMounted";
 
 async function safelyCompleteAuthSession(): Promise<void> {
   try {
@@ -166,6 +167,10 @@ const bootStyles = StyleSheet.create({
   },
 });
 
+function BootShell() {
+  return <View style={bootStyles.container} testID="web-hydration-shell" />;
+}
+
 function AppProviders({ queryClient }: { queryClient: QueryClient }) {
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
@@ -197,6 +202,7 @@ function AppProviders({ queryClient }: { queryClient: QueryClient }) {
 
 export default function RootLayout() {
   const [initError, setInitError] = useState<string | null>(null);
+  const mounted = useMounted();
 
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
@@ -262,6 +268,11 @@ export default function RootLayout() {
 
   if (initError) {
     return <CrashFallback error={initError} onRetry={() => setInitError(null)} />;
+  }
+
+  if (Platform.OS === 'web' && !mounted) {
+    console.log('[Layout] Waiting for web mount before rendering providers');
+    return <BootShell />;
   }
 
   const queryClient = getQueryClient();

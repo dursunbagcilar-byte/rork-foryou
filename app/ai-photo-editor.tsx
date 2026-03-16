@@ -131,21 +131,21 @@ export default function AIPhotoEditorScreen() {
 
   useEffect(() => {
     Animated.timing(fadeAnim, { toValue: 1, duration: 500, useNativeDriver: true }).start();
-  }, []);
+  }, [fadeAnim]);
 
   useEffect(() => {
     if (selectedImage) {
       imageScaleAnim.setValue(0.85);
       Animated.spring(imageScaleAnim, { toValue: 1, tension: 60, friction: 8, useNativeDriver: true }).start();
     }
-  }, [selectedImage]);
+  }, [imageScaleAnim, selectedImage]);
 
   useEffect(() => {
     if (editedImage) {
       resultAnim.setValue(0);
       Animated.spring(resultAnim, { toValue: 1, tension: 50, friction: 7, useNativeDriver: true }).start();
     }
-  }, [editedImage]);
+  }, [editedImage, resultAnim]);
 
   useEffect(() => {
     const loop = Animated.loop(
@@ -156,7 +156,7 @@ export default function AIPhotoEditorScreen() {
     );
     loop.start();
     return () => loop.stop();
-  }, []);
+  }, [shimmerAnim]);
 
   useEffect(() => {
     const loop = Animated.loop(
@@ -167,7 +167,7 @@ export default function AIPhotoEditorScreen() {
     );
     loop.start();
     return () => loop.stop();
-  }, []);
+  }, [pulseAnim]);
 
   const editMutation = useMutation({
     mutationFn: async ({ base64, prompt }: { base64: string; prompt: string }) => {
@@ -341,7 +341,7 @@ export default function AIPhotoEditorScreen() {
             contentContainerStyle={styles.scrollContentInner}
           >
             {selectedImage ? (
-              <>
+              <View>
                 <View style={styles.imageSection}>
                   <Animated.View style={[styles.imageFloat, { transform: [{ scale: editedImage ? resultAnim.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1]}) : imageScaleAnim }]}]}>
                     <LinearGradient
@@ -493,7 +493,7 @@ export default function AIPhotoEditorScreen() {
                     })}
                   </ScrollView>
                 </View>
-              </>
+              </View>
             ) : (
               <View style={styles.emptyState}>
                 <Animated.View style={[styles.emptyIconContainer, { transform: [{ scale: pulseAnim }]}]}>

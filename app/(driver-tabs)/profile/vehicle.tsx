@@ -123,8 +123,8 @@ export default function VehicleInfoScreen() {
           <Text style={styles.sectionTitle}>Araç Detayları</Text>
           <View style={styles.card}>
             {FIELDS.map((field, idx) => (
-              <React.Fragment key={field.key}>
-                {idx > 0 && <View style={styles.divider} />}
+              <View key={field.key}>
+                {idx > 0 ? <View style={styles.divider} /> : null}
                 <View style={styles.fieldRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: field.iconBg }]}>
                     <field.icon size={18} color={field.color} />
@@ -144,7 +144,7 @@ export default function VehicleInfoScreen() {
                     )}
                   </View>
                 </View>
-              </React.Fragment>
+              </View>
             ))}
           </View>
 

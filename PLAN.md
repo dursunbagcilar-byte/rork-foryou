@@ -5,39 +5,24 @@
 
 ## Olası Nedenler
 1. **Hydration mismatch**: Sunucu ve istemci farklı HTML render ediyor
-2. **Köşe durumlarındaki conditional render**: `clientProvidersReady` kontrolündeki erken return
+2. **Köşe durumlarındaki conditional render**: Web açılışında tutarsız başlangıç ağacı
 3. **Overlay component'leri**: `DriverApprovalWaiting` ve `ApprovalSuccessOverlay` absolute position elementleri
-4. **React.Fragment kullanımı**: Koşullu render edilen fragment'lerde key eksikliği
+4. **React.Fragment kullanımı**: Koşullu render edilen fragment'lerde DOM ağacı stabil kalmıyor
 
 ## Düzeltme Planı
 
-### 1. Root Layout Hydration Düzeltmesi
-`app/_layout.tsx` dosyasında:
-- `clientProvidersReady` kontrolünü kaldır veya suppressHydrationWarning ekle
-- Web platformunda tutarlı başlangıç render'ı sağla
+- [x] `app/_layout.tsx` içinde web için tutarlı ilk render sağlayan hydration shell ekle
+- [x] `app/(driver-tabs)/_layout.tsx` içinde overlay host yapısını stabilize et ve overlay key'lerini ekle
+- [x] `app/(customer-tabs)/profile/security.tsx` içinde fragment tabanlı conditional render bloklarını `View` ile değiştir
+- [x] `app/(driver-tabs)/profile/security.tsx` içinde fragment tabanlı conditional render bloklarını `View` ile değiştir
+- [x] `app/(driver-tabs)/profile/vehicle.tsx` içinde map fragment yapısını stabilize et
+- [x] `app/ai-photo-editor.tsx` içinde ScrollView altındaki fragment wrapper'ını stabilize et
+- [x] Web uyumluluğu için ilgili effect dependency dizilerini netleştir
 
-### 2. Driver Tabs Overlay Düzeltmesi  
-`app/(driver-tabs)/_layout.tsx` dosyasında:
-- Overlay component'lerine key prop ekle
-- Conditional render mantığını düzenle - fragment yerine View kullan
-- zIndex ve absolute positioning düzenlemesi
-
-### 3. Security Screen Düzeltmeleri
-`app/(customer-tabs)/profile/security.tsx` ve `app/(driver-tabs)/profile/security.tsx`:
-- React.Fragment kullanılan map işlemlerinde key kontrolü
-- Conditional render bloklarında parantez eşleşmesi kontrolü
-
-### 4. Vehicle Screen Düzeltmesi
-`app/(driver-tabs)/profile/vehicle.tsx`:
-- Benzer şekilde conditional render ve fragment kontrolü
-
-### 5. AI Photo Editor Düzeltmesi
-`app/ai-photo-editor.tsx`:
-- ScrollView içindeki conditional render düzenlemesi
-- React Native Web uyumluluğu için ek kontroller
-
-## Test Planı
-1. Web platformunda sayfalar arası geçiş testi
-2. Login/logout sonrası render kontrolü
-3. Driver approval overlay açıp kapatma testi
-4. Customer security sayfası şifre formu açıp kapatma
+## Doğrulama
+- [x] TypeScript typecheck çalıştır
+- [x] Lint çalıştır
+- [ ] Web platformunda sayfalar arası geçiş testi
+- [ ] Login/logout sonrası render kontrolü
+- [ ] Driver approval overlay açıp kapatma testi
+- [ ] Customer security sayfası şifre formu açıp kapatma

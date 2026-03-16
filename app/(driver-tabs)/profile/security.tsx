@@ -25,7 +25,6 @@ import {
   X,
   ChevronRight,
   ShieldCheck,
-  Users,
 } from 'lucide-react-native';
 import { Colors } from '@/constants/colors';
 import { useAuth } from '@/contexts/AuthContext';
@@ -276,8 +275,8 @@ export default function DriverSecurityScreen() {
           <Text style={styles.sectionDesc}>Acil durumda bilgilendirilecek kişiler</Text>
           <View style={styles.card}>
             {trustedContacts.map((contact, idx) => (
-              <React.Fragment key={contact.id}>
-                {idx > 0 && <View style={styles.divider} />}
+              <View key={contact.id}>
+                {idx > 0 ? <View style={styles.divider} /> : null}
                 <View style={styles.contactRow}>
                   <View style={[styles.contactAvatar, { backgroundColor: `hsl(${(idx * 60) % 360}, 60%, 45%)` }]}>
                     <Text style={styles.contactInitial}>{contact.name[0]}</Text>
@@ -290,7 +289,7 @@ export default function DriverSecurityScreen() {
                     <X size={16} color={Colors.light.accent} />
                   </TouchableOpacity>
                 </View>
-              </React.Fragment>
+              </View>
             ))}
 
             {showContactForm ? (
@@ -325,13 +324,13 @@ export default function DriverSecurityScreen() {
                 </View>
               </View>
             ) : (
-              <>
+              <View>
                 <View style={styles.divider} />
                 <TouchableOpacity style={styles.addContactBtn} onPress={() => setShowContactForm(true)} activeOpacity={0.7}>
                   <Plus size={18} color={Colors.light.primary} />
                   <Text style={styles.addContactText}>Kişi Ekle</Text>
                 </TouchableOpacity>
-              </>
+              </View>
             )}
           </View>
 

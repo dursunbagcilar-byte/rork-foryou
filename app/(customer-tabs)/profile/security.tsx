@@ -8,8 +8,6 @@ import {
   Switch,
   Alert,
   TextInput,
-  Platform,
-  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -17,7 +15,6 @@ import {
   ArrowLeft,
   Lock,
   KeyRound,
-  Users,
   Smartphone,
   MapPin,
   Trash2,
@@ -278,8 +275,8 @@ export default function SecurityScreen() {
           <Text style={styles.sectionDesc}>Acil durumda bilgilendirilecek kişiler</Text>
           <View style={styles.card}>
             {trustedContacts.map((contact, idx) => (
-              <React.Fragment key={contact.id}>
-                {idx > 0 && <View style={styles.divider} />}
+              <View key={contact.id}>
+                {idx > 0 ? <View style={styles.divider} /> : null}
                 <View style={styles.contactRow}>
                   <View style={[styles.contactAvatar, { backgroundColor: `hsl(${(idx * 60) % 360}, 60%, 45%)` }]}>
                     <Text style={styles.contactInitial}>{contact.name[0]}</Text>
@@ -292,7 +289,7 @@ export default function SecurityScreen() {
                     <X size={16} color={Colors.light.accent} />
                   </TouchableOpacity>
                 </View>
-              </React.Fragment>
+              </View>
             ))}
 
             {showContactForm ? (
@@ -327,13 +324,13 @@ export default function SecurityScreen() {
                 </View>
               </View>
             ) : (
-              <>
+              <View>
                 <View style={styles.divider} />
                 <TouchableOpacity style={styles.addContactBtn} onPress={() => setShowContactForm(true)} activeOpacity={0.7}>
                   <Plus size={18} color={Colors.light.primary} />
                   <Text style={styles.addContactText}>Kişi Ekle</Text>
                 </TouchableOpacity>
-              </>
+              </View>
             )}
           </View>
 
