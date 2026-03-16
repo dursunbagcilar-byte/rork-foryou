@@ -1,49 +1,77 @@
-const isWeb =
+const canPatchDom =
   typeof document !== 'undefined' &&
   typeof window !== 'undefined' &&
   typeof Node !== 'undefined';
 
-if (isWeb) {
-  const patchKey = '__rork_dom_patch__';
-  const g = globalThis as unknown as Record<string, unknown>;
+if (canPatchDom) {
+  try {
+    const patchKey = '__rork_dom_patch__';
+    const globalStore = globalThis as Record<string, unknown>;
 
-  if (!g[patchKey]) {
-    g[patchKey] = true;
+    if (!globalStore[patchKey]) {
+      globalStore[patchKey] = true;
 
-    // eslint-disable-next-line @typescript-eslint/unbound-method
-    const _removeChild = Node.prototype.removeChild;
-    Node.prototype.removeChild = function <T extends Node>(child: T): T {
-      if (child.parentNode !== this) {
-        return child;
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      const originalRemoveChild = Node.prototype.removeChild;
+      Node.prototype.removeChild = function <T extends Node>(child: T): T {
+        if (!child || child.parentNode !== this) {
+          return child;
+        }
+        return originalRemoveChild.call(this, child) as T;
+      };
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      const originalInsertBefore = Node.prototype.insertBefore;
+      Node.prototype.insertBefore = function <T extends Node>(
+        newNode: T,
+        referenceNode: Node | null,
+      ): T {
+        if (!referenceNode || referenceNode.parentNode !== this) {
+          return originalInsertBefore.call(this, newNode, null) as T;
+        }
+        return originalInsertBefore.call(this, newNode, referenceNode) as T;
+      };
+
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      const originalReplaceChild = Node.prototype.replaceChild;
+      Node.prototype.replaceChild = function <T extends Node>(
+        newChild: Node,
+        oldChild: T,
+      ): T {
+        if (!oldChild || oldChild.parentNode !== this || newChild === oldChild) {
+          return oldChild;
+        }
+        return originalReplaceChild.call(this, newChild, oldChild) as T;
+      };
+
+      if (typeof window.addEventListener === 'function') {
+        window.addEventListener(
+          'error',
+          (event: ErrorEvent) => {
+            const message = event.message ?? '';
+            const isPatchedOperation =
+              message.includes('removeChild') ||
+              message.includes('insertBefore') ||
+              message.includes('replaceChild');
+            const isKnownDomMismatch =
+              message.includes('not a child') ||
+              message.includes('to be removed is not a child of this node') ||
+              message.includes('The child can not be found in the parent');
+
+            if (isPatchedOperation && isKnownDomMismatch) {
+              event.stopImmediatePropagation();
+              event.preventDefault();
+              return true;
+            }
+
+            return false;
+          },
+          true,
+        );
       }
-      return _removeChild.call(this, child) as T;
-    };
-
-    // eslint-disable-next-line @typescript-eslint/unbound-method
-    const _insertBefore = Node.prototype.insertBefore;
-    Node.prototype.insertBefore = function <T extends Node>(
-      newNode: T,
-      ref: Node | null,
-    ): T {
-      if (ref && ref.parentNode !== this) {
-        return _insertBefore.call(this, newNode, null) as T;
-      }
-      return _insertBefore.call(this, newNode, ref) as T;
-    };
-
-    window.addEventListener('error', (event: ErrorEvent) => {
-      if (
-        event.message &&
-        (event.message.includes('removeChild') ||
-          event.message.includes('insertBefore')) &&
-        event.message.includes('not a child')
-      ) {
-        event.stopImmediatePropagation();
-        event.preventDefault();
-        return true;
-      }
-      return false;
-    }, true);
+    }
+  } catch (error) {
+    console.log('[webDomPatch] Failed to initialize DOM patch:', error);
   }
 }
 

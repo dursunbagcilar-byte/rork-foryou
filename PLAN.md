@@ -18,6 +18,7 @@
 - [x] `app/(driver-tabs)/profile/vehicle.tsx` içinde map fragment yapısını stabilize et
 - [x] `app/ai-photo-editor.tsx` içinde ScrollView altındaki fragment wrapper'ını stabilize et
 - [x] Web uyumluluğu için ilgili effect dependency dizilerini netleştir
+- [x] `utils/webDomPatch.ts` içinde DOM patch başlatmasını korumalı hale getir ve `replaceChild` güvenliğini ekle
 - [x] Lint uyarılarına neden olan kullanılmayan state/import ve tip tanımlarını temizle
 
 ## Doğrulama
