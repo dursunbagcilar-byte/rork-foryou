@@ -452,6 +452,7 @@ export default function AIPhotoEditorScreen() {
                     horizontal
                     showsHorizontalScrollIndicator={false}
                     contentContainerStyle={styles.optionsRow}
+                    scrollEnabled={Platform.OS !== 'web'}
                   >
                     {EDIT_OPTIONS.map((option) => {
                       const isActive = selectedMode === option.id;

@@ -3092,7 +3092,7 @@ export default function CustomerHomeScreen() {
                   showsHorizontalScrollIndicator={false}
                   style={styles.recentScroll}
                   contentContainerStyle={styles.recentScrollContent}
-                  nestedScrollEnabled
+                  scrollEnabled={Platform.OS !== 'web'}
                 >
                   <TouchableOpacity style={styles.recentChip} onPress={() => toggleSearch(true)}>
                     <Clock size={16} color="#666" />

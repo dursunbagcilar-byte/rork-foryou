@@ -2169,6 +2169,7 @@ export default function DriverHomeScreen() {
                 showsHorizontalScrollIndicator={false}
                 style={styles.stepsScroll}
                 contentContainerStyle={styles.stepsScrollContent}
+                scrollEnabled={Platform.OS !== 'web'}
               >
                 {navigationSteps.slice(currentStepIndex, currentStepIndex + 4).map((step, i) => {
                   const stepIdx = currentStepIndex + i;
