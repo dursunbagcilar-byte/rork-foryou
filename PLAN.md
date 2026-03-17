@@ -1,31 +1,64 @@
-# React DOM removeChild hatası düzeltmesi
+# Sahte/Simülasyon Özellikleri Gerçek Sisteme Geçiş
 
-## Sorun
-"Failed to execute 'removeChild' on 'Node'" hatası - React sanal DOM ile gerçek DOM arasında uyumsuzluk.
 
-## Olası Nedenler
-1. **Hydration mismatch**: Sunucu ve istemci farklı HTML render ediyor
-2. **Köşe durumlarındaki conditional render**: Web açılışında tutarsız başlangıç ağacı
-3. **Overlay component'leri**: `DriverApprovalWaiting` ve `ApprovalSuccessOverlay` absolute position elementleri
-4. **React.Fragment kullanımı**: Koşullu render edilen fragment'lerde DOM ağacı stabil kalmıyor
+## Özet
+Uygulamadaki 5 sahte/simülasyon özelliği profesyonel ve gerçek çalışan sistemlere dönüştürülecek.
 
-## Düzeltme Planı
+---
 
-- [x] `app/_layout.tsx` içinde web için tutarlı ilk render sağlayan hydration shell ekle
-- [x] `app/(driver-tabs)/_layout.tsx` içinde overlay host yapısını stabilize et ve overlay key'lerini ekle
-- [x] `app/(customer-tabs)/profile/security.tsx` içinde fragment tabanlı conditional render bloklarını `View` ile değiştir
-- [x] `app/(driver-tabs)/profile/security.tsx` içinde fragment tabanlı conditional render bloklarını `View` ile değiştir
-- [x] `app/(driver-tabs)/profile/vehicle.tsx` içinde map fragment yapısını stabilize et
-- [x] `app/ai-photo-editor.tsx` içinde ScrollView altındaki fragment wrapper'ını stabilize et
-- [x] Web uyumluluğu için ilgili effect dependency dizilerini netleştir
-- [x] `utils/webDomPatch.ts` içinde DOM patch başlatmasını korumalı hale getir ve `replaceChild` güvenliğini ekle
-- [x] Lint uyarılarına neden olan kullanılmayan state/import ve tip tanımlarını temizle
+### 1. 💬 Müşteri-Şoför Sohbeti — Gerçek Zamanlı
+**Şu an**: Sahte "Merhaba, yoldayım!" mesajıyla başlıyor, mesajlar 5 saniyede bir çekiliyor
+**Yapılacak**:
+- Sahte başlangıç mesajı kaldırılacak — sohbet backend'den gelen gerçek mesajlarla başlayacak
+- Mesaj polling süresi **3 saniyeye** düşürülecek (gerçek zamanlıya yakın)
+- Sohbet açıkken mesajlar otomatik "okundu" olarak işaretlenecek
+- Yeni mesaj geldiğinde titreşim bildirimi eklenecek
+- Sohbet açılır açılmaz son mesajlara otomatik kaydırma
 
-## Doğrulama
-- [x] TypeScript typecheck çalıştır
-- [x] Lint çalıştır
-- [x] Web bundle export doğrulaması çalıştır
-- [ ] Web platformunda sayfalar arası geçiş testi
-- [ ] Login/logout sonrası render kontrolü
-- [ ] Driver approval overlay açıp kapatma testi
-- [ ] Customer security sayfası şifre formu açıp kapatma
+---
+
+### 2. 🚗 Şoför Yaklaşma Hareketi — Gerçek GPS
+**Şu an**: Simüle edilmiş yol üzerinde sahte hareket (driverPathRef + setInterval)
+**Yapılacak**:
+- Tüm simülasyon kodları (driverPathRef, driverPathIndexRef, trackingIntervalRef) kaldırılacak
+- Sadece backend'den gelen **gerçek şoför GPS konumu** kullanılacak
+- GPS polling hızı artırılacak: şoför yaklaşırken **2 saniye**, normal durumda **3 saniye**
+- Harita üzerinde şoförün gerçek konumu anlık gösterilecek
+- Gerçek mesafeye göre ETA hesaplanacak
+
+---
+
+### 3. 🗺️ Yolculuk Sırasında Hareket — Gerçek GPS
+**Şu an**: tripPathRef + tripIntervalRef ile simüle edilen yol hareketi
+**Yapılacak**:
+- Trip simülasyon kodları (tripPathRef, tripPathIndexRef, tripIntervalRef) kaldırılacak
+- Yolculuk sırasında da **gerçek şoför GPS konumu** kullanılacak (zaten `driverLocationPollQuery` var)
+- Trip sırasında polling **3 saniye** olacak
+- Varış noktasına gerçek mesafe ve ETA gösterilecek
+- Hedefe 50m yaklaşınca otomatik tamamlama tetiklenecek
+
+---
+
+### 4. 🚦 Trafik Bilgisi (AI Sohbet) — Google Directions API
+**Şu an**: Rastgele "Hafif/Orta/Yoğun" döndürüyor
+**Yapılacak**:
+- Google Directions API kullanarak **gerçek trafik verisi** çekilecek
+- Bölge adından koordinat bulunacak (Geocoding API)
+- Trafik yoğunluğu: normal süre vs trafikli süre karşılaştırmasıyla belirlenecek
+- Sonuç: "Taksim bölgesinde trafik: Yoğun (Normal: 15 dk, Şu an: 28 dk)" gibi detaylı bilgi
+
+---
+
+### 5. 💰 Fiyat Tahmini (AI Sohbet) — Gerçek Fiyat Formülü + Google API
+**Şu an**: Sadece mesafe × 12.5 TL basit formül
+**Yapılacak**:
+- Google Directions API ile **gerçek yol mesafesi** hesaplanacak
+- Uygulamanın kendi fiyat formülü kullanılacak (araç tipi bazlı: scooter 500₺, motorsiklet 700₺, otomobil 800₺ baz + km başı 50₺)
+- 3 araç tipi için ayrı ayrı fiyat gösterilecek
+- Tahmini süre de eklenecek
+- Sonuç: "Taksim → Kadıköy (12.3 km, ~25 dk): 🛴 Scooter ₺615 | 🏍️ Motor ₺715 | 🚗 Otomobil ₺815"
+
+---
+
+### Uygulama İkonu
+Bu güncelleme mevcut uygulamaya ekleme olduğu için ikon değişikliği yapılmayacak.

@@ -17,6 +17,8 @@ import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRorkAgent, createRorkTool } from '@rork-ai/toolkit-sdk';
 import { z } from 'zod';
+import { calculatePrice, PRICING } from '@/constants/pricing';
+import { getGoogleMapsApiKey, getDirectionsApiUrl } from '@/utils/maps';
 import { keyboardAvoidingBehavior, keyboardVerticalOffset } from '@/utils/platform';
 
 const QUICK_PROMPTS_CUSTOMER = [
@@ -113,25 +115,106 @@ export default function AIChatScreen() {
   const { messages, sendMessage, setMessages } = useRorkAgent({
     tools: {
       estimatePrice: createRorkTool({
-        description: 'Tahmini fiyat hesapla',
+        description: 'İki nokta arası tahmini fiyat hesapla. Nereden ve nereye bilgisi gerekir.',
         zodSchema: z.object({
-          distance: z.number().describe('Mesafe (km)'),
-          vehicleType: z.string().describe('Araç tipi'),
+          origin: z.string().describe('Başlangıç noktası (adres veya yer adı, örn: Taksim)'),
+          destination: z.string().describe('Varış noktası (adres veya yer adı, örn: Kadıköy)'),
         }),
-        execute(params) {
-          const basePrice = params.distance * 12.5;
-          return `Tahmini fiyat: ${basePrice.toFixed(0)} TL (${params.vehicleType}, ${params.distance} km)`;
+        async execute(params) {
+          const apiKey = getGoogleMapsApiKey();
+          if (!apiKey) {
+            const fallbackDist = 10;
+            const scooterPrice = calculatePrice(fallbackDist, 'scooter');
+            const motorcyclePrice = calculatePrice(fallbackDist, 'motorcycle');
+            const carPrice = calculatePrice(fallbackDist, 'car');
+            return `${params.origin} → ${params.destination} (tahmini ~${fallbackDist} km):\n🛴 Scooter: ₺${scooterPrice} | 🏍️ Motor: ₺${motorcyclePrice} | 🚗 Otomobil: ₺${carPrice}`;
+          }
+
+          try {
+            const url = `${getDirectionsApiUrl()}?origin=${encodeURIComponent(params.origin + ', İstanbul')}&destination=${encodeURIComponent(params.destination + ', İstanbul')}&language=tr&departure_time=now&key=${apiKey}`;
+            console.log('[AI-Price] Fetching directions for price estimate');
+            const res = await fetch(url);
+            const data = await res.json();
+
+            if (data.status !== 'OK' || !data.routes?.[0]?.legs?.[0]) {
+              console.log('[AI-Price] Directions API error:', data.status);
+              return `${params.origin} → ${params.destination} için rota bulunamadı. Lütfen adresleri kontrol edin.`;
+            }
+
+            const leg = data.routes[0].legs[0];
+            const distanceKm = Math.round((leg.distance.value / 1000) * 10) / 10;
+            const durationMin = Math.ceil(leg.duration.value / 60);
+            const durationInTrafficMin = leg.duration_in_traffic ? Math.ceil(leg.duration_in_traffic.value / 60) : durationMin;
+
+            const scooterPrice = calculatePrice(distanceKm, 'scooter');
+            const motorcyclePrice = calculatePrice(distanceKm, 'motorcycle');
+            const carPrice = calculatePrice(distanceKm, 'car');
+
+            console.log('[AI-Price] Result:', distanceKm, 'km, duration:', durationMin, 'min, traffic:', durationInTrafficMin, 'min');
+            return `${params.origin} → ${params.destination} (${distanceKm} km, ~${durationInTrafficMin} dk):\n\n🛴 Scooter: ₺${scooterPrice}\n🏍️ Motor: ₺${motorcyclePrice}\n🚗 Otomobil: ₺${carPrice}\n\n📏 İlk ${PRICING.baseDistanceKm} km dahil, sonrası km başı ₺${PRICING.extraPerKm}`;
+          } catch (err) {
+            console.log('[AI-Price] Error:', err);
+            return `${params.origin} → ${params.destination} fiyat hesaplanamadı. Lütfen tekrar deneyin.`;
+          }
         },
       }),
       getTrafficInfo: createRorkTool({
-        description: 'Trafik durumunu öğren',
+        description: 'Bir bölgedeki veya iki nokta arasındaki gerçek zamanlı trafik durumunu öğren',
         zodSchema: z.object({
-          area: z.string().describe('Bölge adı'),
+          area: z.string().describe('Bölge adı veya başlangıç noktası (örn: Taksim, Beşiktaş)'),
+          destination: z.string().optional().describe('Varış noktası (opsiyonel, örn: Kadıköy)'),
         }),
-        execute(params) {
-          const levels = ['Hafif', 'Orta', 'Yoğun'];
-          const random = levels[Math.floor(Math.random() * levels.length)];
-          return `${params.area} bölgesinde trafik: ${random}`;
+        async execute(params) {
+          const apiKey = getGoogleMapsApiKey();
+          if (!apiKey) {
+            return `${params.area} bölgesinde trafik bilgisi alınamadı. Google Maps API anahtarı gerekli.`;
+          }
+
+          try {
+            const origin = params.area + ', İstanbul';
+            const dest = params.destination ? params.destination + ', İstanbul' : params.area + ' Meydanı, İstanbul';
+            const url = `${getDirectionsApiUrl()}?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(dest)}&language=tr&departure_time=now&key=${apiKey}`;
+            console.log('[AI-Traffic] Fetching real traffic data for:', params.area);
+            const res = await fetch(url);
+            const data = await res.json();
+
+            if (data.status !== 'OK' || !data.routes?.[0]?.legs?.[0]) {
+              console.log('[AI-Traffic] Directions API error:', data.status);
+              return `${params.area} bölgesinde trafik bilgisi alınamadı.`;
+            }
+
+            const leg = data.routes[0].legs[0];
+            const normalDurationMin = Math.ceil(leg.duration.value / 60);
+            const trafficDurationMin = leg.duration_in_traffic ? Math.ceil(leg.duration_in_traffic.value / 60) : normalDurationMin;
+            const distanceKm = Math.round((leg.distance.value / 1000) * 10) / 10;
+
+            const ratio = trafficDurationMin / Math.max(normalDurationMin, 1);
+            let trafficLevel: string;
+            let trafficEmoji: string;
+            if (ratio <= 1.15) {
+              trafficLevel = 'Hafif';
+              trafficEmoji = '🟢';
+            } else if (ratio <= 1.4) {
+              trafficLevel = 'Orta';
+              trafficEmoji = '🟡';
+            } else if (ratio <= 1.7) {
+              trafficLevel = 'Yoğun';
+              trafficEmoji = '🟠';
+            } else {
+              trafficLevel = 'Çok Yoğun';
+              trafficEmoji = '🔴';
+            }
+
+            const routeLabel = params.destination
+              ? `${params.area} → ${params.destination}`
+              : `${params.area} bölgesi`;
+
+            console.log('[AI-Traffic] Result:', trafficLevel, 'normal:', normalDurationMin, 'traffic:', trafficDurationMin, 'ratio:', ratio.toFixed(2));
+            return `${trafficEmoji} ${routeLabel} trafik: ${trafficLevel}\n⏱️ Normal süre: ${normalDurationMin} dk | Şu an: ${trafficDurationMin} dk\n📏 Mesafe: ${distanceKm} km`;
+          } catch (err) {
+            console.log('[AI-Traffic] Error:', err);
+            return `${params.area} bölgesinde trafik bilgisi alınamadı. Lütfen tekrar deneyin.`;
+          }
         },
       }),
     },

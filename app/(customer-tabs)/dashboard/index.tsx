@@ -295,9 +295,7 @@ export default function CustomerHomeScreen() {
   const [ridePickupOverride, setRidePickupOverride] = useState<{ latitude: number; longitude: number } | null>(null);
   const [tripEta, setTripEta] = useState<number>(0);
   const [tripCompleted, setTripCompleted] = useState<boolean>(false);
-  const tripPathRef = useRef<{ latitude: number; longitude: number }[]>([]);
-  const tripPathIndexRef = useRef<number>(0);
-  const tripIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const startTripRef = useRef<(() => Promise<void>) | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
   const [showChatModal, setShowChatModal] = useState<boolean>(false);
@@ -343,9 +341,9 @@ export default function CustomerHomeScreen() {
   const venueProgress = useRef(new Animated.Value(0)).current;
   const [venueProgressValue, setVenueProgressValue] = useState(0);
   const [ratingScaleValue, setRatingScaleValue] = useState(0);
-  const [chatMessages, setChatMessages] = useState<{ id: string; text: string; fromMe: boolean; time: string }[]>([
-    { id: '1', text: 'Merhaba, yoldayım!', fromMe: false, time: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) },
-  ]);
+  const [chatMessages, setChatMessages] = useState<{ id: string; text: string; fromMe: boolean; time: string }[]>([]);
+  const previousChatCountRef = useRef<number>(0);
+  const markAsReadMutation = trpc.messages.markAsRead.useMutation();
   const [chatInput, setChatInput] = useState<string>('');
   const approachingPlayedRef = useRef<boolean>(false);
   const userInteractingRef = useRef<boolean>(false);
@@ -359,9 +357,7 @@ export default function CustomerHomeScreen() {
     });
     return () => ratingScaleAnim.removeListener(listener);
   }, [ratingScaleAnim]);
-  const driverPathRef = useRef<{ latitude: number; longitude: number }[]>([]);
-  const driverPathIndexRef = useRef<number>(0);
-  const trackingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const panelAnim = useRef(new Animated.Value(0)).current;
   const sheetScrollOffsetRef = useRef(0);
   const destinationInputRef = useRef<TextInput | null>(null);
@@ -1072,8 +1068,8 @@ export default function CustomerHomeScreen() {
         (driverFound && !driverArrived && !tripStarted) ||
         (tripStarted && !tripCompleted)
       ),
-      refetchInterval: isRealtimeScreenActive ? (tripStarted ? 3500 : 5000) : false,
-      staleTime: tripStarted ? 3000 : 4000,
+      refetchInterval: isRealtimeScreenActive ? (driverApproaching ? 2000 : 3000) : false,
+      staleTime: driverApproaching ? 1500 : 2500,
     }
   );
 
@@ -1452,12 +1448,6 @@ export default function CustomerHomeScreen() {
     console.log('[Customer] Driver cancelled! Reassigning...');
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
 
-    if (trackingIntervalRef.current) {
-      clearInterval(trackingIntervalRef.current);
-      trackingIntervalRef.current = null;
-    }
-    driverPathRef.current = [];
-    driverPathIndexRef.current = 0;
     setDriverLocation(null);
     setDriverRoutePath([]);
     setDriverEta(0);
@@ -1675,8 +1665,8 @@ export default function CustomerHomeScreen() {
     { rideId: currentBackendRideId ?? '' },
     {
       enabled: !!currentBackendRideId && showChatModal && isRealtimeScreenActive,
-      refetchInterval: isRealtimeScreenActive ? 5000 : false,
-      staleTime: 4000,
+      refetchInterval: isRealtimeScreenActive && showChatModal ? 3000 : false,
+      staleTime: 2500,
     }
   );
 
@@ -2001,15 +1991,6 @@ export default function CustomerHomeScreen() {
     } else {
       await incrementCompletedRides();
     }
-    if (trackingIntervalRef.current) {
-      clearInterval(trackingIntervalRef.current);
-      trackingIntervalRef.current = null;
-    }
-    if (tripIntervalRef.current) {
-      clearInterval(tripIntervalRef.current);
-      tripIntervalRef.current = null;
-    }
-
     if (selectedDest) {
       const now = new Date();
       const ride = {
@@ -2095,8 +2076,6 @@ export default function CustomerHomeScreen() {
       setCurrentRideFree(false);
       setDriverLocation(null);
       setDriverEta(0);
-      driverPathRef.current = [];
-      driverPathIndexRef.current = 0;
       approachingPlayedRef.current = false;
       setDriverRoutePath([]);
       setTripStarted(false);
@@ -2104,8 +2083,6 @@ export default function CustomerHomeScreen() {
       setTripDriverLocation(null);
       setTripEta(0);
       setTripCompleted(false);
-      tripPathRef.current = [];
-      tripPathIndexRef.current = 0;
       setCurrentBackendRideId(null);
       setCurrentDriver(null);
       setPreviousDriverIds([]);
@@ -2134,8 +2111,6 @@ export default function CustomerHomeScreen() {
       setCurrentRideFree(false);
       setDriverLocation(null);
       setDriverEta(0);
-      driverPathRef.current = [];
-      driverPathIndexRef.current = 0;
       approachingPlayedRef.current = false;
       setDriverRoutePath([]);
       setTripStarted(false);
@@ -2143,8 +2118,6 @@ export default function CustomerHomeScreen() {
       setTripDriverLocation(null);
       setTripEta(0);
       setTripCompleted(false);
-      tripPathRef.current = [];
-      tripPathIndexRef.current = 0;
       setCurrentDriver(null);
       setPreviousDriverIds([]);
       setCurrentBackendRideId(null);
@@ -2181,8 +2154,6 @@ export default function CustomerHomeScreen() {
     setCurrentRideFree(false);
     setDriverLocation(null);
     setDriverEta(0);
-    driverPathRef.current = [];
-    driverPathIndexRef.current = 0;
     approachingPlayedRef.current = false;
     setDriverRoutePath([]);
     setTripStarted(false);
@@ -2193,16 +2164,6 @@ export default function CustomerHomeScreen() {
     setTripCompleted(false);
     setCustomerConfirmedArrival(false);
     setDriverSearchPanelState('searching');
-    tripPathRef.current = [];
-    tripPathIndexRef.current = 0;
-    if (trackingIntervalRef.current) {
-      clearInterval(trackingIntervalRef.current);
-      trackingIntervalRef.current = null;
-    }
-    if (tripIntervalRef.current) {
-      clearInterval(tripIntervalRef.current);
-      tripIntervalRef.current = null;
-    }
     setCurrentDriver(null);
     setPreviousDriverIds([]);
     setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
@@ -2281,8 +2242,6 @@ export default function CustomerHomeScreen() {
       };
       const rawPath = await fetchDriverRoute(driverStart, { latitude: customerLat, longitude: customerLng });
       const path = densifyPath(rawPath, 80);
-      driverPathRef.current = path;
-      driverPathIndexRef.current = 0;
       setDriverLocation(path[0]);
       setDriverRoutePath(path);
       const etaMinutes = Math.max(2, Math.ceil(path.length * 0.6 / 10));
@@ -2377,9 +2336,35 @@ export default function CustomerHomeScreen() {
         fromMe: m.senderId === user?.id,
         time: new Date(m.createdAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
       }));
+
+      if (mapped.length > previousChatCountRef.current && previousChatCountRef.current > 0) {
+        const newMessages = mapped.slice(previousChatCountRef.current);
+        const hasNewFromOther = newMessages.some(m => !m.fromMe);
+        if (hasNewFromOther) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+          console.log('[Chat] New message from driver, haptic triggered');
+        }
+      }
+      previousChatCountRef.current = mapped.length;
       setChatMessages(mapped);
+    } else if (rideMessagesQuery.data && rideMessagesQuery.data.length === 0) {
+      setChatMessages([]);
+      previousChatCountRef.current = 0;
     }
   }, [rideMessagesQuery.data, user?.id]);
+
+  useEffect(() => {
+    if (showChatModal && currentBackendRideId && user?.id) {
+      markAsReadMutation.mutate(
+        { userId: user.id, rideId: currentBackendRideId },
+        {
+          onSuccess: () => console.log('[Chat] Messages marked as read'),
+          onError: (err) => console.log('[Chat] Mark as read error:', err),
+        }
+      );
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showChatModal, currentBackendRideId, user?.id]);
 
   const handleSendChat = useCallback(() => {
     if (!chatInput.trim()) return;
