@@ -6,23 +6,26 @@
     "start": "bunx rork start -p qqd36vuy6c1tv9jy9gc6g --tunnel --port 8082",
     "start-web": "bunx rork start -p qqd36vuy6c1tv9jy9gc6g --web --tunnel --port 8082",
     "start-web-dev": "DEBUG=expo* bunx rork start -p qqd36vuy6c1tv9jy9gc6g --web --tunnel --port 8082",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "postinstall": "node fix-expo-location-duplicate.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
     "@hono/trpc-server": "0.4.2",
     "@nkzw/create-context-hook": "^1.1.0",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "@rork-ai/toolkit-sdk": "^0.2.51",
+    "@rork-ai/toolkit-sdk": "^0.2.54",
     "@tanstack/react-query": "^5.83.0",
     "@trpc/client": "^11.10.0",
     "@trpc/react-query": "^11.10.0",
     "@trpc/server": "^11.10.0",
     "expo": "~54.0.27",
     "expo-apple-authentication": "~8.0.8",
+    "expo-asset": "~12.0.12",
     "expo-audio": "~1.1.1",
     "expo-auth-session": "~7.0.10",
     "expo-av": "~16.0.8",
+    "expo-blur": "~15.0.7",
     "expo-clipboard": "~8.0.8",
     "expo-constants": "~18.0.11",
     "expo-crypto": "~15.0.8",
@@ -65,5 +68,9 @@
     "eslint-config-expo": "~10.0.0",
     "typescript": "~5.9.2"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "expo-location": "~19.0.8"
+  },
+  "packageManager": "bun@1.3.9"
 }
