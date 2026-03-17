@@ -2,13 +2,10 @@ import { useEffect } from 'react';
 import { Tabs } from 'expo-router';
 import { Home, Clock, User } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
-import { useTheme } from '@/contexts/ThemeContext';
 import { useNotifications } from '@/hooks/useNotifications';
-import { androidTextFix, crossPlatformShadow, isAndroid } from '@/utils/platform';
 
 export default function CustomerTabsLayout() {
   const { user } = useAuth();
-  const { colors } = useTheme();
   const { scheduleEveningNotifications } = useNotifications(user?.id ?? null);
 
   useEffect(() => {
@@ -23,26 +20,7 @@ export default function CustomerTabsLayout() {
         headerShown: false,
         tabBarHideOnKeyboard: true,
         tabBarStyle: {
-          backgroundColor: colors.background,
-          borderTopColor: colors.cardBorder,
-          borderTopWidth: isAndroid ? 0 : 1,
-          ...crossPlatformShadow({
-            color: '#000',
-            offsetY: -2,
-            opacity: isAndroid ? 0.18 : 0.08,
-            radius: 10,
-            elevation: 12,
-          }),
-        },
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textMuted,
-        tabBarItemStyle: {
-          paddingTop: isAndroid ? 4 : 0,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '600' as const,
-          ...androidTextFix({ lineHeight: 13, fontWeight: '600' }),
+          display: 'none' as const,
         },
       }}
     >
