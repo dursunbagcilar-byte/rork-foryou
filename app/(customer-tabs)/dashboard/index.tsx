@@ -7290,7 +7290,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
     borderRadius: 16,
     padding: 18,
-    backgroundColor: '#137A4B',
+    backgroundColor: '#17C653',
     borderWidth: 1,
     borderColor: 'rgba(255,215,0,0.15)',
     alignItems: 'center' as const,
