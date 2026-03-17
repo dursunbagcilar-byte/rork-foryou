@@ -1054,7 +1054,7 @@ function isAuthStoreUnavailable(): boolean {
   return storageMode === 'memory' && !isDbConfigured() && !persistentStore.available && loadedUsers === 0 && loadedDrivers === 0;
 }
 
-async function resolveValidSession(sessionToken: string): Promise<Session | null> {
+async function resolveValidSession(sessionToken: string, skipAccountHydration = false): Promise<Session | null> {
   let session: Session | null | undefined = db.sessions.get(sessionToken);
 
   if (!session) {
@@ -1077,6 +1077,7 @@ async function resolveValidSession(sessionToken: string): Promise<Session | null
     session = await parseSignedSessionToken(sessionToken);
     if (session) {
       db.sessions.set(sessionToken, session);
+      await persistSessionDirect(session);
       console.log('[SERVER] Session recovered from signed token:', session.userId);
     }
   }
@@ -1092,11 +1093,14 @@ async function resolveValidSession(sessionToken: string): Promise<Session | null
     return null;
   }
 
+  if (skipAccountHydration) {
+    return session;
+  }
+
   const account = await hydrateSessionAccount(session);
   if (!account) {
-    db.sessions.delete(sessionToken);
-    console.log('[SERVER] Session account missing, invalidated token for:', session.userId);
-    return null;
+    console.log('[SERVER] Session account not found in memory/DB, trusting signed token for:', session.userId);
+    return session;
   }
 
   return session;
@@ -2154,10 +2158,88 @@ app.post("/auth/session", async (c) => {
       return c.json({ valid: false, error: 'Oturum geçersiz veya süresi dolmuş', user: null, userType: null }, 401);
     }
 
-    const account = await hydrateSessionAccount(session);
+    let account = await hydrateSessionAccount(session);
+
     if (!account) {
-      db.sessions.delete(sessionToken);
+      console.log('[REST] session: account not hydrated, attempting store reload for:', session.userId);
+      try {
+        await initializeStore();
+        await forceReloadStore();
+        account = await hydrateSessionAccount(session);
+      } catch (reloadErr) {
+        console.log('[REST] session: store reload error:', reloadErr);
+      }
+    }
+
+    if (!account && typeof body.user === 'object' && body.user !== null) {
+      console.log('[REST] session: recovering account from client-provided user data for:', session.userId);
+      const clientUser = body.user as Record<string, any>;
+      if (session.userType === 'driver') {
+        const recoveredDriver: Driver = {
+          id: session.userId,
+          name: typeof clientUser.name === 'string' ? clientUser.name : 'Şoför',
+          phone: typeof clientUser.phone === 'string' ? clientUser.phone : '',
+          email: typeof clientUser.email === 'string' ? clientUser.email : '',
+          type: 'driver',
+          driverCategory: clientUser.driverCategory as any ?? 'driver',
+          vehiclePlate: typeof clientUser.vehiclePlate === 'string' ? clientUser.vehiclePlate : '',
+          vehicleModel: typeof clientUser.vehicleModel === 'string' ? clientUser.vehicleModel : '',
+          vehicleColor: typeof clientUser.vehicleColor === 'string' ? clientUser.vehicleColor : '',
+          rating: typeof clientUser.rating === 'number' ? clientUser.rating : 5,
+          totalRides: typeof clientUser.totalRides === 'number' ? clientUser.totalRides : 0,
+          isOnline: typeof clientUser.isOnline === 'boolean' ? clientUser.isOnline : false,
+          isApproved: typeof clientUser.isApproved === 'boolean' ? clientUser.isApproved : true,
+          dailyEarnings: 0,
+          weeklyEarnings: 0,
+          monthlyEarnings: 0,
+          city: typeof clientUser.city === 'string' ? clientUser.city : '',
+          district: typeof clientUser.district === 'string' ? clientUser.district : '',
+          createdAt: typeof clientUser.createdAt === 'string' ? clientUser.createdAt : new Date().toISOString(),
+        };
+        db.drivers.set(session.userId, recoveredDriver);
+        await persistAccountDirect(recoveredDriver, 'driver');
+        account = recoveredDriver;
+        console.log('[REST] session: driver account recovered from client data:', session.userId);
+      } else {
+        const recoveredUser: User = {
+          id: session.userId,
+          name: typeof clientUser.name === 'string' ? clientUser.name : 'Müşteri',
+          phone: typeof clientUser.phone === 'string' ? clientUser.phone : '',
+          email: typeof clientUser.email === 'string' ? clientUser.email : '',
+          type: 'customer',
+          gender: clientUser.gender as any,
+          city: typeof clientUser.city === 'string' ? clientUser.city : '',
+          district: typeof clientUser.district === 'string' ? clientUser.district : '',
+          referralCode: typeof clientUser.referralCode === 'string' ? clientUser.referralCode : '',
+          freeRidesRemaining: typeof clientUser.freeRidesRemaining === 'number' ? clientUser.freeRidesRemaining : 0,
+          createdAt: typeof clientUser.createdAt === 'string' ? clientUser.createdAt : new Date().toISOString(),
+        };
+        db.users.set(session.userId, recoveredUser);
+        await persistAccountDirect(recoveredUser, 'customer');
+        account = recoveredUser;
+        console.log('[REST] session: customer account recovered from client data:', session.userId);
+      }
+    }
+
+    if (!account) {
+      console.log('[REST] session: account still not found after all recovery attempts for:', session.userId, 'type:', session.userType);
       return c.json({ valid: false, error: 'Hesap bulunamadı', user: null, userType: null }, 401);
+    }
+
+    const SESSION_RENEWAL_THRESHOLD_MS = 15 * 24 * 60 * 60 * 1000;
+    const remainingMs = new Date(session.expiresAt).getTime() - Date.now();
+    let renewedToken: string | null = null;
+
+    if (remainingMs < SESSION_RENEWAL_THRESHOLD_MS) {
+      try {
+        const renewedSession = await createSignedSessionRecord(session.userId, session.userType);
+        await db.sessions.setSync(renewedSession.token, renewedSession);
+        await persistSessionDirect(renewedSession);
+        renewedToken = renewedSession.token;
+        console.log('[REST] session: token renewed for:', session.userId, 'old expiry:', session.expiresAt, 'new expiry:', renewedSession.expiresAt);
+      } catch (renewErr) {
+        console.log('[REST] session: token renewal error:', renewErr);
+      }
     }
 
     return c.json({
@@ -2169,6 +2251,7 @@ app.post("/auth/session", async (c) => {
         createdAt: session.createdAt,
         expiresAt: session.expiresAt,
       },
+      renewedToken,
     });
   } catch (err: any) {
     console.log('[REST] session error:', err?.message ?? err);

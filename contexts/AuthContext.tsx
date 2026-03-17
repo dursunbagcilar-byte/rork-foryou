@@ -1429,23 +1429,32 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       setIsAuthenticated(true);
 
       const normalizedPhone = normalizeTurkishPhone(phone || returnedUser.phone);
+      const normalizedEmail = returnedUser.email ? normalizeAuthEmail(returnedUser.email) : '';
       const persistenceTasks: Promise<unknown>[] = [
         AsyncStorage.setItem('auth_user', JSON.stringify(returnedUser)),
         saveRememberedPhone(normalizedPhone, actualType),
-        saveRememberedPhoneAccount(normalizedPhone, returnedUser.email, actualType),
       ];
+
+      if (normalizedEmail) {
+        persistenceTasks.push(saveRememberedPhoneAccount(normalizedPhone, normalizedEmail, actualType));
+      }
 
       if (result?.token) {
         persistenceTasks.unshift(setSessionToken(result.token));
       }
 
       await queueAuthPersistence(`phone-login:${actualType}:${normalizedPhone}`, persistenceTasks);
-      console.log('[Auth] Phone login success for:', normalizedPhone, 'type:', actualType);
+
+      if (normalizedEmail && result?.token) {
+        backgroundRepairRemoteAccount(returnedUser, 'phone-login-sync').catch(() => {});
+      }
+
+      console.log('[Auth] Phone login success for:', normalizedPhone, 'type:', actualType, 'hasToken:', !!result?.token);
       return actualType;
     }
 
     throw new Error(result?.error ?? 'Giriş doğrulanamadı');
-  }, [queueAuthPersistence, saveRememberedPhone, saveRememberedPhoneAccount]);
+  }, [backgroundRepairRemoteAccount, queueAuthPersistence, saveRememberedPhone, saveRememberedPhoneAccount]);
 
   const sendCustomerLoginCode = useCallback(async (phone: string): Promise<PhoneLoginResponse> => {
     const normalizedPhone = normalizeTurkishPhone(phone);
@@ -1638,23 +1647,30 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
 
     const normalizedEmail = normalizeAuthEmail(parsedStoredUser.email);
-    if (!normalizedEmail) {
-      console.log('[Auth] Session recovery skipped - cached email missing for:', reason);
-      return false;
-    }
 
     const [rememberedLogin, backup] = await Promise.all([
-      getRememberedLogin(parsedStoredUser.type),
-      getLocalAuthBackup(normalizedEmail),
+      normalizedEmail ? getRememberedLogin(parsedStoredUser.type) : Promise.resolve(null),
+      normalizedEmail ? getLocalAuthBackup(normalizedEmail) : Promise.resolve(null),
     ]);
 
-    if (!rememberedLogin || rememberedLogin.email !== normalizedEmail) {
-      console.log('[Auth] Session recovery skipped - remembered login missing for:', normalizedEmail, 'reason:', reason);
-      return false;
-    }
+    const hasEmailCredentials = !!(rememberedLogin && rememberedLogin.email === normalizedEmail && backup);
 
-    if (!backup) {
-      console.log('[Auth] Session recovery skipped - local backup missing for:', normalizedEmail, 'reason:', reason);
+    if (!hasEmailCredentials) {
+      const normalizedPhone = normalizeTurkishPhone(parsedStoredUser.phone);
+      if (normalizedPhone) {
+        console.log('[Auth] Session recovery trying phone-based local recovery for:', normalizedPhone, 'reason:', reason);
+        const localPhoneResult = await tryLocalPhoneLogin(normalizedPhone, parsedStoredUser.type, `session-recovery-phone:${reason}`);
+        if (localPhoneResult) {
+          console.log('[Auth] Session recovered via local phone login for:', normalizedPhone, 'reason:', reason);
+          return true;
+        }
+      }
+
+      if (!normalizedEmail) {
+        console.log('[Auth] Session recovery skipped - no email and phone recovery failed for:', reason);
+        return false;
+      }
+      console.log('[Auth] Session recovery skipped - remembered login/backup missing for:', normalizedEmail, 'reason:', reason);
       return false;
     }
 
@@ -1708,7 +1724,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       console.log('[Auth] Session recovery from cached credentials failed for:', normalizedEmail, 'reason:', reason, error);
       return false;
     }
-  }, [directFetch, ensureBackendAuthReady, getLocalAuthBackup, getRememberedLogin, queueAuthPersistence, saveRememberedLogin, saveRememberedPhone, saveRememberedPhoneAccount]);
+  }, [directFetch, ensureBackendAuthReady, getLocalAuthBackup, getRememberedLogin, queueAuthPersistence, saveRememberedLogin, saveRememberedPhone, saveRememberedPhoneAccount, tryLocalPhoneLogin]);
 
   const handleSessionInvalid = useCallback(async () => {
     console.log('[Auth] Session invalid, logging out...');
@@ -1730,7 +1746,12 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
 
     try {
-      const result = await directFetch('/auth/session', { token });
+      const cachedUser = fallbackStoredUser ? parseStoredAuthUser(fallbackStoredUser) : null;
+      const sessionPayload: Record<string, any> = { token };
+      if (cachedUser) {
+        sessionPayload.user = cachedUser;
+      }
+      const result = await directFetch('/auth/session', sessionPayload);
       if (result?.valid && result.user) {
         const restoredType: UserType = result.userType === 'driver' ? 'driver' : 'customer';
         const restoredUser = {
@@ -1746,7 +1767,15 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         setUser(normalizedRestoredUser);
         setUserType(restoredType);
         setIsAuthenticated(true);
-        await AsyncStorage.setItem('auth_user', JSON.stringify(normalizedRestoredUser));
+
+        const persistTasks: Promise<unknown>[] = [
+          AsyncStorage.setItem('auth_user', JSON.stringify(normalizedRestoredUser)),
+        ];
+        if (result.renewedToken) {
+          persistTasks.push(setSessionToken(result.renewedToken));
+          console.log('[Auth] Session token renewed during restore');
+        }
+        await Promise.allSettled(persistTasks);
         console.log('[Auth] Session validated on server:', normalizedRestoredUser.id, restoredType);
         return true;
       }
@@ -1801,8 +1830,16 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
     if (token) {
       try {
-        const result = await directFetch('/auth/session', { token });
+        const sessionPayload: Record<string, any> = { token };
+        if (user) {
+          sessionPayload.user = user;
+        }
+        const result = await directFetch('/auth/session', sessionPayload);
         if (result?.valid === true && result.user) {
+          if (result.renewedToken) {
+            await setSessionToken(result.renewedToken);
+            console.log('[Auth] ensureServerSession token renewed for:', reason);
+          }
           console.log('[Auth] ensureServerSession confirmed active token for:', reason);
           return true;
         }
@@ -1834,9 +1871,27 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       return true;
     }
 
+    if (user && isAuthenticated) {
+      console.log('[Auth] ensureServerSession attempting phone-based re-login for:', reason);
+      const normalizedPhone = normalizeTurkishPhone(user.phone);
+      if (normalizedPhone) {
+        const localRecovery = await tryLocalPhoneLogin(normalizedPhone, user.type as Exclude<UserType, null>, `ensure-session-phone:${reason}`);
+        if (localRecovery) {
+          console.log('[Auth] ensureServerSession local phone recovery succeeded for:', reason);
+          return true;
+        }
+      }
+
+      console.log('[Auth] ensureServerSession restoring cached user as final fallback for:', reason);
+      const restoredFromCache = await restoreCachedAuthUser(storedUser, `ensure-session-cache:${reason}`);
+      if (restoredFromCache) {
+        return true;
+      }
+    }
+
     console.log('[Auth] ensureServerSession failed to recover session for:', reason);
     throw new Error('Oturumunuzun süresi dolmuş. Lütfen tekrar giriş yapın.');
-  }, [directFetch, shouldTryLocalAuthFallback, tryRecoverServerSessionFromStoredUser]);
+  }, [directFetch, isAuthenticated, restoreCachedAuthUser, shouldTryLocalAuthFallback, tryLocalPhoneLogin, tryRecoverServerSessionFromStoredUser, user]);
 
   useEffect(() => {
     const loadAuth = async () => {
