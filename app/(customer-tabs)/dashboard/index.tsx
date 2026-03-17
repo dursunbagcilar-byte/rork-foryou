@@ -42,7 +42,7 @@ import { useWeather } from '@/hooks/useWeather';
 import { getGoogleMapsApiKey, getDirectionsApiUrl, getGeocodingUrl, logMapsKeyStatus } from '@/utils/maps';
 import TrendingMusicPlayer from '@/components/TrendingMusicPlayer';
 import { ScalePressable } from '@/components/ScalePressable';
-import { androidTextFix, crossPlatformShadow, keyboardAvoidingBehavior, keyboardVerticalOffset } from '@/utils/platform';
+import { androidTextFix, crossPlatformShadow } from '@/utils/platform';
 
 const GOOGLE_API_KEY = getGoogleMapsApiKey();
 const DIRECTIONS_API_URL = getDirectionsApiUrl();
@@ -3344,8 +3344,8 @@ export default function CustomerHomeScreen() {
         {isSearching ? (
           <KeyboardAvoidingView
             style={styles.routePickerKeyboard}
-            behavior={keyboardAvoidingBehavior()}
-            keyboardVerticalOffset={keyboardVerticalOffset()}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={0}
           >
             <SafeAreaView style={styles.routePickerSafeArea} edges={['top']}>
               <View style={styles.routePickerSurface}>
