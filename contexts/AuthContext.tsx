@@ -322,7 +322,11 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
   const ensureBackendAuthReady = useCallback(async (reason: string, force = false): Promise<boolean> => {
     const now = Date.now();
-    if (!force && now - lastAuthBootstrapAtRef.current < 15000) {
+    if (!force && now - lastAuthBootstrapAtRef.current < 30000) {
+      return true;
+    }
+
+    if (force && now - lastAuthBootstrapAtRef.current < 5000) {
       return true;
     }
 
@@ -333,7 +337,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     authBootstrapPromiseRef.current = (async () => {
       let apiBase = getApiBase();
       if (!apiBase) {
-        apiBase = await waitForBaseUrl(8000);
+        apiBase = await waitForBaseUrl(3000);
       }
 
       if (!apiBase) {
@@ -342,7 +346,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
 
       try {
         const bootstrapBody = getDbBootstrapPayload();
@@ -1451,7 +1455,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
 
     try {
-      const backendReady = await ensureBackendAuthReady('customer-send-login-code', true);
+      const backendReady = await ensureBackendAuthReady('customer-send-login-code');
       if (!backendReady) {
         console.log('[Auth] customer-send-login-code bootstrap not confirmed, trying direct request anyway');
       }
@@ -1502,7 +1506,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     }
 
     try {
-      const backendReady = await ensureBackendAuthReady('driver-send-login-code', true);
+      const backendReady = await ensureBackendAuthReady('driver-send-login-code');
       if (!backendReady) {
         console.log('[Auth] driver-send-login-code bootstrap not confirmed, trying direct request anyway');
       }
