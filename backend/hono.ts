@@ -67,6 +67,14 @@ function cacheContextEnv(c: Context): void {
 
     if (cachedAny) {
       console.log('[SERVER] Context env cache refreshed - endpoint:', !!(_serverEnvCache.EXPO_PUBLIC_RORK_DB_ENDPOINT || _serverEnvCache.RORK_DB_ENDPOINT), 'namespace:', !!(_serverEnvCache.EXPO_PUBLIC_RORK_DB_NAMESPACE || _serverEnvCache.RORK_DB_NAMESPACE), 'token:', !!(_serverEnvCache.EXPO_PUBLIC_RORK_DB_TOKEN || _serverEnvCache.RORK_DB_TOKEN));
+
+      const ep = _serverEnvCache.EXPO_PUBLIC_RORK_DB_ENDPOINT || _serverEnvCache.RORK_DB_ENDPOINT || '';
+      const ns = _serverEnvCache.EXPO_PUBLIC_RORK_DB_NAMESPACE || _serverEnvCache.RORK_DB_NAMESPACE || '';
+      const tk = _serverEnvCache.EXPO_PUBLIC_RORK_DB_TOKEN || _serverEnvCache.RORK_DB_TOKEN || '';
+      if (ep && ns && tk && !isDbConfigured()) {
+        console.log('[SERVER] Auto-configuring DB from context env cache');
+        setDbConfig(ep, ns, tk);
+      }
     }
   } catch (error) {
     console.log('[SERVER] Context env cache error:', error);
@@ -1114,29 +1122,38 @@ app.use("*", async (c, next) => {
 });
 
 function readServerEnv(key: string): string {
+  const cachedValue = normalizeServerEnvValue(_serverEnvCache[key]);
+  if (cachedValue) {
+    return cachedValue;
+  }
+
   try {
     const bunEnv = (globalThis as any).Bun?.env as Record<string, string | undefined> | undefined;
     const bunValue = typeof bunEnv?.[key] === 'string' ? bunEnv[key]?.trim() ?? '' : '';
-    if (bunValue) return bunValue;
+    if (bunValue) {
+      _serverEnvCache[key] = bunValue;
+      return bunValue;
+    }
   } catch {}
   try {
     const d = (globalThis as any).Deno;
     if (d?.env?.get) {
       const val = d.env.get(key);
-      if (val) return val;
+      if (val) {
+        _serverEnvCache[key] = val;
+        return val;
+      }
     }
   } catch {}
   try {
     if (typeof process !== 'undefined' && process.env) {
       const val = (process.env as Record<string, string | undefined>)[key];
-      if (val) return val;
+      if (val) {
+        _serverEnvCache[key] = val;
+        return val;
+      }
     }
   } catch {}
-
-  const cachedValue = normalizeServerEnvValue(_serverEnvCache[key]);
-  if (cachedValue) {
-    return cachedValue;
-  }
 
   return '';
 }
@@ -1216,16 +1233,30 @@ app.use("*", async (c, next) => {
   const bootstrapBody = await readBootstrapBodyFromClone(c);
   const { ep, ns, tk } = resolveBootstrapDbConfig(c, bootstrapBody);
   if (ep && ns && tk) {
+    if (!isDbConfigured()) {
+      console.log('[SERVER] Middleware: configuring DB from resolved config');
+      setDbConfig(ep, ns, tk);
+    }
     await ensureDbReady(ep, ns, tk);
-  } else if (!_dbReady && !isDbConfigured()) {
-    try {
-      await initializeStore();
-      if (isDbConfigured() || isStoreReadyForDatabaseMode()) {
-        _dbReady = true;
-        console.log('[SERVER] DB recovered from snapshot during middleware init');
+  } else if (!_dbReady || !isDbConfigured()) {
+    const fallbackEp = readServerEnv('EXPO_PUBLIC_RORK_DB_ENDPOINT') || readServerEnv('RORK_DB_ENDPOINT');
+    const fallbackNs = readServerEnv('EXPO_PUBLIC_RORK_DB_NAMESPACE') || readServerEnv('RORK_DB_NAMESPACE');
+    const fallbackTk = readServerEnv('EXPO_PUBLIC_RORK_DB_TOKEN') || readServerEnv('RORK_DB_TOKEN');
+
+    if (fallbackEp && fallbackNs && fallbackTk) {
+      console.log('[SERVER] Middleware: configuring DB from server env fallback');
+      setDbConfig(fallbackEp, fallbackNs, fallbackTk);
+      await ensureDbReady(fallbackEp, fallbackNs, fallbackTk);
+    } else {
+      try {
+        await initializeStore();
+        if (isDbConfigured() || isStoreReadyForDatabaseMode()) {
+          _dbReady = true;
+          console.log('[SERVER] DB recovered from snapshot during middleware init');
+        }
+      } catch (e) {
+        console.log('[SERVER] Middleware snapshot recovery attempt failed:', e);
       }
-    } catch (e) {
-      console.log('[SERVER] Middleware snapshot recovery attempt failed:', e);
     }
   }
   await next();
@@ -1251,10 +1282,24 @@ app.get("/", (c) => {
   });
 });
 app.get("/health", async (c) => {
-  const { ep, ns, tk } = resolveDbHeaders(c);
-  console.log('[SERVER] Health check - ep:', ep ? ep.substring(0, 30) + '...' : 'MISSING', 'ns:', ns ? 'YES' : 'MISSING', 'tk:', tk ? 'YES' : 'MISSING');
+  let { ep, ns, tk } = resolveDbHeaders(c);
+
+  if (!ep || !ns || !tk) {
+    const fallbackEp = readServerEnv('EXPO_PUBLIC_RORK_DB_ENDPOINT') || readServerEnv('RORK_DB_ENDPOINT');
+    const fallbackNs = readServerEnv('EXPO_PUBLIC_RORK_DB_NAMESPACE') || readServerEnv('RORK_DB_NAMESPACE');
+    const fallbackTk = readServerEnv('EXPO_PUBLIC_RORK_DB_TOKEN') || readServerEnv('RORK_DB_TOKEN');
+    if (!ep && fallbackEp) ep = fallbackEp;
+    if (!ns && fallbackNs) ns = fallbackNs;
+    if (!tk && fallbackTk) tk = fallbackTk;
+  }
+
+  console.log('[SERVER] Health check - ep:', ep ? ep.substring(0, 30) + '...' : 'MISSING', 'ns:', ns ? 'YES' : 'MISSING', 'tk:', tk ? 'YES' : 'MISSING', 'dbConfigured:', isDbConfigured());
 
   if (ep && ns && tk) {
+    if (!isDbConfigured()) {
+      console.log('[SERVER] Health: setting DB config from resolved values');
+      setDbConfig(ep, ns, tk);
+    }
     try {
       await ensureDbReady(ep, ns, tk);
     } catch (e) {
@@ -1273,7 +1318,7 @@ app.get("/health", async (c) => {
       _dbReady = true;
     }
   } else {
-    console.log('[SERVER] Health: DB config incomplete from headers - endpoint:', !!ep, 'namespace:', !!ns, 'token:', !!tk);
+    console.log('[SERVER] Health: DB config incomplete - endpoint:', !!ep, 'namespace:', !!ns, 'token:', !!tk);
     if (!isDbConfigured()) {
       try {
         await initializeStore();
@@ -1292,19 +1337,18 @@ app.get("/health", async (c) => {
   const finalStorageMode = getCurrentStorageMode();
   const finalReady = finalStorageMode !== 'memory';
   const finalPersistentStore = getPersistentStoreStatus();
-  const resolvedHealthConfig = resolveDbHeaders(c);
-  const effectiveDbAvailable = finalConfigured || resolvedHealthConfig.ep && resolvedHealthConfig.ns && resolvedHealthConfig.tk;
+  const effectiveDbAvailable = finalConfigured || (!!ep && !!ns && !!tk);
   console.log('[SERVER] Health response: configured:', finalConfigured, 'ready:', finalReady, 'storageMode:', finalStorageMode, 'snapshotAvailable:', finalPersistentStore.available, 'users:', db.users.getAll().length, 'drivers:', db.drivers.getAll().length, 'smsConfigured:', netgsmStatus.configured);
   return c.json({
     status: "ok",
-    version: "68",
+    version: "69",
     dbConfigured: finalConfigured,
     dbReady: finalReady,
     storageMode: finalStorageMode,
     persistentStoreAvailable: finalPersistentStore.available,
     persistentStoreLastSavedAt: finalPersistentStore.lastSavedAt,
     dbMissing: !effectiveDbAvailable
-      ? { endpoint: !resolvedHealthConfig.ep && !finalConfigured, namespace: !resolvedHealthConfig.ns && !finalConfigured, token: !resolvedHealthConfig.tk && !finalConfigured }
+      ? { endpoint: !ep && !finalConfigured, namespace: !ns && !finalConfigured, token: !tk && !finalConfigured }
       : undefined,
     smsProvider: AUTH_SMS_PROVIDER,
     smsConfigured: netgsmStatus.configured,

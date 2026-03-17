@@ -143,6 +143,10 @@ function getConfig() {
     if (!token && _cachedConfig.token) token = _cachedConfig.token;
   }
 
+  if (endpoint && !STATIC_ENDPOINT) STATIC_ENDPOINT = endpoint;
+  if (namespace && !STATIC_NAMESPACE) STATIC_NAMESPACE = namespace;
+  if (token && !STATIC_TOKEN) STATIC_TOKEN = token;
+
   syncCachedConfigFromResolvedValues(endpoint, namespace, token);
 
   return { endpoint, namespace, token };
