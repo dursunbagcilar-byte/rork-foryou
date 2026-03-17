@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput, Image,
   Animated, Platform, ActivityIndicator, Alert, Linking,
-  KeyboardAvoidingView, ScrollView, Keyboard, useWindowDimensions,
+  KeyboardAvoidingView, ScrollView, Keyboard, useWindowDimensions, BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
@@ -29,7 +29,6 @@ import {
   calculatePrice,
   calculateDistance,
   estimateDuration,
-  POPULAR_DESTINATIONS,
   PRICING,
 } from '@/constants/pricing';
 import type { DestinationOption, VehicleType } from '@/constants/pricing';
@@ -43,10 +42,14 @@ import { getGoogleMapsApiKey, getDirectionsApiUrl, getGeocodingUrl, logMapsKeySt
 import TrendingMusicPlayer from '@/components/TrendingMusicPlayer';
 import { ScalePressable } from '@/components/ScalePressable';
 import { androidTextFix, crossPlatformShadow } from '@/utils/platform';
+import { buildSupportWhatsAppUrl } from '@/constants/support';
 
 const GOOGLE_API_KEY = getGoogleMapsApiKey();
 const DIRECTIONS_API_URL = getDirectionsApiUrl();
 const DEFAULT_DRIVER_SEARCH_STATUS = 'Yakınlarınızdaki şoförler kontrol ediliyor';
+const SOS_EMERGENCY_NUMBER = '112';
+const SOS_DESCRIPTION = 'SOS bölümünde yalnızca 112 ve WhatsApp destek seçenekleri kullanılabilir.';
+const SOS_WHATSAPP_URL = buildSupportWhatsAppUrl('Acil durum yardımına ihtiyacım var. Lütfen benimle hızlıca iletişime geçin.');
 
 type DriverSearchPanelState = 'searching' | 'no_drivers';
 
@@ -59,14 +62,6 @@ interface CartItem {
   quantity: number;
 }
 
-interface RoutePickerRecentItem {
-  id: string;
-  title: string;
-  subtitle: string;
-  latitude?: number;
-  longitude?: number;
-  source: 'history' | 'city' | 'popular';
-}
 
 function buildDriverPreview(
   driverId: string,
@@ -246,7 +241,7 @@ async function resolvePickupLocationFromCoordinates(
 export default function CustomerHomeScreen() {
   const { height: SCREEN_HEIGHT } = useWindowDimensions();
   const MAP_BOTTOM_PADDING = Math.round(SCREEN_HEIGHT * 0.37);
-  const { user, promoApplied, isFreeRide, remainingFreeRides, applyPromoCode, incrementCompletedRides, consumeFreeRide, addRideToHistory, customVehicleImage, rideHistory, ensureServerSession } = useAuth();
+  const { user, promoApplied, isFreeRide, remainingFreeRides, applyPromoCode, incrementCompletedRides, consumeFreeRide, addRideToHistory, customVehicleImage, ensureServerSession } = useAuth();
   const { draft: rideForOtherDraft, resetRideForOtherDraft } = useRideForOthers();
 
   const { location: gpsLocation } = useLocation(true, 8000);
@@ -384,10 +379,12 @@ export default function CustomerHomeScreen() {
     if (open) {
       panelAnim.setValue(1);
       setIsSearching(true);
+      console.log('[RoutePicker] Search panel opened');
     } else {
       blurRoutePickerInput();
       panelAnim.setValue(0);
       setIsSearching(false);
+      console.log('[RoutePicker] Search panel closed');
     }
   }, [blurRoutePickerInput, panelAnim]);
 
@@ -407,16 +404,6 @@ export default function CustomerHomeScreen() {
     setDriverSearchPanelState('no_drivers');
     setDriverSearchStatus(message);
     toggleSearch(false);
-  }, [toggleSearch]);
-
-  const dismissDriverAvailabilityPanel = useCallback(() => {
-    console.log('[Customer] Dismissing no-driver availability panel and returning to route picker');
-    setRideRequested(false);
-    setFindingDriver(false);
-    setDriverFound(false);
-    setDriverSearchPanelState('searching');
-    setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
-    toggleSearch(true);
   }, [toggleSearch]);
 
   const vehicleEmoji = useMemo(() => {
@@ -452,13 +439,65 @@ export default function CustomerHomeScreen() {
   const locationBias = userCity ? { latitude: userCity.latitude, longitude: userCity.longitude, radius: 50000, strict: true } : undefined;
   const { predictions, isLoading: autoCompleteLoading, fetchPredictions, getPlaceDetails, clearPredictions } = usePlacesAutocomplete(locationBias, user?.city);
 
-  const userCityName = user?.city ?? '';
-  const isUserInIstanbul = userCityName === 'İstanbul';
+  const clearRoutePickerDraft = useCallback(() => {
+    setDestination('');
+    setSelectedDest(null);
+    clearPredictions();
+    console.log('[RoutePicker] Destination draft cleared');
+  }, [clearPredictions]);
+
+  const handleCloseRoutePicker = useCallback(() => {
+    clearRoutePickerDraft();
+    toggleSearch(false);
+  }, [clearRoutePickerDraft, toggleSearch]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !isSearching) {
+      return;
+    }
+
+    const backSubscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      console.log('[RoutePicker] Android back pressed - closing route picker and clearing draft');
+      handleCloseRoutePicker();
+      return true;
+    });
+
+    return () => {
+      backSubscription.remove();
+    };
+  }, [handleCloseRoutePicker, isSearching]);
+
+  const dismissDriverAvailabilityPanel = useCallback(() => {
+    console.log('[Customer] Dismissing no-driver availability panel and returning to route picker');
+    setRideRequested(false);
+    setFindingDriver(false);
+    setDriverFound(false);
+    setDriverSearchPanelState('searching');
+    setDriverSearchStatus(DEFAULT_DRIVER_SEARCH_STATUS);
+    clearRoutePickerDraft();
+    toggleSearch(true);
+  }, [clearRoutePickerDraft, toggleSearch]);
+
+
+
+  const rideActiveRef = useRef(false);
+  useEffect(() => {
+    rideActiveRef.current = rideRequested || driverFound || tripStarted;
+  }, [rideRequested, driverFound, tripStarted]);
+
+  const clearRoutePickerDraftRef = useRef(clearRoutePickerDraft);
+  useEffect(() => {
+    clearRoutePickerDraftRef.current = clearRoutePickerDraft;
+  }, [clearRoutePickerDraft]);
 
   useFocusEffect(
     useCallback(() => {
       console.log('[Customer] Dashboard focused - polling resumed');
       setIsScreenFocused(true);
+      if (!rideActiveRef.current) {
+        console.log('[Customer] Dashboard focused - clearing destination draft (no active ride)');
+        clearRoutePickerDraftRef.current();
+      }
       return () => {
         console.log('[Customer] Dashboard blurred - polling paused');
         setIsScreenFocused(false);
@@ -470,16 +509,6 @@ export default function CustomerHomeScreen() {
     return getNightlifeVenuesByCity(user?.city ?? '', user?.district ?? '');
   }, [user?.city, user?.district]);
   const venuePhotos = useVenuePhotos(cityVenues);
-  const filteredDestinations = useMemo(() => {
-    if (!isUserInIstanbul) {
-      return [] as DestinationOption[];
-    }
-
-    return POPULAR_DESTINATIONS.filter((d) => (
-      destination ? d.name.toLowerCase().includes(destination.toLowerCase()) : true
-    ));
-  }, [destination, isUserInIstanbul]);
-
   const currentLocationLabel = useMemo(() => {
     if (user?.district && user?.city) {
       return `${user.district}, ${user.city}`;
@@ -492,66 +521,7 @@ export default function CustomerHomeScreen() {
     return 'Mevcut konumunuz';
   }, [user?.city, user?.district]);
 
-  const routePickerRecentItems = useMemo<RoutePickerRecentItem[]>(() => {
-    const items: RoutePickerRecentItem[] = [];
-    const seenKeys = new Set<string>();
 
-    const pushItem = (item: RoutePickerRecentItem) => {
-      const dedupeKey = `${item.title}|${item.subtitle}`.toLocaleLowerCase('tr-TR');
-      if (seenKeys.has(dedupeKey)) {
-        return;
-      }
-      seenKeys.add(dedupeKey);
-      items.push(item);
-    };
-
-    rideHistory.slice(0, 6).forEach((ride, index) => {
-      if (!ride.dropoffAddress) {
-        return;
-      }
-
-      pushItem({
-        id: `recent-ride-${ride.id}-${index}`,
-        title: ride.dropoffAddress,
-        subtitle: ride.pickupAddress || currentLocationLabel,
-        latitude: ride.dropoffLat,
-        longitude: ride.dropoffLng,
-        source: 'history',
-      });
-    });
-
-    if (userCity) {
-      const citySubtitleParts: string[] = [];
-      if (user?.city) {
-        citySubtitleParts.push(user.city);
-      }
-      if (user?.district) {
-        citySubtitleParts.push(user.district);
-      }
-
-      pushItem({
-        id: 'quick-city-center',
-        title: user?.district ? `${user.district} Merkez` : `${user?.city ?? 'Şehir'} Merkez`,
-        subtitle: citySubtitleParts.join(' / ') || 'Hızlı seçim',
-        latitude: userCity.latitude,
-        longitude: userCity.longitude,
-        source: 'city',
-      });
-    }
-
-    filteredDestinations.slice(0, 3).forEach((item, index) => {
-      pushItem({
-        id: `popular-destination-${index}`,
-        title: item.name,
-        subtitle: user?.city ? `${user.city} için popüler nokta` : 'Popüler rota',
-        latitude: item.latitude,
-        longitude: item.longitude,
-        source: 'popular',
-      });
-    });
-
-    return items.slice(0, 5);
-  }, [rideHistory, currentLocationLabel, user?.city, user?.district, userCity, filteredDestinations]);
 
   const onlineDriversQuery = trpc.drivers.getOnlineByCity.useQuery(
     { city: user?.city ?? '', requestedDriverCategory: selectedRequestedDriverCategory },
@@ -1591,26 +1561,7 @@ export default function CustomerHomeScreen() {
     }
   }, [mapRegion.latitude, mapRegion.longitude, selectedVehiclePackage, fetchDrivingDistance, hasFreeRideAvailable]);
 
-  const handleSelectRoutePickerItem = useCallback((item: RoutePickerRecentItem) => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 
-    if (typeof item.latitude === 'number' && typeof item.longitude === 'number') {
-      clearPredictions();
-      blurRoutePickerInput();
-      void selectDestination({
-        name: item.title,
-        latitude: item.latitude,
-        longitude: item.longitude,
-      });
-      console.log('[RoutePicker] Quick destination selected:', item.title);
-      return;
-    }
-
-    setDestination(item.title);
-    setSelectedDest(null);
-    void fetchPredictions(item.title);
-    console.log('[RoutePicker] Searching quick destination:', item.title);
-  }, [blurRoutePickerInput, clearPredictions, fetchPredictions, selectDestination]);
 
   const handleRoutePickerMapSelection = useCallback(() => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -2304,13 +2255,13 @@ export default function CustomerHomeScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
     Alert.alert(
       'Acil Durum',
-      'Yardım almak için bir seçenek belirleyin:',
+      SOS_DESCRIPTION,
       [
         {
           text: '112 Ara',
           onPress: () => {
-            Linking.openURL('tel:112').catch(() => {
-              console.log('[SOS] Could not open dialer for 112');
+            Linking.openURL(`tel:${SOS_EMERGENCY_NUMBER}`).catch(() => {
+              console.log('[SOS] Could not open dialer for', SOS_EMERGENCY_NUMBER);
             });
           },
           style: 'destructive',
@@ -2318,7 +2269,7 @@ export default function CustomerHomeScreen() {
         {
           text: 'WhatsApp',
           onPress: () => {
-            Linking.openURL('https://wa.me/905001234567?text=Acil%20durum%20yard%C4%B1m%C4%B1na%20ihtiyac%C4%B1m%20var').catch(() => {
+            Linking.openURL(SOS_WHATSAPP_URL).catch(() => {
               console.log('[SOS] Could not open WhatsApp');
             });
           },
@@ -2326,7 +2277,7 @@ export default function CustomerHomeScreen() {
         { text: 'İptal', style: 'cancel' },
       ]
     );
-    console.log('[SOS] Emergency options shown');
+    console.log('[SOS] Emergency options shown:', { emergencyNumber: SOS_EMERGENCY_NUMBER, whatsappEnabled: true });
   }, []);
 
   useEffect(() => {
@@ -3052,26 +3003,7 @@ export default function CustomerHomeScreen() {
                   <Search size={22} color="#888" />
                   <Text style={styles.searchPlaceholderNew}>Nereye?</Text>
                 </TouchableOpacity>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.recentScroll}
-                  contentContainerStyle={styles.recentScrollContent}
-                  scrollEnabled={Platform.OS !== 'web'}
-                >
-                  <TouchableOpacity style={styles.recentChip} onPress={() => toggleSearch(true)}>
-                    <Clock size={16} color="#666" />
-                    <Text style={styles.recentChipText} numberOfLines={1}>
-                      {user?.city ? `${user.city} Merkez` : 'Son Konum'}
-                    </Text>
-                  </TouchableOpacity>
-                  {user?.district ? (
-                    <TouchableOpacity style={styles.recentChip} onPress={() => toggleSearch(true)}>
-                      <Clock size={16} color="#666" />
-                      <Text style={styles.recentChipText} numberOfLines={1}>{user.district}</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </ScrollView>
+
                 <View style={styles.serviceGrid}>
                   <TouchableOpacity
                     style={styles.mainServiceCard}
@@ -3353,7 +3285,7 @@ export default function CustomerHomeScreen() {
                 <View style={styles.routePickerHeader}>
                   <TouchableOpacity
                     style={styles.routePickerHeaderButton}
-                    onPress={() => toggleSearch(false)}
+                    onPress={handleCloseRoutePicker}
                     activeOpacity={0.7}
                     testID="route-picker-close"
                   >
@@ -3509,36 +3441,15 @@ export default function CustomerHomeScreen() {
                       </TouchableOpacity>
                     ))}
 
-                    {!showGoogleResults && routePickerRecentItems.map((item) => (
-                      <TouchableOpacity
-                        key={item.id}
-                        style={styles.routePickerRecentRow}
-                        onPress={() => handleSelectRoutePickerItem(item)}
-                        activeOpacity={0.8}
-                        testID={`route-picker-quick-${item.id}`}
-                      >
-                        <View style={styles.routePickerRecentIcon}>
-                          <Clock size={17} color="#8C90A1" />
-                        </View>
-                        <View style={styles.routePickerRecentContent}>
-                          <Text style={styles.routePickerRecentTitle} numberOfLines={1}>{item.title}</Text>
-                          <Text style={styles.routePickerRecentSubtitle} numberOfLines={1}>{item.subtitle}</Text>
-                        </View>
-                        <View style={styles.routePickerRecentTrailing}>
-                          <ChevronRight size={18} color="#C5C9D5" />
-                        </View>
-                      </TouchableOpacity>
-                    ))}
-
                     {showGoogleResults && predictions.length === 0 && !autoCompleteLoading && destination.length >= 2 && !selectedDest && (
                       <View style={styles.noResultRow}>
                         <Text style={styles.noResultText}>Sonuç bulunamadı, aramaya devam edin...</Text>
                       </View>
                     )}
 
-                    {!showGoogleResults && routePickerRecentItems.length === 0 && (
+                    {!showGoogleResults && (
                       <View style={styles.noResultRow}>
-                        <Text style={styles.noResultText}>Henüz hızlı seçim bulunmuyor. Adres aramaya başlayın.</Text>
+                        <Text style={styles.noResultText}>Gitmek istediğiniz adresi arayın.</Text>
                       </View>
                     )}
                   </View>
