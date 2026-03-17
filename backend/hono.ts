@@ -2138,6 +2138,111 @@ app.post("/auth/repair-account", async (c) => {
   }
 });
 
+app.post("/auth/ensure-user-session", async (c) => {
+  try {
+    const body = await c.req.json().catch((): Record<string, unknown> => ({})) as Record<string, any>;
+    const requestDbConfig = resolveRequestDbConfig(c, body);
+    await recoverAuthStoreForRequest('ensure-user-session', requestDbConfig.endpoint, requestDbConfig.namespace, requestDbConfig.token);
+
+    const userId = typeof body.userId === 'string' ? body.userId.trim() : '';
+    const email = typeof body.email === 'string' ? body.email.toLowerCase().trim() : '';
+    const phone = typeof body.phone === 'string' ? normalizeTurkishPhone(body.phone) : '';
+    const accountType: 'customer' | 'driver' = body.type === 'driver' ? 'driver' : 'customer';
+    const clientUser = typeof body.user === 'object' && body.user !== null ? body.user as Record<string, any> : null;
+
+    if (!userId && !email && !phone) {
+      return c.json({ success: false, error: 'Kullanıcı bilgisi eksik', token: null }, 400);
+    }
+
+    let account: User | Driver | null = null;
+
+    if (userId) {
+      account = accountType === 'driver' ? db.drivers.get(userId) ?? null : db.users.get(userId) ?? null;
+    }
+
+    if (!account && email) {
+      account = accountType === 'driver'
+        ? db.drivers.getByEmail(email) ?? null
+        : db.users.getByEmail(email) ?? null;
+    }
+
+    if (!account && phone) {
+      account = accountType === 'driver'
+        ? db.drivers.getByPhone(phone) ?? null
+        : db.users.getByPhone(phone) ?? null;
+    }
+
+    if (!account && clientUser) {
+      const resolvedId = userId || `${accountType === 'driver' ? 'd' : 'c'}_recovered_${Date.now()}`;
+      if (accountType === 'driver') {
+        const recoveredDriver: Driver = {
+          id: resolvedId,
+          name: typeof clientUser.name === 'string' ? clientUser.name : 'Şoför',
+          phone: typeof clientUser.phone === 'string' ? clientUser.phone : phone,
+          email: typeof clientUser.email === 'string' ? clientUser.email.toLowerCase().trim() : email,
+          type: 'driver',
+          driverCategory: clientUser.driverCategory as any ?? 'driver',
+          vehiclePlate: typeof clientUser.vehiclePlate === 'string' ? clientUser.vehiclePlate : '',
+          vehicleModel: typeof clientUser.vehicleModel === 'string' ? clientUser.vehicleModel : '',
+          vehicleColor: typeof clientUser.vehicleColor === 'string' ? clientUser.vehicleColor : '',
+          rating: typeof clientUser.rating === 'number' ? clientUser.rating : 5,
+          totalRides: typeof clientUser.totalRides === 'number' ? clientUser.totalRides : 0,
+          isOnline: typeof clientUser.isOnline === 'boolean' ? clientUser.isOnline : false,
+          isApproved: typeof clientUser.isApproved === 'boolean' ? clientUser.isApproved : true,
+          dailyEarnings: 0,
+          weeklyEarnings: 0,
+          monthlyEarnings: 0,
+          city: typeof clientUser.city === 'string' ? clientUser.city : '',
+          district: typeof clientUser.district === 'string' ? clientUser.district : '',
+          createdAt: typeof clientUser.createdAt === 'string' ? clientUser.createdAt : new Date().toISOString(),
+        };
+        db.drivers.set(resolvedId, recoveredDriver);
+        await persistAccountDirect(recoveredDriver, 'driver');
+        account = recoveredDriver;
+      } else {
+        const recoveredUser: User = {
+          id: resolvedId,
+          name: typeof clientUser.name === 'string' ? clientUser.name : 'Müşteri',
+          phone: typeof clientUser.phone === 'string' ? clientUser.phone : phone,
+          email: typeof clientUser.email === 'string' ? clientUser.email.toLowerCase().trim() : email,
+          type: 'customer',
+          gender: clientUser.gender as any,
+          city: typeof clientUser.city === 'string' ? clientUser.city : '',
+          district: typeof clientUser.district === 'string' ? clientUser.district : '',
+          referralCode: typeof clientUser.referralCode === 'string' ? clientUser.referralCode : '',
+          freeRidesRemaining: typeof clientUser.freeRidesRemaining === 'number' ? clientUser.freeRidesRemaining : 0,
+          createdAt: typeof clientUser.createdAt === 'string' ? clientUser.createdAt : new Date().toISOString(),
+        };
+        db.users.set(resolvedId, recoveredUser);
+        await persistAccountDirect(recoveredUser, 'customer');
+        account = recoveredUser;
+      }
+      console.log('[REST] ensure-user-session: account recovered from client data:', resolvedId, accountType);
+    }
+
+    if (!account) {
+      console.log('[REST] ensure-user-session: account not found:', userId, email, phone, accountType);
+      return c.json({ success: false, error: 'Hesap bulunamadı', token: null }, 404);
+    }
+
+    const sessionRecord = await createSignedSessionRecord(account.id, accountType);
+    const sessionToken = sessionRecord.token;
+    await db.sessions.setSync(sessionToken, sessionRecord);
+    await persistSessionDirect(sessionRecord);
+
+    console.log('[REST] ensure-user-session success:', account.id, accountType, 'hasClientUser:', !!clientUser);
+    return c.json({
+      success: true,
+      error: null,
+      token: sessionToken,
+      user: { ...account, type: accountType },
+    });
+  } catch (err: any) {
+    console.log('[REST] ensure-user-session error:', err?.message ?? err);
+    return c.json({ success: false, error: 'Oturum oluşturulamadı', token: null }, 500);
+  }
+});
+
 app.post("/auth/session", async (c) => {
   try {
     const authHeader = c.req.header('authorization');

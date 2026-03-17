@@ -179,8 +179,32 @@ function getDistanceBetween(
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function isDriverSessionErrorMessage(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes('unauthorized') ||
+    lower.includes('geçersiz oturum') ||
+    lower.includes('oturumunuzun süresi dolmuş') ||
+    lower.includes('oturum');
+}
+
+function getDriverActionErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
 export default function DriverHomeScreen() {
-  const { user, customVehicleImage, updateCustomVehicleImage, profilePhoto, updateProfilePhoto } = useAuth();
+  const {
+    user,
+    customVehicleImage,
+    updateCustomVehicleImage,
+    profilePhoto,
+    updateProfilePhoto,
+    driverApproved: isApproved,
+    ensureServerSession,
+  } = useAuth();
   const router = useRouter();
   const driver = user as Driver | null;
   const [isScreenFocused, setIsScreenFocused] = useState<boolean>(true);
@@ -215,7 +239,6 @@ export default function DriverHomeScreen() {
     }, [])
   );
 
-  const { driverApproved: isApproved } = useAuth();
   const [isOnline, setIsOnline] = useState<boolean>(false);
   const [hasRideRequest, setHasRideRequest] = useState<boolean>(false);
   const [rideAccepted, setRideAccepted] = useState<boolean>(false);
@@ -323,6 +346,25 @@ export default function DriverHomeScreen() {
       staleTime: 4000,
     }
   );
+
+  const runProtectedDriverAction = useCallback(async <T,>(reason: string, action: () => Promise<T>): Promise<T> => {
+    await ensureServerSession(`driver-map-${reason}`);
+
+    try {
+      return await action();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '';
+      console.log('[Driver] Protected action failed:', reason, errorMessage || error);
+
+      if (!isDriverSessionErrorMessage(errorMessage)) {
+        throw error;
+      }
+
+      console.log('[Driver] Retrying protected action after session recovery:', reason);
+      await ensureServerSession(`driver-map-${reason}-retry`);
+      return await action();
+    }
+  }, [ensureServerSession]);
 
   useEffect(() => {
     syncDriverLocationMutateRef.current = syncDriverLocationMutation.mutate;
@@ -1068,12 +1110,12 @@ export default function DriverHomeScreen() {
     }
 
     try {
-      const result = await acceptRideMutation.mutateAsync({
+      const result = await runProtectedDriverAction('accept-ride', () => acceptRideMutation.mutateAsync({
         rideId: currentRideId,
         driverId: driver.id,
         driverName: driver.name ?? 'Şoför',
         driverRating: driver.rating ?? 5.0,
-      });
+      }));
 
       if (!result?.success) {
         Alert.alert('Sipariş alınamadı', result?.error ?? 'Sipariş başka bir kuryeye geçti.');
@@ -1099,7 +1141,7 @@ export default function DriverHomeScreen() {
     setShowCourteousWarning(true);
     spokenStepsRef.current = new Set();
     Animated.timing(requestAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
-  }, [currentRideId, driver, acceptRideMutation, requestAnim, currentRideIsFree]);
+  }, [currentRideId, driver, acceptRideMutation, requestAnim, currentRideIsFree, runProtectedDriverAction]);
 
   const handleCourteousWarningOk = useCallback(async () => {
     setShowCourteousWarning(false);
@@ -1130,10 +1172,10 @@ export default function DriverHomeScreen() {
 
     try {
       if (isBusinessDelivery) {
-        const result = await declineBusinessOrderMutation.mutateAsync({
+        const result = await runProtectedDriverAction('decline-business-order', () => declineBusinessOrderMutation.mutateAsync({
           rideId: currentRideId,
           driverId: driver.id,
-        });
+        }));
         if (!result?.success) {
           const errorMessage = 'error' in result && typeof result.error === 'string'
             ? result.error
@@ -1144,10 +1186,10 @@ export default function DriverHomeScreen() {
         const reassigned = 'reassignment' in result && result.reassignment ? result.reassignment.assigned : false;
         console.log('[Driver] Business order declined:', currentRideId, 'reassigned:', reassigned);
       } else {
-        const result = await declineRideMutation.mutateAsync({
+        const result = await runProtectedDriverAction('decline-ride', () => declineRideMutation.mutateAsync({
           rideId: currentRideId,
           driverId: driver.id,
-        });
+        }));
         if (!result?.success) {
           const errorMessage = 'error' in result && typeof result.error === 'string'
             ? result.error
@@ -1173,7 +1215,7 @@ export default function DriverHomeScreen() {
     setCurrentRidePrice(0);
     Animated.timing(requestAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
     void pendingRidesQuery.refetch();
-  }, [currentRideId, declineBusinessOrderMutation, declineRideMutation, driver?.id, isBusinessDelivery, pendingRidesQuery, requestAnim]);
+  }, [currentRideId, declineBusinessOrderMutation, declineRideMutation, driver?.id, isBusinessDelivery, pendingRidesQuery, requestAnim, runProtectedDriverAction]);
 
   useEffect(() => {
     if (rideAccepted && driverSimLoc && !arrivedAtPickup && driverPathRef.current.length > 0) {
@@ -1370,18 +1412,17 @@ export default function DriverHomeScreen() {
     speakInstruction(isBusinessDelivery ? 'İşletme noktasına geldiniz. Siparişi aldığınızda devam edin.' : 'Adrese geldiniz. Müşteriye bildirim gönderildi. Müşteriyi aldığınızda bildirin.');
     const rideId = currentRideId ?? 'current_ride';
     console.log('[Ride] Driver confirmed arrival at pickup - sending notification, rideId:', rideId);
-    driverArrivedMutation.mutate(
-      { rideId, driverName: driver?.name ?? 'Şoför' },
-      {
-        onSuccess: () => {
-          console.log('[Ride] Driver arrival notification sent to customer successfully');
-        },
-        onError: (err) => {
-          console.log('[Ride] Driver arrival notification error:', err);
-        },
-      }
-    );
-  }, [speakInstruction, driver?.name, driverArrivedMutation, currentRideId, isBusinessDelivery]);
+    void runProtectedDriverAction('driver-arrived', () => driverArrivedMutation.mutateAsync({
+      rideId,
+      driverName: driver?.name ?? 'Şoför',
+    }))
+      .then(() => {
+        console.log('[Ride] Driver arrival notification sent to customer successfully');
+      })
+      .catch((err) => {
+        console.log('[Ride] Driver arrival notification error:', err);
+      });
+  }, [speakInstruction, driver?.name, driverArrivedMutation, currentRideId, isBusinessDelivery, runProtectedDriverAction]);
 
   const handlePickupCustomer = useCallback(() => {
     Alert.alert(
@@ -1394,7 +1435,7 @@ export default function DriverHomeScreen() {
           onPress: async () => {
             if (currentRideId) {
               try {
-                const result = await startRideMutation.mutateAsync({ rideId: currentRideId });
+                const result = await runProtectedDriverAction('start-ride', () => startRideMutation.mutateAsync({ rideId: currentRideId }));
                 if (!result?.success) {
                   const errorMessage = 'error' in result && typeof result.error === 'string'
                     ? result.error
@@ -1405,7 +1446,7 @@ export default function DriverHomeScreen() {
                 console.log('[Ride] Ride started on backend:', currentRideId, 'businessDelivery:', isBusinessDelivery);
               } catch (err) {
                 console.log('[Ride] Start ride backend error:', err);
-                const errorMessage = err instanceof Error ? err.message : 'Yolculuk şu an başlatılamıyor. Lütfen tekrar deneyin.';
+                const errorMessage = getDriverActionErrorMessage(err, 'Yolculuk şu an başlatılamıyor. Lütfen tekrar deneyin.');
                 Alert.alert('Yolculuk Başlatılamadı', errorMessage);
                 return;
               }
@@ -1442,7 +1483,7 @@ export default function DriverHomeScreen() {
         },
       ]
     );
-  }, [speakInstruction, dropoffCoord, driverSimLoc, pickupCoord, fetchDirections, startRideMutation, currentRideId, isBusinessDelivery]);
+  }, [speakInstruction, dropoffCoord, driverSimLoc, pickupCoord, fetchDirections, startRideMutation, currentRideId, isBusinessDelivery, runProtectedDriverAction]);
 
   const openLocationInMaps = useCallback((lat: number, lng: number, label: string) => {
     const url = Platform.select({
@@ -1493,7 +1534,7 @@ export default function DriverHomeScreen() {
   const handleCompleteRide = useCallback(async () => {
     if (currentRideId) {
       try {
-        const result = await completeRideMutation.mutateAsync({ rideId: currentRideId });
+        const result = await runProtectedDriverAction('complete-ride', () => completeRideMutation.mutateAsync({ rideId: currentRideId }));
         if (!result?.success) {
           const errorMessage = 'error' in result && typeof result.error === 'string'
             ? result.error
@@ -1504,7 +1545,7 @@ export default function DriverHomeScreen() {
         console.log('[Driver] Ride completed on backend:', currentRideId);
       } catch (err) {
         console.log('[Driver] Complete ride backend error:', err);
-        const errorMessage = err instanceof Error ? err.message : 'Yolculuk şu an tamamlanamıyor. Lütfen tekrar deneyin.';
+        const errorMessage = getDriverActionErrorMessage(err, 'Yolculuk şu an tamamlanamıyor. Lütfen tekrar deneyin.');
         Alert.alert('Yolculuk Tamamlanamadı', errorMessage);
         return;
       }
@@ -1516,7 +1557,7 @@ export default function DriverHomeScreen() {
     void activeRideQuery.refetch();
     void pendingRidesQuery.refetch();
     Alert.alert('Yolculuk Tamamlandı', 'Kazançlarınız güncellendi. İyi yolculuklar!');
-  }, [resetRideState, currentRideId, completeRideMutation, activeRideQuery, pendingRidesQuery]);
+  }, [resetRideState, currentRideId, completeRideMutation, activeRideQuery, pendingRidesQuery, runProtectedDriverAction]);
 
   const DRIVER_CANCEL_REASONS = [
     { key: 'customer_no_show', label: 'Müşteri gelmedi' },
@@ -1543,7 +1584,11 @@ export default function DriverHomeScreen() {
             onPress: async () => {
               if (currentRideId) {
                 try {
-                  const result = await cancelRideMutation.mutateAsync({ rideId: currentRideId, cancelledBy: 'driver', cancelReason: 'Şoför iptal etti' });
+                  const result = await runProtectedDriverAction('cancel-ride', () => cancelRideMutation.mutateAsync({
+                    rideId: currentRideId,
+                    cancelledBy: 'driver',
+                    cancelReason: 'Şoför iptal etti',
+                  }));
                   if (!result?.success) {
                     const errorMessage = 'error' in result && typeof result.error === 'string'
                       ? result.error
@@ -1554,7 +1599,7 @@ export default function DriverHomeScreen() {
                   console.log('[Ride] Driver cancelled ride on backend:', currentRideId);
                 } catch (err) {
                   console.log('[Ride] Cancel ride backend error:', err);
-                  const errorMessage = err instanceof Error ? err.message : 'Yolculuk şu an iptal edilemiyor. Lütfen tekrar deneyin.';
+                  const errorMessage = getDriverActionErrorMessage(err, 'Yolculuk şu an iptal edilemiyor. Lütfen tekrar deneyin.');
                   Alert.alert('İptal Edilemedi', errorMessage);
                   return;
                 }
@@ -1574,14 +1619,18 @@ export default function DriverHomeScreen() {
         ]
       );
     }
-  }, [resetRideState, confirmedArrival, customerPickedUp, cancelRideMutation, currentRideId]);
+  }, [resetRideState, confirmedArrival, customerPickedUp, cancelRideMutation, currentRideId, runProtectedDriverAction]);
 
   const handleConfirmDriverCancelWithReason = useCallback(async (reason: string) => {
     setShowDriverCancelReasonModal(false);
     setSelectedDriverCancelReason('');
     if (currentRideId) {
       try {
-        const result = await cancelRideMutation.mutateAsync({ rideId: currentRideId, cancelledBy: 'driver', cancelReason: reason });
+        const result = await runProtectedDriverAction('cancel-ride-with-reason', () => cancelRideMutation.mutateAsync({
+          rideId: currentRideId,
+          cancelledBy: 'driver',
+          cancelReason: reason,
+        }));
         if (!result?.success) {
           const errorMessage = 'error' in result && typeof result.error === 'string'
             ? result.error
@@ -1592,7 +1641,7 @@ export default function DriverHomeScreen() {
         console.log('[Ride] Driver cancel with reason on backend:', currentRideId, reason);
       } catch (err) {
         console.log('[Ride] Cancel with reason backend error:', err);
-        const errorMessage = err instanceof Error ? err.message : 'Yolculuk şu an iptal edilemiyor. Lütfen tekrar deneyin.';
+        const errorMessage = getDriverActionErrorMessage(err, 'Yolculuk şu an iptal edilemiyor. Lütfen tekrar deneyin.');
         Alert.alert('İptal Edilemedi', errorMessage);
         return;
       }
@@ -1607,7 +1656,7 @@ export default function DriverHomeScreen() {
       'Yolculuk iptal edildi. Müşteriye bildirim gönderildi.',
       [{ text: 'Tamam' }]
     );
-  }, [resetRideState, currentRideId, cancelRideMutation]);
+  }, [resetRideState, currentRideId, cancelRideMutation, runProtectedDriverAction]);
 
   useEffect(() => {
     if (rideMessagesQuery.data && rideMessagesQuery.data.length > 0) {

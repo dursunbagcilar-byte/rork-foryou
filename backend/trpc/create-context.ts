@@ -261,9 +261,20 @@ async function resolveValidSession(token: string) {
 
   const account = await hydrateSessionAccount(session);
   if (!account) {
-    console.log("[CONTEXT] Session account not found, invalidating token for:", session.userId);
-    db.sessions.delete(token);
-    return null;
+    console.log("[CONTEXT] Session account not found in memory/DB, attempting final store reload for:", session.userId);
+    try {
+      await forceReloadStore();
+      const retryAccount = await hydrateSessionAccount(session);
+      if (retryAccount) {
+        console.log("[CONTEXT] Session account recovered after forced reload for:", session.userId);
+        return session;
+      }
+    } catch (reloadErr) {
+      console.log("[CONTEXT] Final store reload error:", reloadErr);
+    }
+
+    console.log("[CONTEXT] Session account still not found, trusting signed token for:", session.userId, "type:", session.userType);
+    return session;
   }
 
   return session;
@@ -280,7 +291,18 @@ export const createContext = async (opts: FetchCreateContextFnOptions) => {
   let isAdmin = false;
 
   if (token && token.length > 4) {
-    const session = await resolveValidSession(token);
+    let session = await resolveValidSession(token);
+
+    if (!session) {
+      console.log("[CONTEXT] All session recovery attempts failed for token, length:", token.length, "prefix:", token.substring(0, 8));
+      const signedSession = await parseSignedSessionToken(token);
+      if (signedSession) {
+        console.log("[CONTEXT] Final signed token parse succeeded for:", signedSession.userId, "type:", signedSession.userType);
+        db.sessions.set(token, signedSession);
+        session = signedSession;
+      }
+    }
+
     if (session) {
       userId = session.userId;
       userType = session.userType;

@@ -299,7 +299,7 @@ export default function CustomerHomeScreen() {
   const startTripRef = useRef<(() => Promise<void>) | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
   const [showChatModal, setShowChatModal] = useState<boolean>(false);
-  const [showSOSModal, setShowSOSModal] = useState<boolean>(false);
+
   const [activeVenueIndex, setActiveVenueIndex] = useState<number>(0);
   const [showCourierPanel, setShowCourierPanel] = useState<boolean>(false);
   const [selectedCourierBiz, setSelectedCourierBiz] = useState<CourierBusiness | null>(null);
@@ -1876,7 +1876,25 @@ export default function CustomerHomeScreen() {
         }
       };
 
-      const result = await createRideMutation.mutateAsync(rideRequestPayload);
+      let result: Awaited<ReturnType<typeof createRideMutation.mutateAsync>>;
+      try {
+        result = await createRideMutation.mutateAsync(rideRequestPayload);
+      } catch (firstErr) {
+        const firstErrMsg = firstErr instanceof Error ? firstErr.message.toLowerCase() : '';
+        const isAuthError = firstErrMsg.includes('unauthorized') || firstErrMsg.includes('geçersiz oturum') || firstErrMsg.includes('oturum');
+        if (isAuthError) {
+          console.log('[Customer] Ride creation auth error, re-acquiring token and retrying...');
+          try {
+            await ensureServerSession('customer-dashboard-create-ride-retry');
+            result = await createRideMutation.mutateAsync(rideRequestPayload);
+          } catch (retryErr) {
+            console.log('[Customer] Ride creation retry also failed:', retryErr);
+            throw retryErr;
+          }
+        } else {
+          throw firstErr;
+        }
+      }
 
       if (!result?.success || !result.ride) {
         const queueAvailable = 'queueAvailable' in result && result.queueAvailable === true;
@@ -2282,50 +2300,33 @@ export default function CustomerHomeScreen() {
     );
   }, [resetRideStates, currentBackendRideId, cancelRideMutation, ensureServerSession]);
 
-  const handleShareWhatsAppLocation = useCallback(() => {
-    const lat = mapRegion.latitude;
-    const lng = mapRegion.longitude;
-    const message = `2go şöförleri ile eve dönüyorum 📍 Canlı konumum: https://maps.google.com/maps?q=${lat},${lng}`;
-    const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(message)}`;
-    void Linking.openURL(whatsappUrl).catch(() => {
-      Alert.alert('Hata', 'WhatsApp açılamadı. Lütfen WhatsApp yüklü olduğundan emin olun.');
-    });
-    console.log('[SOS] Sharing location via WhatsApp');
-  }, [mapRegion.latitude, mapRegion.longitude]);
-
-  const handleSendSMS = useCallback(() => {
-    const lat = mapRegion.latitude;
-    const lng = mapRegion.longitude;
-    const message = `2go şöförleri ile eve dönüyorum 📍 Konumum: https://maps.google.com/maps?q=${lat},${lng}`;
-    const smsUrl = Platform.OS === 'ios'
-      ? `sms:&body=${encodeURIComponent(message)}`
-      : `sms:?body=${encodeURIComponent(message)}`;
-    void Linking.openURL(smsUrl).catch(() => {
-      Alert.alert('Hata', 'SMS uygulaması açılamadı');
-    });
-    console.log('[SOS] Opening SMS with location');
-  }, [mapRegion.latitude, mapRegion.longitude]);
-
   const handleSOS = useCallback(() => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
-    setShowSOSModal(true);
-    console.log('[SOS] Opening SOS modal');
-  }, []);
-
-  const handleSOSCall112 = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-    Linking.openURL('tel:112').catch(() => {
-      Alert.alert('Hata', 'Arama uygulaması açılamadı');
-    });
-    console.log('[SOS] Calling 112');
-  }, []);
-
-  const handleSOSCall155 = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-    Linking.openURL('tel:155').catch(() => {
-      Alert.alert('Hata', 'Arama uygulaması açılamadı');
-    });
-    console.log('[SOS] Calling 155 Police');
+    Alert.alert(
+      'Acil Durum',
+      'Yardım almak için bir seçenek belirleyin:',
+      [
+        {
+          text: '112 Ara',
+          onPress: () => {
+            Linking.openURL('tel:112').catch(() => {
+              console.log('[SOS] Could not open dialer for 112');
+            });
+          },
+          style: 'destructive',
+        },
+        {
+          text: 'WhatsApp',
+          onPress: () => {
+            Linking.openURL('https://wa.me/905001234567?text=Acil%20durum%20yard%C4%B1m%C4%B1na%20ihtiyac%C4%B1m%20var').catch(() => {
+              console.log('[SOS] Could not open WhatsApp');
+            });
+          },
+        },
+        { text: 'İptal', style: 'cancel' },
+      ]
+    );
+    console.log('[SOS] Emergency options shown');
   }, []);
 
   useEffect(() => {
@@ -4154,7 +4155,7 @@ export default function CustomerHomeScreen() {
         <View style={styles.ratingOverlay}>
           <View style={styles.cancelReasonModal}>
             <TouchableOpacity
-              style={styles.sosModalCloseX}
+              style={styles.cancelReasonCloseX}
               onPress={() => setShowCancelReasonModal(false)}
               activeOpacity={0.7}
             >
@@ -4217,43 +4218,7 @@ export default function CustomerHomeScreen() {
           </View>
         </View>
       ) : null}
-      {showSOSModal ? (
-        <View style={styles.ratingOverlay}>
-          <View style={styles.sosModal}>
-            <TouchableOpacity
-              style={styles.sosModalCloseX}
-              onPress={() => setShowSOSModal(false)}
-              activeOpacity={0.7}
-              testID="sos-close-x"
-            >
-              <X size={22} color="#555" />
-            </TouchableOpacity>
-            <View style={styles.sosModalIconWrap}>
-              <Shield size={36} color="#E74C3C" />
-            </View>
-            <Text style={styles.sosModalTitle}>Acil Durum</Text>
-            <Text style={styles.sosModalSub}>Güvende değilseniz aşağıdaki seçeneklerden birini kullanın. Konumunuz otomatik paylaşılabilir.</Text>
-            <View style={styles.sosModalActions}>
-              <TouchableOpacity style={styles.sosModalBtn112} onPress={handleSOSCall112} activeOpacity={0.8}>
-                <Phone size={18} color="#FFF" />
-                <Text style={styles.sosModalBtnText112}>112 Acil Ara</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.sosModalBtn155} onPress={handleSOSCall155} activeOpacity={0.8}>
-                <Phone size={18} color="#FFF" />
-                <Text style={styles.sosModalBtnText155}>155 Polis</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.sosModalBtnWA} onPress={() => { handleShareWhatsAppLocation(); setShowSOSModal(false); }} activeOpacity={0.8}>
-                <Share2 size={18} color="#25D366" />
-                <Text style={styles.sosModalBtnTextWA}>WhatsApp Konum Paylaş</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.sosModalBtnSMS} onPress={() => { handleSendSMS(); setShowSOSModal(false); }} activeOpacity={0.8}>
-                <MessageCircle size={18} color="#1A73E8" />
-                <Text style={styles.sosModalBtnTextSMS}>SMS ile Konum Gönder</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      ) : null}
+
       {showChatModal ? (
         <KeyboardAvoidingView
           style={styles.ratingOverlay}
@@ -6229,120 +6194,7 @@ const styles = StyleSheet.create({
     gap: 8,
     width: '100%',
   },
-  sosModal: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    paddingHorizontal: 24,
-    paddingTop: 40,
-    paddingBottom: 28,
-    width: '100%',
-    alignItems: 'center' as const,
-    borderWidth: 1,
-    borderColor: '#E0E0E8',
-  },
-  sosModalCloseX: {
-    position: 'absolute' as const,
-    top: 14,
-    right: 14,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#F2F2F5',
-    justifyContent: 'center' as const,
-    alignItems: 'center' as const,
-    zIndex: 10,
-  },
-  sosModalIconWrap: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: '#FDE8E8',
-    justifyContent: 'center' as const,
-    alignItems: 'center' as const,
-    marginBottom: 16,
-  },
-  sosModalTitle: {
-    fontSize: 22,
-    fontWeight: '700' as const,
-    color: '#E74C3C',
-    marginBottom: 6,
-  },
-  sosModalSub: {
-    fontSize: 13,
-    color: '#777',
-    textAlign: 'center' as const,
-    marginBottom: 24,
-    lineHeight: 18,
-    paddingHorizontal: 8,
-  },
-  sosModalActions: {
-    width: '100%' as const,
-    gap: 10,
-  },
-  sosModalBtn112: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    gap: 10,
-    backgroundColor: '#E74C3C',
-    paddingVertical: 15,
-    borderRadius: 14,
-    width: '100%' as const,
-  },
-  sosModalBtnText112: {
-    fontSize: 16,
-    fontWeight: '700' as const,
-    color: '#FFF',
-  },
-  sosModalBtn155: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    gap: 10,
-    backgroundColor: '#2563EB',
-    paddingVertical: 15,
-    borderRadius: 14,
-    width: '100%' as const,
-  },
-  sosModalBtnText155: {
-    fontSize: 16,
-    fontWeight: '700' as const,
-    color: '#FFF',
-  },
-  sosModalBtnWA: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    gap: 10,
-    backgroundColor: '#F0FFF4',
-    paddingVertical: 15,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#25D36640',
-    width: '100%' as const,
-  },
-  sosModalBtnTextWA: {
-    fontSize: 15,
-    fontWeight: '600' as const,
-    color: '#25D366',
-  },
-  sosModalBtnSMS: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    gap: 10,
-    backgroundColor: '#EFF6FF',
-    paddingVertical: 15,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#1A73E840',
-    width: '100%' as const,
-  },
-  sosModalBtnTextSMS: {
-    fontSize: 15,
-    fontWeight: '600' as const,
-    color: '#1A73E8',
-  },
+
   sosButton: {
     flexDirection: 'row' as const,
     alignItems: 'center' as const,
@@ -8973,6 +8825,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600' as const,
     color: '#8B7340',
+  },
+  cancelReasonCloseX: {
+    position: 'absolute' as const,
+    top: 14,
+    right: 14,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#F2F2F5',
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    zIndex: 10,
   },
   cancelReasonModal: {
     width: '90%' as unknown as number,

@@ -648,12 +648,17 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       throw new Error('Yerel oturum verisi okunamadı');
     }
 
-    await setSessionToken(null);
+    const existingToken = await getSessionToken();
+    if (!existingToken) {
+      console.log('[Auth] No existing token during local user restore from:', source);
+    } else {
+      console.log('[Auth] Preserving existing session token during local user restore from:', source);
+    }
     setUser(normalizedLocalUser);
     setUserType(normalizedLocalUser.type);
     setIsAuthenticated(true);
     await AsyncStorage.setItem('auth_user', JSON.stringify(normalizedLocalUser));
-    console.log('[Auth] Local auth session restored from', source, 'for:', normalizedLocalUser.email, 'type:', normalizedLocalUser.type);
+    console.log('[Auth] Local auth session restored from', source, 'for:', normalizedLocalUser.email, 'type:', normalizedLocalUser.type, 'hasToken:', !!existingToken);
     return normalizedLocalUser.type;
   }, []);
 
@@ -672,12 +677,17 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         return false;
       }
 
-      await setSessionToken(null);
+      const existingToken = await getSessionToken();
+      if (!existingToken) {
+        console.log('[Auth] No existing token during cached user restore from:', source);
+      } else {
+        console.log('[Auth] Preserving existing session token during cached user restore from:', source);
+      }
       setUser(parsedStoredUser);
       setUserType(parsedStoredUser.type);
       setIsAuthenticated(true);
       await AsyncStorage.setItem('auth_user', JSON.stringify(parsedStoredUser));
-      console.log('[Auth] Cached session restored for:', parsedStoredUser.id, parsedStoredUser.type, 'source:', source);
+      console.log('[Auth] Cached session restored for:', parsedStoredUser.id, parsedStoredUser.type, 'source:', source, 'hasToken:', !!existingToken);
       return true;
     } catch (error) {
       console.log('[Auth] restoreCachedAuthUser error:', error, 'source:', source);
@@ -1735,14 +1745,73 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     await AsyncStorage.removeItem('auth_user');
   }, []);
 
+  const acquireServerTokenForUser = useCallback(async (targetUser: User | Driver, reason: string): Promise<boolean> => {
+    try {
+      const result = await directFetch('/auth/ensure-user-session', {
+        userId: targetUser.id,
+        email: targetUser.email ?? '',
+        phone: targetUser.phone ?? '',
+        type: targetUser.type,
+        user: targetUser,
+      });
+
+      if (result?.success && result?.token) {
+        await setSessionToken(result.token);
+        if (result.user) {
+          const refreshedUser = normalizeStoredAuthUser({ ...result.user, type: targetUser.type } as User | Driver);
+          if (refreshedUser) {
+            setUser(refreshedUser);
+            setUserType(refreshedUser.type);
+            setIsAuthenticated(true);
+            await AsyncStorage.setItem('auth_user', JSON.stringify(refreshedUser));
+          }
+        }
+        console.log('[Auth] acquireServerTokenForUser success for:', targetUser.id, 'reason:', reason);
+        return true;
+      }
+
+      console.log('[Auth] acquireServerTokenForUser server rejected for:', targetUser.id, 'reason:', reason, 'error:', result?.error ?? 'unknown');
+      return false;
+    } catch (error) {
+      console.log('[Auth] acquireServerTokenForUser error for:', targetUser.id, 'reason:', reason, error);
+      return false;
+    }
+  }, [directFetch]);
+
+  const acquireTokenAfterLocalRestore = useCallback(async (fallbackStoredUser: string | null, source: string): Promise<void> => {
+    const postToken = await getSessionToken();
+    if (postToken) {
+      return;
+    }
+
+    const currentUser = fallbackStoredUser ? parseStoredAuthUser(fallbackStoredUser) : null;
+    if (!currentUser) {
+      return;
+    }
+
+    try {
+      const acquired = await acquireServerTokenForUser(currentUser, `restore-token-bg:${source}`);
+      if (acquired) {
+        console.log('[Auth] Background token acquired after local restore:', source);
+      }
+    } catch (bgError) {
+      console.log('[Auth] Background token acquisition failed after local restore:', source, bgError);
+    }
+  }, [acquireServerTokenForUser]);
+
   const restoreServerSession = useCallback(async (fallbackStoredUser: string | null): Promise<boolean> => {
     const token = await getSessionToken();
     if (!token) {
       const recoveredSession = await tryRecoverServerSessionFromStoredUser(fallbackStoredUser, 'missing-token');
       if (recoveredSession) {
+        await acquireTokenAfterLocalRestore(fallbackStoredUser, 'missing-token-recovery');
         return true;
       }
-      return restoreCachedAuthUser(fallbackStoredUser, 'missing-token');
+      const restoredFromCache = await restoreCachedAuthUser(fallbackStoredUser, 'missing-token');
+      if (restoredFromCache) {
+        await acquireTokenAfterLocalRestore(fallbackStoredUser, 'missing-token-cache');
+      }
+      return restoredFromCache;
     }
 
     try {
@@ -1783,11 +1852,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       await setSessionToken(null);
       const recoveredSession = await tryRecoverServerSessionFromStoredUser(fallbackStoredUser, 'invalid-server-session');
       if (recoveredSession) {
+        await acquireTokenAfterLocalRestore(fallbackStoredUser, 'invalid-session-recovery');
         return true;
       }
 
       const restoredFromCache = await restoreCachedAuthUser(fallbackStoredUser, 'invalid-server-session');
       if (restoredFromCache) {
+        await acquireTokenAfterLocalRestore(fallbackStoredUser, 'invalid-session-cache');
         return true;
       }
 
@@ -1801,6 +1872,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         const restoredFromCache = await restoreCachedAuthUser(fallbackStoredUser, 'network-fallback');
         if (restoredFromCache) {
           console.log('[Auth] Falling back to cached session after network/backend readiness error');
+          acquireTokenAfterLocalRestore(fallbackStoredUser, 'network-fallback').catch(() => {});
           return true;
         }
       }
@@ -1809,11 +1881,13 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         await setSessionToken(null);
         const recoveredSession = await tryRecoverServerSessionFromStoredUser(fallbackStoredUser, 'session-auth-error');
         if (recoveredSession) {
+          await acquireTokenAfterLocalRestore(fallbackStoredUser, 'session-auth-recovery');
           return true;
         }
 
         const restoredFromCache = await restoreCachedAuthUser(fallbackStoredUser, 'session-auth-error');
         if (restoredFromCache) {
+          await acquireTokenAfterLocalRestore(fallbackStoredUser, 'session-auth-cache');
           return true;
         }
 
@@ -1823,7 +1897,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
 
       throw error instanceof Error ? error : new Error('Oturum doğrulanamadı');
     }
-  }, [directFetch, handleSessionInvalid, restoreCachedAuthUser, shouldTryLocalAuthFallback, tryRecoverServerSessionFromStoredUser]);
+  }, [acquireTokenAfterLocalRestore, directFetch, handleSessionInvalid, restoreCachedAuthUser, shouldTryLocalAuthFallback, tryRecoverServerSessionFromStoredUser]);
 
   const ensureServerSession = useCallback(async (reason: string): Promise<boolean> => {
     const token = await getSessionToken();
@@ -1843,7 +1917,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
           console.log('[Auth] ensureServerSession confirmed active token for:', reason);
           return true;
         }
-        console.log('[Auth] ensureServerSession token rejected by server for:', reason);
+        console.log('[Auth] ensureServerSession token rejected by server for:', reason, 'keeping token for tRPC signed-token recovery');
       } catch (error) {
         const message = error instanceof Error ? error.message : '';
         console.log('[Auth] ensureServerSession validation error:', reason, message || error);
@@ -1854,21 +1928,53 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         }
 
         if (!isSessionAuthError(message) && !message.toLowerCase().includes('oturum')) {
-          if (error instanceof Error) {
-            throw error;
-          }
-          throw new Error('Oturum doğrulanamadı');
+          console.log('[Auth] ensureServerSession non-auth error, keeping token for:', reason);
+          return true;
         }
       }
 
-      await setSessionToken(null);
+      console.log('[Auth] ensureServerSession attempting to acquire fresh token while keeping old one for:', reason);
+      if (user && isAuthenticated) {
+        const tokenAcquired = await acquireServerTokenForUser(user, `ensure-session-refresh:${reason}`);
+        if (tokenAcquired) {
+          console.log('[Auth] ensureServerSession fresh token acquired for:', reason);
+          return true;
+        }
+      }
+
+      const stillHasToken = await getSessionToken();
+      if (stillHasToken) {
+        console.log('[Auth] ensureServerSession using existing signed token as fallback for:', reason);
+        return true;
+      }
+    }
+
+    if (user && isAuthenticated) {
+      console.log('[Auth] ensureServerSession no token, attempting direct token acquisition for:', reason);
+      const tokenAcquired = await acquireServerTokenForUser(user, `ensure-session-direct:${reason}`);
+      if (tokenAcquired) {
+        console.log('[Auth] ensureServerSession direct token acquired for:', reason);
+        return true;
+      }
     }
 
     const storedUser = await AsyncStorage.getItem('auth_user');
     const recoveredSession = await tryRecoverServerSessionFromStoredUser(storedUser, `ensure-server-session:${reason}`);
     if (recoveredSession) {
-      console.log('[Auth] ensureServerSession recovered session for:', reason);
-      return true;
+      const postRecoveryToken = await getSessionToken();
+      if (postRecoveryToken) {
+        console.log('[Auth] ensureServerSession recovered session with token for:', reason);
+        return true;
+      }
+      console.log('[Auth] ensureServerSession recovered session but no token, acquiring for:', reason);
+      const currentUser = user ?? (storedUser ? parseStoredAuthUser(storedUser) : null);
+      if (currentUser) {
+        const acquired = await acquireServerTokenForUser(currentUser, `ensure-session-post-recovery:${reason}`);
+        if (acquired) {
+          return true;
+        }
+      }
+      console.log('[Auth] ensureServerSession recovered locally but could not get server token for:', reason);
     }
 
     if (user && isAuthenticated) {
@@ -1877,21 +1983,39 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (normalizedPhone) {
         const localRecovery = await tryLocalPhoneLogin(normalizedPhone, user.type as Exclude<UserType, null>, `ensure-session-phone:${reason}`);
         if (localRecovery) {
-          console.log('[Auth] ensureServerSession local phone recovery succeeded for:', reason);
-          return true;
+          const postLocalToken = await getSessionToken();
+          if (!postLocalToken) {
+            const currentLocalUser = user;
+            if (currentLocalUser) {
+              await acquireServerTokenForUser(currentLocalUser, `ensure-session-post-phone:${reason}`);
+            }
+          }
+          const verifiedPhoneToken = await getSessionToken();
+          if (verifiedPhoneToken) {
+            console.log('[Auth] ensureServerSession local phone recovery completed with token for:', reason);
+            return true;
+          }
         }
       }
 
       console.log('[Auth] ensureServerSession restoring cached user as final fallback for:', reason);
       const restoredFromCache = await restoreCachedAuthUser(storedUser, `ensure-session-cache:${reason}`);
       if (restoredFromCache) {
-        return true;
+        const currentCacheUser = user ?? (storedUser ? parseStoredAuthUser(storedUser) : null);
+        if (currentCacheUser) {
+          await acquireServerTokenForUser(currentCacheUser, `ensure-session-post-cache:${reason}`);
+        }
+        const verifiedCacheToken = await getSessionToken();
+        if (verifiedCacheToken) {
+          console.log('[Auth] ensureServerSession cache fallback completed with token for:', reason);
+          return true;
+        }
       }
     }
 
     console.log('[Auth] ensureServerSession failed to recover session for:', reason);
     throw new Error('Oturumunuzun süresi dolmuş. Lütfen tekrar giriş yapın.');
-  }, [directFetch, isAuthenticated, restoreCachedAuthUser, shouldTryLocalAuthFallback, tryLocalPhoneLogin, tryRecoverServerSessionFromStoredUser, user]);
+  }, [acquireServerTokenForUser, directFetch, isAuthenticated, restoreCachedAuthUser, shouldTryLocalAuthFallback, tryLocalPhoneLogin, tryRecoverServerSessionFromStoredUser, user]);
 
   useEffect(() => {
     const loadAuth = async () => {

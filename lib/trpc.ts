@@ -10,6 +10,9 @@ export const trpc = createTRPCReact<AppRouter>();
 
 const SESSION_TOKEN_KEY = "session_token";
 let _sessionTokenCache: string | null | undefined = undefined;
+let _tokenAcquisitionInFlight: Promise<string | null> | null = null;
+let _lastTokenAcquisitionAttempt = 0;
+const TOKEN_ACQUISITION_COOLDOWN_MS = 5000;
 
 export async function getSessionToken(): Promise<string | null> {
   if (_sessionTokenCache !== undefined) {
@@ -312,6 +315,87 @@ export function getTrpcUrl(): string {
   return buildApiUrl('/api/trpc');
 }
 
+async function tryAcquireTokenInBackground(): Promise<string | null> {
+  const now = Date.now();
+  if (now - _lastTokenAcquisitionAttempt < TOKEN_ACQUISITION_COOLDOWN_MS) {
+    return null;
+  }
+
+  if (_tokenAcquisitionInFlight) {
+    return _tokenAcquisitionInFlight;
+  }
+
+  _lastTokenAcquisitionAttempt = now;
+  _tokenAcquisitionInFlight = (async () => {
+    try {
+      const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+      const storedUserRaw = await AsyncStorage.getItem('auth_user');
+      if (!storedUserRaw) {
+        console.log('[TRPC] No stored user for background token acquisition');
+        return null;
+      }
+
+      const storedUser = JSON.parse(storedUserRaw) as { id?: string; email?: string; phone?: string; type?: string };
+      if (!storedUser?.id || !storedUser?.type) {
+        return null;
+      }
+
+      const base = resolveBaseUrl();
+      if (!base) {
+        return null;
+      }
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+      const dbEndpoint = getClientEnv('EXPO_PUBLIC_RORK_DB_ENDPOINT');
+      const dbNamespace = getClientEnv('EXPO_PUBLIC_RORK_DB_NAMESPACE');
+      const dbTokenVal = getClientEnv('EXPO_PUBLIC_RORK_DB_TOKEN');
+      const reqHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (dbEndpoint && dbNamespace && dbTokenVal) {
+        reqHeaders['x-db-endpoint'] = dbEndpoint;
+        reqHeaders['x-db-namespace'] = dbNamespace;
+        reqHeaders['x-db-token'] = dbTokenVal;
+      }
+
+      const res = await fetch(`${base}/api/auth/ensure-user-session`, {
+        method: 'POST',
+        headers: reqHeaders,
+        body: JSON.stringify({
+          userId: storedUser.id,
+          email: storedUser.email ?? '',
+          phone: storedUser.phone ?? '',
+          type: storedUser.type,
+          user: storedUser,
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        console.log('[TRPC] Background token acquisition failed, status:', res.status);
+        return null;
+      }
+
+      const data = await res.json() as { success?: boolean; token?: string };
+      if (data?.success && data?.token) {
+        await setSessionToken(data.token);
+        console.log('[TRPC] Background token acquired successfully');
+        return data.token;
+      }
+
+      return null;
+    } catch (err) {
+      console.log('[TRPC] Background token acquisition error:', err);
+      return null;
+    } finally {
+      _tokenAcquisitionInFlight = null;
+    }
+  })();
+
+  return _tokenAcquisitionInFlight;
+}
+
 export const trpcClient = trpc.createClient({
   links: [
     httpLink({
@@ -319,7 +403,13 @@ export const trpcClient = trpc.createClient({
       transformer: superjson,
       async headers() {
         const headers: Record<string, string> = {};
-        const token = await getSessionToken();
+        let token = await getSessionToken();
+
+        if (!token) {
+          console.log('[TRPC] No token in headers, attempting background acquisition');
+          token = await tryAcquireTokenInBackground();
+        }
+
         if (token) {
           headers['authorization'] = `Bearer ${token}`;
         }
