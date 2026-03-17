@@ -22,6 +22,8 @@ const referrals = new Map<string, Referral>();
 const referralCodeIndex = new Map<string, string>();
 const businesses = new Map<string, Business>();
 
+const MAX_RIDE_MESSAGES_PER_CONVERSATION = 200;
+
 let _initialized = false;
 let _initPromise: Promise<void> | null = null;
 let _dbWasConfigured = false;
@@ -114,6 +116,20 @@ function matchesLocationValue(left: string | undefined | null, right: string | u
   }
 
   return normalizedLeft === normalizedRight;
+}
+
+function pruneRideMessages(rideMessages: Message[] | undefined | null, rideId?: string): Message[] {
+  const normalizedMessages = Array.isArray(rideMessages)
+    ? rideMessages.filter((message): message is Message => Boolean(message?.id && message?.rideId))
+    : [];
+
+  if (normalizedMessages.length <= MAX_RIDE_MESSAGES_PER_CONVERSATION) {
+    return normalizedMessages;
+  }
+
+  const prunedMessages = normalizedMessages.slice(-MAX_RIDE_MESSAGES_PER_CONVERSATION);
+  console.log('[STORE] Pruned ride message history:', rideId ?? 'unknown', 'from', normalizedMessages.length, 'to', prunedMessages.length);
+  return prunedMessages;
 }
 
 function cleanSurrealId(raw: any, fallbackField?: string): string {
@@ -381,7 +397,7 @@ function hydrateSnapshot(snapshot: StoreSnapshot): void {
   }
 
   for (const messageEntry of snapshot.messages) {
-    messages.set(messageEntry.rideId, messageEntry.messages ?? []);
+    messages.set(messageEntry.rideId, pruneRideMessages(messageEntry.messages, messageEntry.rideId));
   }
 
   for (const payment of snapshot.payments) {
@@ -454,7 +470,7 @@ function buildStoreSnapshot(): StoreSnapshot {
       updatedAt: value.updatedAt,
     })),
     passwords: Array.from(passwords.entries()).map(([email, hash]) => ({ email, hash })),
-    messages: Array.from(messages.entries()).map(([rideId, rideMessages]) => ({ rideId, messages: rideMessages })),
+    messages: Array.from(messages.entries()).map(([rideId, rideMessages]) => ({ rideId, messages: pruneRideMessages(rideMessages, rideId) })),
     payments: Array.from(payments.values()),
     sessions: Array.from(sessions.values()),
     pushTokens: Array.from(pushTokens.values()),
@@ -678,7 +694,7 @@ async function loadFromDb(): Promise<void> {
       }
     }
     for (const m of dbMessages) {
-      if (m.rideId) messages.set(m.rideId, m.messages || []);
+      if (m.rideId) messages.set(m.rideId, pruneRideMessages(m.messages, m.rideId));
     }
     for (const loc of dbLocations) {
       if (loc.driverId) driverLocations.set(loc.driverId, {
@@ -1466,12 +1482,12 @@ export const db = {
     },
   },
   messages: {
-    getByRide: (rideId: string) => messages.get(rideId) ?? [],
+    getByRide: (rideId: string) => pruneRideMessages(messages.get(rideId) ?? [], rideId),
     addToRide: (rideId: string, msg: Message) => {
-      const existing = messages.get(rideId) ?? [];
-      existing.push(msg);
-      messages.set(rideId, existing);
-      persistInBackground(() => dbUpsert('ride_messages', rideId, { rideId, messages: existing }));
+      const existing = pruneRideMessages(messages.get(rideId) ?? [], rideId);
+      const nextMessages = pruneRideMessages([...existing, msg], rideId);
+      messages.set(rideId, nextMessages);
+      persistInBackground(() => dbUpsert('ride_messages', rideId, { rideId, messages: nextMessages }));
     },
   },
   payments: {

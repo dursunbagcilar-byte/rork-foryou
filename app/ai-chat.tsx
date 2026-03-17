@@ -35,6 +35,9 @@ const QUICK_PROMPTS_DRIVER = [
   'En iyi sürüş rotası öner',
 ];
 
+const MAX_AI_CHAT_MESSAGES = 24;
+const WELCOME_MESSAGE_ID = 'welcome';
+
 interface ChatBubbleProps {
   role: string;
   text: string;
@@ -111,6 +114,9 @@ export default function AIChatScreen() {
   const systemPrompt = isDriver
     ? `Sen 2GO uygulamasının şoför asistanısın. Türkçe cevap ver. Şoförlere yoğunluk analizi, rota önerileri, kazanç artırma ipuçları, trafik bilgisi ve araç bakımı konularında yardım et. Kısa ve net cevaplar ver. Şoförün adı: ${user?.name ?? 'Şoför'}`
     : `Sen 2GO uygulamasının müşteri asistanısın. Türkçe cevap ver. Müşterilere yakın mekanlar, tahmini süreler, fiyat tahminleri, kampanyalar ve güvenli yolculuk ipuçları konularında yardım et. Kısa ve net cevaplar ver. Kullanıcının adı: ${user?.name ?? 'Kullanıcı'}`;
+  const compactMessagePrompt = isDriver
+    ? '2GO şoför asistanı olarak Türkçe, kısa ve net cevap ver.'
+    : '2GO müşteri asistanı olarak Türkçe, kısa ve net cevap ver.';
 
   const { messages, sendMessage, setMessages } = useRorkAgent({
     tools: {
@@ -220,6 +226,38 @@ export default function AIChatScreen() {
     },
   });
 
+  const buildOutgoingMessage = useCallback((userMessage: string): string => {
+    const hasUserHistory = messages.some((message) => message.role === 'user');
+    if (!hasUserHistory) {
+      return `${systemPrompt}\n\nKullanıcı mesajı: ${userMessage}`;
+    }
+
+    return `${compactMessagePrompt}\n\nKullanıcı mesajı: ${userMessage}`;
+  }, [compactMessagePrompt, messages, systemPrompt]);
+
+  useEffect(() => {
+    if (messages.length <= MAX_AI_CHAT_MESSAGES) {
+      return;
+    }
+
+    setMessages((currentMessages) => {
+      if (currentMessages.length <= MAX_AI_CHAT_MESSAGES) {
+        return currentMessages;
+      }
+
+      const welcomeMessage = currentMessages.find((message) => message.id === WELCOME_MESSAGE_ID) ?? null;
+      const candidateMessages = welcomeMessage
+        ? currentMessages.filter((message) => message.id !== WELCOME_MESSAGE_ID)
+        : currentMessages;
+      const keepCount = MAX_AI_CHAT_MESSAGES - (welcomeMessage ? 1 : 0);
+      const recentMessages = candidateMessages.slice(-keepCount);
+      const nextMessages = welcomeMessage ? [welcomeMessage, ...recentMessages] : [...recentMessages];
+
+      console.log('[AI-CHAT] Pruned local chat history from', currentMessages.length, 'to', nextMessages.length);
+      return nextMessages;
+    });
+  }, [messages.length, setMessages]);
+
   useEffect(() => {
     if (messages.length === 0) {
       const greeting = isDriver
@@ -228,7 +266,7 @@ export default function AIChatScreen() {
 
       setMessages([
         {
-          id: 'welcome',
+          id: WELCOME_MESSAGE_ID,
           role: 'assistant' as const,
           parts: [{ type: 'text' as const, text: greeting }],
         },
@@ -240,24 +278,24 @@ export default function AIChatScreen() {
     const trimmed = input.trim();
     if (!trimmed) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    sendMessage(`${systemPrompt}\n\nKullanıcı mesajı: ${trimmed}`);
+    sendMessage(buildOutgoingMessage(trimmed));
     setInput('');
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 200);
-  }, [input, sendMessage, systemPrompt]);
+  }, [buildOutgoingMessage, input, sendMessage]);
 
   const handleQuickPrompt = useCallback((prompt: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setInput(prompt);
     setTimeout(() => {
-      sendMessage(`${systemPrompt}\n\nKullanıcı mesajı: ${prompt}`);
+      sendMessage(buildOutgoingMessage(prompt));
       setInput('');
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 200);
     }, 100);
-  }, [sendMessage, systemPrompt]);
+  }, [buildOutgoingMessage, sendMessage]);
 
   const renderMessage = useCallback(({ item, index }: { item: typeof messages[0]; index: number }) => {
     const textParts = item.parts.filter((p) => p.type === 'text');
