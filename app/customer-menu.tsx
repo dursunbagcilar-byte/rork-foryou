@@ -151,6 +151,7 @@ export default function CustomerMenuScreen() {
   const langBtnBg = isDark ? colors.card : '#F0F0F0';
   const langBtnActiveBg = isDark ? '#F5A623' : '#1A1A1A';
   const themeBtnBg = isDark ? colors.card : '#F0F0F0';
+  const inviteBannerAccent = '#17C653';
   const usePhoneFrame = width > 430;
 
   return (
@@ -216,7 +217,7 @@ export default function CustomerMenuScreen() {
           <View style={styles.cardsRow}>
             <View style={[styles.miniCard, { backgroundColor: isDark ? '#1A1A2E' : '#1B0B3B' }]}>
               <Heart size={20} color="#C9B8FF" strokeWidth={2} />
-              <Text style={styles.miniCardSubtitle}>{t('support_subtitle')}</Text>
+              <Text style={[styles.miniCardSubtitle, { color: inviteBannerAccent }]}>{t('support_subtitle')}</Text>
               <Text style={styles.miniCardTitle}>{t('support_title')}</Text>
               <TouchableOpacity activeOpacity={0.7} onPress={() => {
                 Alert.alert(
@@ -225,7 +226,7 @@ export default function CustomerMenuScreen() {
                   [{ text: 'Tamam' }]
                 );
               }}>
-                <Text style={styles.miniCardLink}>{t('support_link')}</Text>
+                <Text style={[styles.miniCardLink, { color: inviteBannerAccent }]}>{t('support_link')}</Text>
               </TouchableOpacity>
             </View>
             <TouchableOpacity
