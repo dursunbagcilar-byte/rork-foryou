@@ -22,7 +22,7 @@ import { useLocation } from '@/hooks/useLocation';
 import { useAppActive } from '@/hooks/useAppActive';
 import { useMounted } from '@/hooks/useMounted';
 import { buildApiUrl, trpc, trpcClient } from '@/lib/trpc';
-import { ISTANBUL_REGION, findBestAlternativeVehicle, getVehicleTypeLabel } from '@/constants/mockData';
+import { ISTANBUL_REGION, getVehicleTypeLabel } from '@/constants/mockData';
 import type { Driver, MockDriverInfo } from '@/constants/mockData';
 import { getCityByName, getCityRegion } from '@/constants/cities';
 import {
@@ -1348,7 +1348,7 @@ export default function CustomerHomeScreen() {
         console.log('[Customer] No real drivers found via backend, reason:', data?.reason, 'totalOnline:', data?.totalOnline);
       }
     } catch (err) {
-      console.log('[Customer] Backend findBestDriver error, falling back to mock:', err);
+      console.log('[Customer] Backend findBestDriver error:', err);
     }
 
     if (!assignedDriver) {
@@ -1357,27 +1357,25 @@ export default function CustomerHomeScreen() {
     }
 
     setCurrentDriver(assignedDriver);
-    setPreviousDriverIds(prev => [...prev, assignedDriver!.id]);
+    setPreviousDriverIds(prev => [...prev, assignedDriver.id]);
     console.log('[Customer] Assigned driver:', assignedDriver.shortName, assignedDriver.vehicleModel, assignedDriver.vehiclePlate);
 
     if (selectedDest) {
-      let driverStart = driverStartLocation;
-      if (!driverStart) {
-        const angle = Math.random() * 2 * Math.PI;
-        const offsetDist = 0.025 + Math.random() * 0.02;
-        driverStart = {
-          latitude: customerLat + Math.cos(angle) * offsetDist,
-          longitude: customerLng + Math.sin(angle) * offsetDist,
-        };
+      if (driverStartLocation) {
+        const rawPath = await fetchDriverRoute(driverStartLocation, { latitude: customerLat, longitude: customerLng });
+        const path = densifyPath(rawPath, 80);
+        setDriverLocation(driverStartLocation);
+        setDriverRoutePath(path);
+        const distKm = calculateDistance(driverStartLocation.latitude, driverStartLocation.longitude, customerLat, customerLng);
+        const etaMinutes = Math.max(2, Math.ceil((distKm / 30) * 60));
+        setDriverEta(etaMinutes);
+        console.log('[Customer] Driver route loaded from real GPS:', path.length, 'points, dist:', distKm.toFixed(2), 'km');
+      } else {
+        setDriverLocation(null);
+        setDriverRoutePath([]);
+        setDriverEta(0);
+        console.log('[Customer] Assigned driver has no real GPS yet; waiting for backend location polling');
       }
-      const rawPath = await fetchDriverRoute(driverStart, { latitude: customerLat, longitude: customerLng });
-      const path = densifyPath(rawPath, 80);
-      setDriverLocation(driverStartLocation ?? path[0]);
-      setDriverRoutePath(path);
-      const distKm = calculateDistance(driverStart.latitude, driverStart.longitude, customerLat, customerLng);
-      const etaMinutes = Math.max(2, Math.ceil((distKm / 30) * 60));
-      setDriverEta(etaMinutes);
-      console.log('[Customer] Driver route loaded:', path.length, 'points, dist:', distKm.toFixed(2), 'km');
     }
     return assignedDriver;
   }, [selectedDest, mapRegion.latitude, mapRegion.longitude, fetchDriverRoute, densifyPath, user?.city, user?.district]);
@@ -1447,15 +1445,9 @@ export default function CustomerHomeScreen() {
         );
         console.log('[Customer] New driver assigned:', newDriver.shortName);
       } else {
-        const alt = findBestAlternativeVehicle(selectedVehiclePackage, previousDriverIds);
         setReassigning(false);
-        if (alt) {
-          setAlternativeVehicle(alt);
-          setShowAlternativeSuggestion(true);
-        } else {
-          prepareRideRecoveryState(cancelledDriverName);
-          console.log('[Customer] No new driver found after cancellation, recovery card opened');
-        }
+        prepareRideRecoveryState(cancelledDriverName);
+        console.log('[Customer] No new real driver found after cancellation, recovery card opened');
       }
     }, 2500);
   }, [assignNewDriver, currentDriver, prepareRideRecoveryState, previousDriverIds, selectedVehiclePackage]);
@@ -2181,45 +2173,19 @@ export default function CustomerHomeScreen() {
     }
   }, [driverFound, resetRideStates, customerConfirmedArrival]);
 
-  const handleAcceptAlternative = useCallback(async () => {
+  const handleAcceptAlternative = useCallback(() => {
     if (!alternativeVehicle) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    const newType = alternativeVehicle.vehicleType;
-    const newDriver = alternativeVehicle.driver;
-    console.log('[Customer] Accepted alternative:', newType, newDriver.shortName);
-    setSelectedVehiclePackage(newType);
+    console.log('[Customer] Alternative vehicle acceptance stopped because no real-time tracked driver is available');
     setShowAlternativeSuggestion(false);
     setAlternativeVehicle(null);
-
-    if (selectedDest) {
-      const dist = rideDistance > 0 ? rideDistance : calculateDistance(mapRegion.latitude, mapRegion.longitude, selectedDest.latitude, selectedDest.longitude);
-      const price = calculatePrice(dist, newType as VehicleType);
-      setRidePrice(price);
-      console.log('[Customer] Updated price for', newType, ':', price);
-    }
-
-    setCurrentDriver(newDriver);
-    setPreviousDriverIds(prev => [...prev, newDriver.id]);
-
-    if (selectedDest) {
-      const customerLat = mapRegion.latitude;
-      const customerLng = mapRegion.longitude;
-      const angle = Math.random() * 2 * Math.PI;
-      const offsetDist = 0.025 + Math.random() * 0.02;
-      const driverStart = {
-        latitude: customerLat + Math.cos(angle) * offsetDist,
-        longitude: customerLng + Math.sin(angle) * offsetDist,
-      };
-      const rawPath = await fetchDriverRoute(driverStart, { latitude: customerLat, longitude: customerLng });
-      const path = densifyPath(rawPath, 80);
-      setDriverLocation(path[0]);
-      setDriverRoutePath(path);
-      const etaMinutes = Math.max(2, Math.ceil(path.length * 0.6 / 10));
-      setDriverEta(etaMinutes);
-    }
-
-    setDriverFound(true);
-  }, [alternativeVehicle, selectedDest, rideDistance, mapRegion.latitude, mapRegion.longitude, fetchDriverRoute, densifyPath]);
+    prepareRideRecoveryState(alternativeVehicle.driver.shortName);
+    Alert.alert(
+      'Şu an uygun şoför bulunamadı',
+      'Gerçek zamanlı takip edilebilen alternatif bir şoför bulunamadı. Lütfen tekrar deneyin.',
+      [{ text: 'Tamam' }]
+    );
+  }, [alternativeVehicle, prepareRideRecoveryState]);
 
   const handleRejectAlternative = useCallback(() => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});

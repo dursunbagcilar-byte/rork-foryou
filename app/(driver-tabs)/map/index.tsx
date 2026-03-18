@@ -292,10 +292,6 @@ export default function DriverHomeScreen() {
     latitude: mapRegion.latitude,
     longitude: mapRegion.longitude,
   });
-  const locationOffsetRef = useRef({
-    lat: (Math.random() - 0.5) * 0.01,
-    lng: (Math.random() - 0.5) * 0.01,
-  });
   const syncDriverLocationMutation = useMutation({
     mutationFn: async (payload: { driverId: string; latitude: number; longitude: number }) => {
       return postDriverSync('/drivers/update-location', payload);
@@ -509,23 +505,12 @@ export default function DriverHomeScreen() {
   const latestGpsLocationRef = useRef<{ latitude: number; longitude: number } | null>(
     gpsLocation ? { latitude: gpsLocation.latitude, longitude: gpsLocation.longitude } : null
   );
-  const latestFallbackRegionRef = useRef<{ latitude: number; longitude: number }>({
-    latitude: fallbackRegion.latitude,
-    longitude: fallbackRegion.longitude,
-  });
 
   useEffect(() => {
     latestGpsLocationRef.current = gpsLocation
       ? { latitude: gpsLocation.latitude, longitude: gpsLocation.longitude }
       : null;
   }, [gpsLocation]);
-
-  useEffect(() => {
-    latestFallbackRegionRef.current = {
-      latitude: fallbackRegion.latitude,
-      longitude: fallbackRegion.longitude,
-    };
-  }, [fallbackRegion.latitude, fallbackRegion.longitude]);
 
   const locationSendInterval = React.useMemo(() => {
     if (rideAccepted && !arrivedAtPickup) return 5000;
@@ -555,17 +540,13 @@ export default function DriverHomeScreen() {
 
     const sendLocation = () => {
       const liveLocation = latestGpsLocationRef.current;
-      const fallbackLocation = latestFallbackRegionRef.current;
-
-      let lat: number;
-      let lng: number;
-      if (liveLocation) {
-        lat = liveLocation.latitude;
-        lng = liveLocation.longitude;
-      } else {
-        lat = fallbackLocation.latitude + locationOffsetRef.current.lat + (Math.random() - 0.5) * 0.001;
-        lng = fallbackLocation.longitude + locationOffsetRef.current.lng + (Math.random() - 0.5) * 0.001;
+      if (!liveLocation) {
+        console.log('[Driver] Skipping location sync because real GPS is unavailable');
+        return;
       }
+
+      const lat = liveLocation.latitude;
+      const lng = liveLocation.longitude;
 
       if (hasMoved(lat, lng)) {
         if (isLocationSyncInFlightRef.current) {
