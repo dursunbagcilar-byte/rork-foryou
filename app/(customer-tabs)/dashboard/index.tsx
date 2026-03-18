@@ -3235,9 +3235,19 @@ export default function CustomerHomeScreen() {
 
                 <View style={styles.michelinStarSection}>
                   <View style={styles.michelinStarRow}>
-                    <Star size={18} color="#FFFFFF" fill="#FFFFFF" />
-                    <Star size={18} color="#9CA3AF" fill="#9CA3AF" />
-                    <Star size={18} color="#FFD700" fill="#FFD700" />
+                    {[
+                      { color: '#FFFFFF', testID: 'quality-star-1' },
+                      { color: '#9CA3AF', testID: 'quality-star-2' },
+                      { color: '#FFD700', testID: 'quality-star-3' },
+                    ].map((item) => (
+                      <Star
+                        key={item.testID}
+                        size={18}
+                        color={item.color}
+                        fill={item.color}
+                        testID={item.testID}
+                      />
+                    ))}
                   </View>
                   <Text style={styles.michelinTitle}>2GO Kalite Yıldızı</Text>
                   <Text style={styles.michelinDesc}>
