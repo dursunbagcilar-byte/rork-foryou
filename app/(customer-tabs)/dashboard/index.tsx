@@ -3202,8 +3202,8 @@ export default function CustomerHomeScreen() {
                 <View style={styles.michelinStarSection}>
                   <View style={styles.michelinStarRow}>
                     {[
-                      { color: '#FFFFFF', testID: 'quality-star-1' },
-                      { color: '#B3B3B3', testID: 'quality-star-2' },
+                      { color: '#C0C0C0', testID: 'quality-star-1' },
+                      { color: '#E0E0E0', testID: 'quality-star-2' },
                       { color: '#FFD700', testID: 'quality-star-3' },
                     ].map((item) => (
                       <Star
@@ -7283,9 +7283,9 @@ const styles = StyleSheet.create({
     marginBottom: 18,
     borderRadius: 16,
     padding: 18,
-    backgroundColor: '#17C653',
+    backgroundColor: '#1A1A2E',
     borderWidth: 1,
-    borderColor: 'rgba(255,215,0,0.15)',
+    borderColor: 'rgba(255,215,0,0.25)',
     alignItems: 'center' as const,
   },
   michelinStarRow: {
