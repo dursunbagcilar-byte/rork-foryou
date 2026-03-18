@@ -3237,7 +3237,7 @@ export default function CustomerHomeScreen() {
                   <View style={styles.michelinStarRow}>
                     {[
                       { color: '#FFFFFF', testID: 'quality-star-1' },
-                      { color: '#9CA3AF', testID: 'quality-star-2' },
+                      { color: '#B3B3B3', testID: 'quality-star-2' },
                       { color: '#FFD700', testID: 'quality-star-3' },
                     ].map((item) => (
                       <Star
