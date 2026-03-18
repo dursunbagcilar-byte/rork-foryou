@@ -270,6 +270,7 @@ export default function DriverHomeScreen() {
   const [showDriverChatModal, setShowDriverChatModal] = useState<boolean>(false);
   const [driverChatInput, setDriverChatInput] = useState<string>('');
   const [driverChatMessages, setDriverChatMessages] = useState<{ id: string; text: string; fromMe: boolean; time: string }[]>([]);
+  const driverChatFlatListRef = useRef<FlatList>(null);
   const [currentCustomerPhone, setCurrentCustomerPhone] = useState<string>('');
   const [fallbackRidePrice, setCurrentRidePrice] = useState<number>(0);
 
@@ -1670,6 +1671,22 @@ export default function DriverHomeScreen() {
     }
   }, [rideMessagesQuery.data, driver?.id]);
 
+  useEffect(() => {
+    if (driverChatMessages.length > 0) {
+      setTimeout(() => {
+        driverChatFlatListRef.current?.scrollToEnd({ animated: true });
+      }, 80);
+    }
+  }, [driverChatMessages.length]);
+
+  useEffect(() => {
+    if (showDriverChatModal) {
+      setTimeout(() => {
+        driverChatFlatListRef.current?.scrollToEnd({ animated: false });
+      }, 120);
+    }
+  }, [showDriverChatModal]);
+
   const handleDriverSendChat = useCallback((text: string) => {
     if (!text.trim()) return;
     const msgText = text.trim();
@@ -2397,10 +2414,12 @@ export default function DriverHomeScreen() {
                 </TouchableOpacity>
               </View>
               <FlatList
+                ref={driverChatFlatListRef}
                 data={driverChatMessages}
                 keyExtractor={(item) => item.id}
                 style={styles.driverChatList}
                 contentContainerStyle={styles.driverChatListContent}
+                onContentSizeChange={() => driverChatFlatListRef.current?.scrollToEnd({ animated: true })}
                 renderItem={({ item }) => (
                   <View style={[styles.driverChatBubble, item.fromMe ? styles.driverChatBubbleMe : styles.driverChatBubbleOther]}>
                     <Text style={[styles.driverChatBubbleText, item.fromMe ? styles.driverChatBubbleTextMe : styles.driverChatBubbleTextOther]}>{item.text}</Text>

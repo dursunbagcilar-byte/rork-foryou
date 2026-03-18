@@ -338,6 +338,7 @@ export default function CustomerHomeScreen() {
   const [ratingScaleValue, setRatingScaleValue] = useState(0);
   const [chatMessages, setChatMessages] = useState<{ id: string; text: string; fromMe: boolean; time: string }[]>([]);
   const previousChatCountRef = useRef<number>(0);
+  const chatScrollRef = useRef<ScrollView>(null);
   const markAsReadMutation = trpc.messages.markAsRead.useMutation();
   const [chatInput, setChatInput] = useState<string>('');
   const approachingPlayedRef = useRef<boolean>(false);
@@ -2306,6 +2307,22 @@ export default function CustomerHomeScreen() {
   }, [rideMessagesQuery.data, user?.id]);
 
   useEffect(() => {
+    if (chatMessages.length > 0) {
+      setTimeout(() => {
+        chatScrollRef.current?.scrollToEnd({ animated: true });
+      }, 80);
+    }
+  }, [chatMessages.length]);
+
+  useEffect(() => {
+    if (showChatModal) {
+      setTimeout(() => {
+        chatScrollRef.current?.scrollToEnd({ animated: false });
+      }, 120);
+    }
+  }, [showChatModal]);
+
+  useEffect(() => {
     if (showChatModal && currentBackendRideId && user?.id) {
       markAsReadMutation.mutate(
         { userId: user.id, rideId: currentBackendRideId },
@@ -4151,7 +4168,7 @@ export default function CustomerHomeScreen() {
                 <X size={22} color={'#777'} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.chatMessages} contentContainerStyle={styles.chatMessagesContent}>
+            <ScrollView ref={chatScrollRef} style={styles.chatMessages} contentContainerStyle={styles.chatMessagesContent}>
               {chatMessages.map((msg) => (
                 <View key={msg.id} style={[styles.chatBubble, msg.fromMe ? styles.chatBubbleMine : styles.chatBubbleTheirs]}>
                   <Text style={[styles.chatBubbleText, msg.fromMe ? styles.chatBubbleTextMine : styles.chatBubbleTextTheirs]}>
