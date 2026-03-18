@@ -152,6 +152,9 @@ export default function CustomerMenuScreen() {
   const langBtnActiveBg = isDark ? '#F5A623' : '#1A1A1A';
   const themeBtnBg = isDark ? colors.card : '#F0F0F0';
   const inviteBannerAccent = '#17C653';
+  const supportCardBg = isDark ? 'rgba(23,198,83,0.16)' : '#EAF8EE';
+  const supportCardIconColor = isDark ? '#8FE7B3' : '#17C653';
+  const supportCardTitleColor = isDark ? '#F4FFF7' : '#14532D';
   const usePhoneFrame = width > 430;
 
   return (
@@ -215,10 +218,10 @@ export default function CustomerMenuScreen() {
           </View>
 
           <View style={styles.cardsRow}>
-            <View style={[styles.miniCard, { backgroundColor: isDark ? '#1A1A2E' : '#1B0B3B' }]}>
-              <Heart size={20} color="#C9B8FF" strokeWidth={2} />
+            <View style={[styles.miniCard, { backgroundColor: supportCardBg }]}>
+              <Heart size={20} color={supportCardIconColor} strokeWidth={2} />
               <Text style={[styles.miniCardSubtitle, { color: inviteBannerAccent }]}>{t('support_subtitle')}</Text>
-              <Text style={styles.miniCardTitle}>{t('support_title')}</Text>
+              <Text style={[styles.miniCardTitle, { color: supportCardTitleColor }]}>{t('support_title')}</Text>
               <TouchableOpacity activeOpacity={0.7} onPress={() => {
                 Alert.alert(
                   t('support_title'),
