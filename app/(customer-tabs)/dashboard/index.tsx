@@ -7328,7 +7328,7 @@ const styles = StyleSheet.create({
   michelinDesc: {
     fontSize: 12,
     fontWeight: '400' as const,
-    color: 'rgba(255,255,255,0.75)',
+    color: '#FFFFFF',
     lineHeight: 18,
     textAlign: 'center' as const,
     paddingHorizontal: 8,
