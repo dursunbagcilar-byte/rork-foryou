@@ -3235,8 +3235,8 @@ export default function CustomerHomeScreen() {
 
                 <View style={styles.michelinStarSection}>
                   <View style={styles.michelinStarRow}>
-                    <Star size={18} color="#FFD700" fill="#FFD700" />
-                    <Star size={18} color="#FFD700" fill="#FFD700" />
+                    <Star size={18} color="#FFFFFF" fill="#FFFFFF" />
+                    <Star size={18} color="#9CA3AF" fill="#9CA3AF" />
                     <Star size={18} color="#FFD700" fill="#FFD700" />
                   </View>
                   <Text style={styles.michelinTitle}>2GO Kalite Yıldızı</Text>
