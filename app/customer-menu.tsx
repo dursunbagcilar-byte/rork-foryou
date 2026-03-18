@@ -233,16 +233,16 @@ export default function CustomerMenuScreen() {
               </TouchableOpacity>
             </View>
             <TouchableOpacity
-              style={[styles.miniCard, { backgroundColor: isDark ? '#1E1A2E' : '#F3EEFF' }]}
+              style={[styles.miniCard, { backgroundColor: isDark ? 'rgba(23,198,83,0.16)' : '#EAF8EE' }]}
               activeOpacity={0.82}
               onPress={() => handleMenuPress('/(customer-tabs)/dashboard/invite')}
               testID="customer-menu-invite-card"
             >
-              <Award size={20} color={isDark ? '#C9B8FF' : '#6B4EAE'} strokeWidth={2} />
-              <Text style={[styles.miniCardSubtitle, { color: isDark ? '#C9B8FF' : '#6B4EAE' }]}>{t('invite_friends_subtitle' as TranslationKey)}</Text>
-              <Text style={[styles.miniCardTitle, { color: isDark ? '#FFFFFF' : '#3D2C8D' }]}>{t('invite_friends_title' as TranslationKey)}</Text>
-              <Text style={[styles.miniCardDesc, { color: isDark ? '#9595A8' : '#6B4EAE' }]}>{t('invite_friends_desc' as TranslationKey)}</Text>
-              <Text style={[styles.miniCardLink, { color: isDark ? '#F5A623' : '#3D2C8D' }]}>{t('invite_friends_link' as TranslationKey)}</Text>
+              <Award size={20} color={isDark ? '#8FE7B3' : '#17C653'} strokeWidth={2} />
+              <Text style={[styles.miniCardSubtitle, { color: isDark ? '#8FE7B3' : '#17C653' }]}>{t('invite_friends_subtitle' as TranslationKey)}</Text>
+              <Text style={[styles.miniCardTitle, { color: isDark ? '#F4FFF7' : '#14532D' }]}>{t('invite_friends_title' as TranslationKey)}</Text>
+              <Text style={[styles.miniCardDesc, { color: isDark ? '#8FE7B3' : '#15803D' }]}>{t('invite_friends_desc' as TranslationKey)}</Text>
+              <Text style={[styles.miniCardLink, { color: isDark ? '#17C653' : '#14532D' }]}>{t('invite_friends_link' as TranslationKey)}</Text>
             </TouchableOpacity>
           </View>
 
