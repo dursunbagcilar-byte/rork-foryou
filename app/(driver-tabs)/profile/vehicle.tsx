@@ -360,3 +360,4 @@ const styles = StyleSheet.create({
   },
   saveButtonText: { fontSize: 15, fontWeight: '600' as const, color: Colors.light.background },
 });
+

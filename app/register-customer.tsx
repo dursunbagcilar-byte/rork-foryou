@@ -710,3 +710,4 @@ const styles = StyleSheet.create({
   modalItemTextSelected: { color: Colors.dark.primary, fontWeight: '600' },
 
 });
+

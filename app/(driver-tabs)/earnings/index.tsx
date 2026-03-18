@@ -598,3 +598,4 @@ const styles = StyleSheet.create({
   vehicleValue: { fontSize: 14, fontWeight: '600', color: Colors.light.text },
   vehicleDivider: { height: 1, backgroundColor: Colors.light.divider, marginLeft: 16 },
 });
+

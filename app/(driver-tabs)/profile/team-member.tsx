@@ -743,3 +743,4 @@ const styles = StyleSheet.create({
   },
   viewImage: { width: '90%', height: '70%' },
 });
+

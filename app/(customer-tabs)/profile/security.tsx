@@ -495,3 +495,4 @@ const styles = StyleSheet.create({
   addBtnText: { fontSize: 14, fontWeight: '600', color: Colors.light.background },
   activeDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.light.success },
 });
+

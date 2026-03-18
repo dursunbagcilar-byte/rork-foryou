@@ -285,3 +285,4 @@ const styles = StyleSheet.create({
   tipTitle: { fontSize: 14, fontWeight: '700' as const, color: '#1A1A1A', marginBottom: 4 },
   tipDesc: { fontSize: 13, color: '#666', lineHeight: 19 },
 });
+

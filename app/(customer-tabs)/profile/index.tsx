@@ -248,3 +248,4 @@ const styles = StyleSheet.create({
   },
   logoutText: { fontSize: 15, fontWeight: '600', color: Colors.light.accent },
 });
+

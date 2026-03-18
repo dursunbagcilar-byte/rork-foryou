@@ -233,3 +233,4 @@ const styles = StyleSheet.create({
   reviewDate: { fontSize: 11, color: '#AAA' },
   reviewComment: { fontSize: 13, color: '#555', lineHeight: 20, marginTop: 10, paddingLeft: 46 },
 });
+

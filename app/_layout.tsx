@@ -288,3 +288,4 @@ export default function RootLayout() {
   console.log('[Layout] Rendering provider tree with key:', providerTreeKey);
   return <AppProviders key={providerTreeKey} queryClient={queryClient} />;
 }
+

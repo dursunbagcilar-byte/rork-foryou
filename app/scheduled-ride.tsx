@@ -403,3 +403,4 @@ const styles = StyleSheet.create({
   },
   newRideBtnText: { fontSize: 15, fontWeight: '700' as const, color: '#FFFFFF' },
 });
+
