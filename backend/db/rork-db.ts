@@ -10,6 +10,16 @@ let _lastEnvRetryTime = 0;
 
 let _cachedConfig: { endpoint: string; namespace: string; token: string } | null = null;
 
+function readGlobalEnvValue(key: string): string {
+  try {
+    const globalEnv = (globalThis as { __ENV__?: Record<string, unknown> }).__ENV__;
+    const rawValue = globalEnv?.[key];
+    return typeof rawValue === 'string' ? rawValue.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
 interface PendingOperation {
   type: 'upsert' | 'delete';
   table: string;
@@ -22,6 +32,8 @@ const _pendingOps: PendingOperation[] = [];
 let _flushingPending = false;
 
 function findSingleEnvValue(key: string): string {
+  const globalValue = readGlobalEnvValue(key);
+  if (globalValue) return globalValue;
   try {
     const bunEnv = (globalThis as any).Bun?.env as Record<string, string | undefined> | undefined;
     const bunValue = typeof bunEnv?.[key] === 'string' ? bunEnv[key]?.trim() ?? '' : '';
@@ -104,6 +116,8 @@ try {
 console.log('[RORK-DB] v13 init - endpoint:', STATIC_ENDPOINT ? 'YES' : 'NO', 'ns:', STATIC_NAMESPACE ? 'YES' : 'NO', 'token:', STATIC_TOKEN ? 'YES' : 'NO');
 
 function readEnvDirect(key: string): string {
+  const globalValue = readGlobalEnvValue(key);
+  if (globalValue) return globalValue;
   try {
     const bunEnv = (globalThis as any).Bun?.env as Record<string, string | undefined> | undefined;
     const bunValue = typeof bunEnv?.[key] === 'string' ? bunEnv[key]?.trim() ?? '' : '';

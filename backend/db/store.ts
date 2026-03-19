@@ -68,6 +68,16 @@ let _snapshotPersistInFlight: Promise<void> | null = null;
 
 function readRuntimeEnv(key: string): string {
   try {
+    const globalEnv = (globalThis as { __ENV__?: Record<string, unknown> }).__ENV__;
+    const globalValue = typeof globalEnv?.[key] === 'string' ? globalEnv[key].trim() : '';
+    if (globalValue) {
+      return globalValue;
+    }
+  } catch (error) {
+    console.log('[STORE] global env read failed:', key, error);
+  }
+
+  try {
     const bunEnv = (globalThis as any).Bun?.env as Record<string, string | undefined> | undefined;
     const bunValue = typeof bunEnv?.[key] === 'string' ? bunEnv[key]?.trim() ?? '' : '';
     if (bunValue) {

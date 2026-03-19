@@ -18,6 +18,38 @@ function normalizeEnvValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function readGlobalEnvRecord(key: string): string {
+  try {
+    const globalEnv = (globalThis as unknown as { __ENV__?: Record<string, unknown> }).__ENV__;
+    const directValue = normalizeEnvValue(globalEnv?.[key]);
+    if (directValue) {
+      return directValue;
+    }
+  } catch (error) {
+    console.log('[Env] global env record read error for key:', key, error);
+  }
+
+  return '';
+}
+
+function readExpoExtraAliases(key: string): string {
+  const aliasMap: Record<string, string[]> = {
+    EXPO_PUBLIC_RORK_DB_ENDPOINT: ['RORK_DB_ENDPOINT'],
+    EXPO_PUBLIC_RORK_DB_NAMESPACE: ['RORK_DB_NAMESPACE'],
+    EXPO_PUBLIC_RORK_DB_TOKEN: ['RORK_DB_TOKEN'],
+  };
+
+  const aliases = aliasMap[key] ?? [];
+  for (const alias of aliases) {
+    const aliasValue = readProcessEnv(alias);
+    if (aliasValue) {
+      return aliasValue;
+    }
+  }
+
+  return '';
+}
+
 function readInlineExpoPublicEnv(key: string): string {
   switch (key) {
     case 'EXPO_PUBLIC_GOOGLE_MAPS_API_KEY':
@@ -108,9 +140,19 @@ export function getClientEnv(key: string): string {
     return processValue;
   }
 
+  const globalValue = readGlobalEnvRecord(key);
+  if (globalValue) {
+    return globalValue;
+  }
+
   const configValue = readExpoConfigExtra(key);
   if (configValue) {
     return configValue;
+  }
+
+  const aliasValue = readExpoExtraAliases(key);
+  if (aliasValue) {
+    return aliasValue;
   }
 
   return '';

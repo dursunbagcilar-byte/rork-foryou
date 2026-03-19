@@ -1132,6 +1132,15 @@ function readServerEnv(key: string): string {
   }
 
   try {
+    const globalEnv = (globalThis as { __ENV__?: Record<string, unknown> }).__ENV__;
+    const globalValue = normalizeServerEnvValue(globalEnv?.[key]);
+    if (globalValue) {
+      _serverEnvCache[key] = globalValue;
+      return globalValue;
+    }
+  } catch {}
+
+  try {
     const bunEnv = (globalThis as any).Bun?.env as Record<string, string | undefined> | undefined;
     const bunValue = typeof bunEnv?.[key] === 'string' ? bunEnv[key]?.trim() ?? '' : '';
     if (bunValue) {
